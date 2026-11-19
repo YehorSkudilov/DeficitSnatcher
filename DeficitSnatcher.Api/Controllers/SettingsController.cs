@@ -38,8 +38,10 @@ public sealed class SettingsController(SettingsStore store, Notifier notifier) :
     public Task<BotSettings> Get(CancellationToken ct) => store.GetAsync(ct);
 
     [HttpPut]
-    public async Task<BotSettings> Save(BotSettings settings, CancellationToken ct)
+    public async Task<ActionResult<BotSettings>> Save(BotSettings settings, CancellationToken ct)
     {
+        if (Tracking.StoreProxy.Validate(settings.ProxyUrl) is { } proxyError)
+            return Problem(proxyError, statusCode: 400);
         var before = await store.GetAsync(ct);
         var saved = await store.SaveAsync(settings, ct);
         await LogArmChange(before, saved);

@@ -59,7 +59,8 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             if (settings.ScanSnapshots != "Off")
                 followUp.Snapshot(failed.Id, site.Url, site.CookiesEncrypted, "The check failed", null, null);
             // Keeps failing in a way a different reader might get past (blocked, timed out, changed page), not a dead link.
-            if (site.ConsecutiveErrors >= 3 && !message.Contains("404"))
+            // (Not when the store's bot protection blocks it: re-reading the page can't get past that.)
+            if (site.ConsecutiveErrors >= 3 && !message.Contains("404") && e is not BlockedException)
                 await followUp.MaybeRelearnAsync(site.Id, $"{site.ConsecutiveErrors} checks in a row failed ({message})");
             if (site.ConsecutiveErrors == settings.ErrorThreshold)
                 await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning,

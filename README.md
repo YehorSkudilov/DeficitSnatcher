@@ -52,9 +52,12 @@ Chromium (goto, click, fill, select, type, wait, expectText…), filling in the 
 - Card number and CVV are masked in every log, error and saved page; screenshots, page HTML, the card, cookies and
   notification tokens are stored encrypted (AES-GCM, `Secrets__Key`).
 
-**Limits.** Big retailers (Best Buy, Walmart, Amazon) use bot protection, captchas and 3-D Secure. Checks can get
-blocked (try Browser mode, a longer interval, or your cookies) and a checkout can stop at a captcha or bank prompt;
-the checkout's screenshots and error show exactly where. Shopify and smaller stores work best.
+**Bot protection.** Big retailers (Best Buy, Walmart, Amazon) use bot protection (Akamai, Cloudflare, HUMAN, DataDome),
+captchas and 3-D Secure. A blocked check says "Blocked by …" in its scan. Most of these block servers' addresses
+outright, however real the browser looks (the browser runs as full Chrome in its new headless mode, not the easy-to-spot
+headless shell), so the fix is a **residential proxy**: Settings → Checking → Proxy (`http://user:password@host:port`); all
+store traffic goes through it, ChatGPT's doesn't. Your own signed-in cookies on the page help too. A checkout can still
+stop at a captcha or bank prompt; its screenshots and error show where. Shopify and smaller stores work best.
 
 ## Run it with Docker
 

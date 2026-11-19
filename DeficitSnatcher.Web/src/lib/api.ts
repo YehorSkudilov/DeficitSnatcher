@@ -361,6 +361,7 @@ export type Settings = {
   minSecondsPerHost: number;
   maxConcurrentChecks: number;
   requestTimeoutSeconds: number;
+  proxyUrl: string;
   userAgent: string;
   historyDays: number;
   scanHistoryDays: number;

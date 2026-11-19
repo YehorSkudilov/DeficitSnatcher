@@ -26,6 +26,9 @@ public sealed record BotSettings
     public int MinSecondsPerHost { get; init; } = 10;
     public int MaxConcurrentChecks { get; init; } = 4;
     public int RequestTimeoutSeconds { get; init; } = 20;
+    /// <summary>Stores are reached through this proxy (checks and checkouts; not ChatGPT): http://user:pass@host:port.
+    /// A residential proxy gets past stores that block servers' addresses. Empty: direct.</summary>
+    public string ProxyUrl { get; init; } = "";
     public string UserAgent { get; init; } =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
     /// <summary>Price history and the activity log older than this are removed; 0 keeps it all.</summary>
@@ -98,6 +101,7 @@ public sealed record BotSettings
         TelegramBotToken = TelegramBotToken?.Trim() ?? "",
         TelegramChatId = TelegramChatId?.Trim() ?? "",
         WebhookUrl = WebhookUrl?.Trim() ?? "",
+        ProxyUrl = ProxyUrl?.Trim() ?? "",
     };
 }
 

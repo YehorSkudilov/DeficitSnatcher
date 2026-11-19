@@ -32,7 +32,7 @@ public sealed class ScanFollowUp(IServiceScopeFactory scopes, BrowserPool browse
             {
                 var settings = await settingsStore.GetAsync();
                 var cookies = cookiesSealed == null ? [] : SiteCookies.Parse(box.Decrypt(cookiesSealed), url);
-                await using var context = await browsers.NewContextAsync(settings.UserAgent, cookies, CancellationToken.None);
+                await using var context = await browsers.NewContextAsync(settings, cookies, CancellationToken.None);
                 var page = await context.NewPageAsync();
                 await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
                 try

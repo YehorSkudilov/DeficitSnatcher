@@ -33,14 +33,17 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers)
         if (site.Kind == SiteKind.Browser)
         {
             var rendered = await RenderAsync(url, cookies, settings, ct);
+            if (BlockDetector.Detect(rendered) is { } vendor)
+                throw new BlockedException(BlockDetector.Message(vendor, browser: true));
             return PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" };
         }
 
         var (code, html) = await GetAsync(url, cookies, settings, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", ct);
+        if (BlockDetector.Detect(html, (int)code) is { } blockedBy)
+            throw new BlockedException($"The site answered {(int)code}: " + BlockDetector.Message(blockedBy, browser: false)
+                + " Or try the Browser kind.");
         if (code != HttpStatusCode.OK)
-            throw new HttpRequestException(code is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests
-                ? $"The site answered {(int)code} {code}: it's likely blocking bots. Try the Browser kind, a longer interval, or the site's cookies."
-                : $"The site answered {(int)code} {code}.");
+            throw new HttpRequestException($"The site answered {(int)code} {code}.");
         return PageParser.ParseHtml(html, selectors) with { Source = html, SourceType = "text/html" };
     }
 
@@ -56,14 +59,15 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers)
         var cookieHeader = SiteCookies.Header(cookies, url);
         if (cookieHeader.Length > 0)
             request.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+        var client = StoreProxy.Parse(settings.ProxyUrl) is { } proxy ? StoreProxy.Client(proxy) : http;
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
         var body = await response.Content.ReadAsStringAsync(timeout.Token);
         return (response.StatusCode, body);
     }
 
     private async Task<string> RenderAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct)
     {
-        await using var context = await browsers.NewContextAsync(settings.UserAgent, cookies, ct);
+        await using var context = await browsers.NewContextAsync(settings, cookies, ct);
         var page = await context.NewPageAsync();
         await page.GotoAsync(url.ToString(), new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = settings.RequestTimeoutSeconds * 1000 });
         try
@@ -82,3 +86,6 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers)
     private static string? VariantFromUrl(Uri url) =>
         System.Web.HttpUtility.ParseQueryString(url.Query)["variant"] is { Length: > 0 } v ? v : null;
 }
+
+/// <summary>The store's bot protection answered instead of the page.</summary>
+public sealed class BlockedException(string message) : HttpRequestException(message);

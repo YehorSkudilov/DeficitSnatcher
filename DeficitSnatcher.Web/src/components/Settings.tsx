@@ -108,7 +108,19 @@ function SettingsForm({ initial }: { initial: Settings }) {
             <NumberInput value={s.checkoutHistoryDays} min={0} onChange={(v) => set({ checkoutHistoryDays: v ?? 0 })} />
           </Field>
         </div>
-        <Field label="User agent" hint="The browser the checks say they are.">
+        <Field
+          label="Proxy"
+          hint={
+            <>
+              All store traffic (checks and checkouts; not ChatGPT) goes through it. Big stores (Best Buy, Walmart…) often answer &quot;Access
+              Denied&quot; to any server&apos;s address; a <b>residential</b> proxy gets past that. Format: <code>http://user:password@host:port</code>{" "}
+              (or socks5://). Empty: direct.
+            </>
+          }
+        >
+          <input type="text" autoComplete="off" value={s.proxyUrl} placeholder="http://user:password@proxy.example.com:8000" onChange={(e) => set({ proxyUrl: e.target.value })} />
+        </Field>
+        <Field label="User agent" hint="What plain checks (not the browser) say they are.">
           <input type="text" value={s.userAgent} onChange={(e) => set({ userAgent: e.target.value })} />
         </Field>
       </div>

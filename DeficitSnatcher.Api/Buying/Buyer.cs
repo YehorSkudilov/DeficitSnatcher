@@ -181,7 +181,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
 
             var cookies = site.CookiesEncrypted == null ? [] : SiteCookies.Parse(box.Decrypt(site.CookiesEncrypted), site.Url);
             Log($"Opening a browser ({cookies.Count} cookies, user agent: {settings.UserAgent})");
-            await using var context = await browsers.NewContextAsync(settings.UserAgent, cookies, CancellationToken.None);
+            await using var context = await browsers.NewContextAsync(settings, cookies, CancellationToken.None);
             var page = await context.NewPageAsync();
             page.Console += (_, m) =>
             {

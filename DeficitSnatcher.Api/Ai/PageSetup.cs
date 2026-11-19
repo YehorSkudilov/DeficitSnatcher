@@ -116,7 +116,7 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
         // 2. The page in a browser: text, candidate prices, buttons, screenshot.
         PageState state;
         JsonElement extra;
-        await using (var context = await browsers.NewContextAsync(settings.UserAgent, cookies, ct))
+        await using (var context = await browsers.NewContextAsync(settings, cookies, ct))
         {
             var page = await context.NewPageAsync();
             await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });
@@ -128,6 +128,10 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
             {
             }
             state = await PageReader.ReadAsync(page, screenshot: true, ct);
+            // Blocked in the browser too: there's nothing for the AI to read, so don't ask it.
+            if (BlockDetector.Detect(await page.ContentAsync()) is { } vendor)
+                return new SetupSuggestion(new Uri(url).Host.Replace("www.", ""), SiteKind.Browser, null, null, null, null, null,
+                    BlockDetector.Message(vendor, browser: true), null, null, BlockDetector.Message(vendor, browser: true));
             extra = await page.EvaluateAsync<JsonElement>(PriceScript);
         }
 
