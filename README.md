@@ -14,6 +14,7 @@ One account, no sign-ups: the username and password come from the environment (G
 
 | Tab | |
 |---|---|
+| **Products** → a product, or one of its pages | Its **Logs**: scans (with a screenshot and the page's source when something changed), checkouts, activity, and AI calls. |
 | **Dashboard** | The auto-buy switch, each product's sites with price, stock and verdict, recent activity and checkouts. |
 | **Price ranges** | Per product: min and max price (shipping included), units to buy in all and per order, title keywords. |
 | **Sites** | Store pages to watch: Test, Check now, selectors, checkout steps, cookies, price history, dry-run / buy now. |
@@ -22,6 +23,20 @@ One account, no sign-ups: the username and password come from the environment (G
 | **Activity** | Everything that happened (alerts, price drops, checkouts, failing sites, settings changes), filterable. |
 | **Settings** | Auto-buy (armed, dry run, budget, retry wait), checking (interval, jitter, per-store spacing, timeouts), notifications (Discord, Telegram, any webhook such as ntfy.sh), history retention, checkout profile (address, card). |
 | **Deploy** | What's running (commit, build time), commits on `main` not deployed yet, Deploy button, live progress of each step, cancel, links to the full GitHub logs. |
+
+## AI (ChatGPT)
+
+Turned on by the `OPENAI_API_KEY` secret; model and options in Settings. Every call is in each page's Logs → AI.
+
+- **Auto-fill with AI** (adding a page): reads the page and fills in the store name, how to read price and stock, and
+  whether it really is the PS5 Pro; the settings are checked before they're offered.
+- **Record checkout with AI**: ChatGPT goes through the store's checkout itself (dry run) and the steps it takes are saved.
+- **Fixes broken checkouts**: when a saved step fails (the store changed its page), the AI takes over from that screen,
+  finishes, and saves the corrected steps. Pages without steps are bought by the AI directly.
+- **Fixes reading**: when a page keeps failing or showing no price or stock, the AI re-learns it (at most every 6 hours).
+- The AI never sees the card or address: it writes `{{card.number}}`-style placeholders that are filled in locally, and
+  gets no screenshots once card details are typed. Before a real order it must read the order total, which must be within
+  the maximum price plus the allowed tax (15% by default), or the order isn't placed.
 
 ## How buying works
 
@@ -85,6 +100,7 @@ Run it the first time from GitHub (Actions → Deploy → Run workflow); after t
 | `SECRETS_KEY` | `openssl rand -base64 32`. Never change it once set: the card and screenshots are encrypted with it. |
 | `POSTGRES_PASSWORD` | Any strong password. |
 | `SERVER_HOST`, `SERVER_USER`, `SERVER_SSH_KEY` | SSH to the server. |
+| `OPENAI_API_KEY` | Optional, turns on the AI (platform.openai.com → API keys). |
 | `DEPLOY_GITHUB_TOKEN` | Optional, turns on the Deploy tab: a fine-grained token for this repository with Actions (read and write) and Contents (read). |
 
 **Variables** (all optional): `WEB_PORT` (default 8090), `PUBLIC_URL` (the site's address, for links in

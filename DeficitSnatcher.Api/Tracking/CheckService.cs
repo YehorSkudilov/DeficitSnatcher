@@ -11,7 +11,7 @@ namespace DeficitSnatcher.Api.Tracking;
 /// range, a lower price, a site that keeps failing) and buy when it's a match and auto-buy is on.
 /// </summary>
 public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetcher, SettingsStore settingsStore, SecretBox box,
-    Notifier notifier, Buyer buyer, ILogger<CheckService> log)
+    Notifier notifier, Buyer buyer, ScanFollowUp followUp, ILogger<CheckService> log)
 {
     public sealed record CheckOutcome(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage, long? ScanId = null,
         int? PurchaseId = null);
@@ -56,6 +56,11 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             db.Scans.Add(failed);
             await db.SaveChangesAsync(CancellationToken.None);
             log.LogInformation("Check of {Site} failed: {Error}", site.Name, message);
+            if (settings.ScanSnapshots != "Off")
+                followUp.Snapshot(failed.Id, site.Url, site.CookiesEncrypted, "The check failed", null, null);
+            // Keeps failing in a way a different reader might get past (blocked, timed out, changed page), not a dead link.
+            if (site.ConsecutiveErrors >= 3 && !message.Contains("404"))
+                await followUp.MaybeRelearnAsync(site.Id, $"{site.ConsecutiveErrors} checks in a row failed ({message})");
             if (site.ConsecutiveErrors == settings.ErrorThreshold)
                 await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning,
                     $"{site.Name} failed {site.ConsecutiveErrors} checks in a row: {message}", site.Id, site.Url);
@@ -70,6 +75,8 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         var verdict = BuyRules.Evaluate(product, site, result);
         var inStock = result.InStock == true;
         var previousPrice = site.LastPrice;
+        var previousInStock = site.LastInStock;
+        var firstScan = site.LastCheckedAt == null;
 
         if (result.Price != site.LastPrice || inStock != site.LastInStock)
         {
@@ -83,6 +90,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         site.LastVariantId = result.VariantId;
         site.LastError = null;
         site.ConsecutiveErrors = 0;
+        site.UnreadableCount = result.Price == null || result.InStock == null ? site.UnreadableCount + 1 : 0;
 
         var scan = new Scan
         {
@@ -102,6 +110,20 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         };
         db.Scans.Add(scan);
         await db.SaveChangesAsync(CancellationToken.None);
+
+        // The scan's snapshot: every scan, or when something worth seeing happened.
+        var stockChanged = previousInStock != null && previousInStock != result.InStock;
+        var reason = settings.ScanSnapshots == "Every" ? "Every scan"
+            : verdict.Match ? "In range"
+            : firstScan ? "First check"
+            : stockChanged ? (inStock ? "Came into stock" : "Went out of stock")
+            : previousPrice != null && result.Price != previousPrice ? $"Price changed from {previousPrice:0.00}"
+            : site.UnreadableCount > 0 ? "No price or stock found"
+            : null;
+        if (reason != null && settings.ScanSnapshots != "Off")
+            followUp.Snapshot(scan.Id, site.Url, site.CookiesEncrypted, reason, result.Source, result.SourceType);
+        if (site.UnreadableCount >= 3)
+            await followUp.MaybeRelearnAsync(site.Id, $"{site.UnreadableCount} checks in a row found {(result.Price == null ? "no price" : "no stock")}");
 
         var money = $"{settings.Currency}";
         if (verdict.Match && !before.Match)

@@ -7,20 +7,20 @@ import { ErrorNote, Field, LevelDot, useAction, useData } from "./ui";
 
 const iso = (local: string) => (local ? new Date(local).toISOString() : "");
 
-/** Everything the bot did and saw, newest first: #logs/activity?site=3. */
-export function Activity({ initial }: { initial?: string }) {
+/** Everything the bot did and saw, newest first (a product's or a page's own, in its Logs). */
+export function Activity({ initial, productId, siteId: fixedSite }: { initial?: string; productId?: number; siteId?: number }) {
   const start = new URLSearchParams(initial ?? "");
   const [level, setLevel] = useState(start.get("level") ?? "");
-  const [siteId, setSiteId] = useState(start.get("site") ?? "");
+  const [siteId, setSiteId] = useState(fixedSite ? String(fixedSite) : (start.get("site") ?? ""));
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [older, setOlder] = useState<BotEvent[]>([]);
   const [done, setDone] = useState(false);
-  const sites = useData(() => api.get<Site[]>("/api/sites"), []);
+  const sites = useData(() => api.get<Site[]>(`/api/sites${query({ productId })}`), [productId]);
   const action = useAction();
 
-  const params = { level, siteId, search: search.trim(), from: iso(from), to: iso(to) };
+  const params = { level, siteId, productId, search: search.trim(), from: iso(from), to: iso(to) };
   const key = JSON.stringify(params);
   const latest = useData(() => api.get<BotEvent[]>(`/api/events${query({ ...params, limit: 100 })}`), [key], 5000);
   const reset = () => (setOlder([]), setDone(false));
@@ -49,13 +49,12 @@ export function Activity({ initial }: { initial?: string }) {
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="page-head" style={{ marginBottom: 0 }}>
-        <p className="muted">
-          What happened: in stock alerts, price drops, checkouts, failing pages, settings changes. Each check is under{" "}
-          <a href="#logs/scans">Scans</a>, each checkout with its steps and screenshots under <a href="#logs/checkouts">Checkouts</a>.
-        </p>
-        <button className="btn danger small" disabled={action.busy} onClick={clear}>
-          Clear
-        </button>
+        <p className="muted">What happened: in stock alerts, price drops, checkouts, AI fixes, failing pages, settings changes.</p>
+        {!productId && !fixedSite && (
+          <button className="btn danger small" disabled={action.busy} onClick={clear}>
+            Clear
+          </button>
+        )}
       </div>
       <ErrorNote error={latest.error || action.error} />
       <div className="card filters">
@@ -68,7 +67,8 @@ export function Activity({ initial }: { initial?: string }) {
             <option value="Error">Errors</option>
           </select>
         </Field>
-        <Field label="Site">
+        {!fixedSite && (
+        <Field label="Page">
           <select value={siteId} onChange={(e) => (setSiteId(e.target.value), reset())}>
             <option value="">All</option>
             {sites.data?.map((s) => (
@@ -78,6 +78,7 @@ export function Activity({ initial }: { initial?: string }) {
             ))}
           </select>
         </Field>
+        )}
         <Field label="From">
           <input type="datetime-local" value={from} onChange={(e) => (setFrom(e.target.value), reset())} />
         </Field>

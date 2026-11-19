@@ -24,21 +24,24 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers)
             var jsonUrl = new UriBuilder(url) { Query = "", Fragment = "" }.Uri.ToString().TrimEnd('/') + ".js";
             var (status, body) = await GetAsync(new Uri(jsonUrl), cookies, settings, "application/json", ct);
             if (status == HttpStatusCode.OK && PageParser.ParseShopify(body, VariantFromUrl(url) ?? site.VariantId) is { } shopify)
-                return shopify;
+                return shopify with { Source = body, SourceType = "application/json" };
             if (site.Kind == SiteKind.Shopify)
                 throw new HttpRequestException($"Shopify product JSON answered {(int)status}; is this a /products/… page of a Shopify store?");
         }
 
         var selectors = new PageParser.Selectors(site.PriceSelector, site.TitleSelector, site.InStockSelector, site.OutOfStockText);
         if (site.Kind == SiteKind.Browser)
-            return PageParser.ParseHtml(await RenderAsync(url, cookies, settings, ct), selectors);
+        {
+            var rendered = await RenderAsync(url, cookies, settings, ct);
+            return PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" };
+        }
 
         var (code, html) = await GetAsync(url, cookies, settings, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", ct);
         if (code != HttpStatusCode.OK)
             throw new HttpRequestException(code is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests
                 ? $"The site answered {(int)code} {code}: it's likely blocking bots. Try the Browser kind, a longer interval, or the site's cookies."
                 : $"The site answered {(int)code} {code}.");
-        return PageParser.ParseHtml(html, selectors);
+        return PageParser.ParseHtml(html, selectors) with { Source = html, SourceType = "text/html" };
     }
 
     private async Task<(HttpStatusCode, string)> GetAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, string accept, CancellationToken ct)

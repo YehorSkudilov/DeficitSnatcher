@@ -17,7 +17,7 @@ namespace DeficitSnatcher.Api.Buying;
 /// one lock, so two sites coming into stock together can't buy more than the product's limit between them.
 /// </summary>
 public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore settingsStore, SecretBox box, BrowserPool browsers,
-    Notifier notifier, ILogger<Buyer> log)
+    Notifier notifier, Ai.OpenAiClient ai, Ai.CheckoutAgent agent, ILogger<Buyer> log)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -31,10 +31,12 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
     /// auto-buy armed or the site's AutoBuy, and ignores the retry wait). <paramref name="forceDryRun"/>: stop before
     /// the final steps whatever the settings say. <paramref name="trigger"/>: what led to it, kept with the checkout.
     /// </summary>
-    public async Task<Outcome> BuyAsync(int siteId, decimal price, bool manual, bool forceDryRun, string trigger, CancellationToken ct)
+    public async Task<Outcome> BuyAsync(int siteId, decimal price, bool manual, bool forceDryRun, string trigger, CancellationToken ct,
+        bool aiRecord = false)
     {
         var settings = await settingsStore.GetAsync(ct);
-        var dryRun = forceDryRun || settings.DryRun;
+        var dryRun = forceDryRun || settings.DryRun || aiRecord;
+        var aiAvailable = await ai.AvailableAsync(ct);
         Site site;
         Product product;
         List<CheckoutStep> steps;
@@ -60,12 +62,15 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                     return new(false, $"Waiting before trying this site again (last try {(now - last).TotalMinutes:0} min ago, retry after {settings.BuyRetryMinutes}).");
             }
 
-            steps = CheckoutStep.Parse(site.CheckoutSteps);
-            if (steps.Count == 0)
-                return new(false, "This site has no checkout steps.");
+            // Record checkout with AI: the AI goes through it from the start, whatever steps there are.
+            steps = aiRecord ? [] : CheckoutStep.Parse(site.CheckoutSteps);
+            if (aiRecord && !aiAvailable)
+                return new(false, ai.HasKey ? "The AI is turned off in Settings." : "The AI is off: set the OPENAI_API_KEY secret.");
+            if (steps.Count == 0 && !aiRecord && !(aiAvailable && settings.AiCheckoutWithoutSteps))
+                return new(false, "This page has no checkout steps (and the AI isn't on to do the checkout itself).");
             if (CheckoutStep.Validate(steps) is { } invalid)
                 return new(false, invalid);
-            if (!dryRun && !steps.Any(s => s.Final))
+            if (!dryRun && steps.Count > 0 && !steps.Any(s => s.Final))
                 return new(false, "The checkout has no final step (the one that places the order), so it can't buy.");
 
             var quantity = product.QuantityPerOrder;
@@ -89,7 +94,10 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                 .AppendLine($"Price {price:0.00} {settings.Currency} · range {product.MinPrice:0.00}–{product.MaxPrice:0.00} · {quantity} per order")
                 .AppendLine($"Bought before: {bought} of {product.MaxQuantity} · spent {spent:0.00}{(settings.TotalBudget > 0 ? $" of budget {settings.TotalBudget:0.00}" : " (no budget)")}")
                 .AppendLine($"Page: {site.Url}")
-                .Append($"Steps: {steps.Count}, final: {string.Join(", ", steps.Select((s, i) => (s, i)).Where(x => x.s.Final).Select(x => x.i + 1))}")
+                .AppendLine(steps.Count == 0
+                    ? aiRecord ? "Steps: recorded by the AI going through the checkout (dry run)" : "Steps: none, the AI does the checkout"
+                    : $"Steps: {steps.Count}, final: {string.Join(", ", steps.Select((s, i) => (s, i)).Where(x => x.s.Final).Select(x => x.i + 1))}")
+                .Append($"AI: {(aiAvailable ? $"{settings.AiModel}, fixes broken steps: {(settings.AiAutofixCheckout ? "yes" : "no")}" : "off")}")
                 .ToString();
 
             var purchase = new Purchase
@@ -116,7 +124,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
         }
 
         await notifier.LogAsync(EventLevel.Info, $"{(dryRun ? "Dry-run checkout" : "Buying")} {product.Name} at {site.Name} for {price:0.00} (checkout #{purchaseId})…", site.Id);
-        _ = Task.Run(() => RunAsync(purchaseId, site, product, steps, price, dryRun, settings), CancellationToken.None);
+        _ = Task.Run(() => RunAsync(purchaseId, site, product, steps, price, dryRun, settings, aiAvailable, aiRecord), CancellationToken.None);
         return new(true, $"{(dryRun ? "Dry-run checkout" : "Checkout")} #{purchaseId} started.", purchaseId, PurchaseStatus.Running);
     }
 
@@ -133,10 +141,15 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
         string? Error,
         long? ShotId,
         bool Final,
-        bool Optional);
+        bool Optional,
+        /// <summary>Done by the AI (with what it saw and why).</summary>
+        bool Ai = false,
+        string? Note = null);
 
-    private async Task RunAsync(int purchaseId, Site site, Product product, List<CheckoutStep> steps, decimal price, bool dryRun, BotSettings settings)
+    private async Task RunAsync(int purchaseId, Site site, Product product, List<CheckoutStep> steps, decimal price, bool dryRun, BotSettings settings,
+        bool aiAvailable, bool aiRecord)
     {
+        var aiUsed = false;
         var logText = new StringBuilder();
         var records = new List<StepRecord>();
         var browserLog = new List<string>();
@@ -189,27 +202,16 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
             };
 
             (status, message) = (PurchaseStatus.Succeeded, "Order placed.");
-            var stopped = false;
             try
             {
-                for (var i = 0; i < steps.Count; i++)
-                {
-                    var step = steps[i];
-                    var description = Describe(step, values);
-                    if (stopped)
-                    {
-                        records.Add(new(i, step.Action, description, "notRun", null, null, null, null, null, step.Final, step.Optional));
-                        continue;
-                    }
-                    if (step.Final && dryRun)
-                    {
-                        Log($"{i + 1}. {description}: not run (dry run stops here)");
-                        records.Add(new(i, step.Action, description, "notRun", null, null, NoQuery(page.Url), "Dry run: the final step isn't run.", null, true, step.Optional));
-                        (status, message) = (PurchaseStatus.DryRun, $"Dry run reached step {i + 1} ({step.Action}) without errors; the order wasn't placed.");
-                        stopped = true;
-                        continue;
-                    }
+                var cardTyped = false;
+                var finalRan = false;
 
+                // Runs one step and records it in the timeline (with its screenshot); the AI's steps go through here too.
+                async Task<(bool Ok, string? Error)> RunOne(CheckoutStep step, bool byAi, string? note)
+                {
+                    var index = records.Count;
+                    var description = Describe(step, values);
                     var at = DateTimeOffset.UtcNow;
                     var watch = Stopwatch.StartNew();
                     string stepStatus;
@@ -218,25 +220,117 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                     {
                         await RunStepAsync(page, step, values);
                         stepStatus = "ok";
-                        Log($"{i + 1}. {description}: ok ({watch.ElapsedMilliseconds} ms) on {NoQuery(page.Url)}");
+                        if (step.Value?.Contains("{{card.", StringComparison.OrdinalIgnoreCase) == true)
+                            cardTyped = true;
+                        if (step.Final)
+                            finalRan = true;
+                        Log($"{index + 1}. {(byAi ? "[AI] " : "")}{description}: ok ({watch.ElapsedMilliseconds} ms) on {NoQuery(page.Url)}");
                     }
                     catch (Exception e) when (e is PlaywrightException or TimeoutException or InvalidOperationException)
                     {
                         stepError = redact(e.Message);
                         stepStatus = step.Optional ? "skipped" : "failed";
-                        Log($"{i + 1}. {description}: FAILED{(step.Optional ? " (optional, carried on)" : "")} after {watch.ElapsedMilliseconds} ms: {stepError.Split('\n')[0]}");
-                        if (!step.Optional)
-                        {
-                            (status, message) = (PurchaseStatus.Failed, $"Step {i + 1} ({step.Action}{(step.Selector is { Length: > 0 } sel ? " " + sel : "")}) failed: {stepError.Split('\n')[0]}");
-                            error = $"Step {i + 1}: {description}\nPage: {NoQuery(page.Url)}\n\n{stepError}";
-                            stopped = true;
-                        }
+                        Log($"{index + 1}. {(byAi ? "[AI] " : "")}{description}: FAILED{(step.Optional ? " (optional, carried on)" : "")} after {watch.ElapsedMilliseconds} ms: {stepError.Split('\n')[0]}");
                     }
                     long? shotId = null;
                     if (settings.StepScreenshots || stepStatus == "failed")
-                        shotId = await ShotAsync(purchaseId, page, i, $"After step {i + 1}: {description} ({stepStatus})", fullPage: false);
-                    records.Add(new(i, step.Action, description, stepStatus, at, watch.ElapsedMilliseconds, NoQuery(page.Url), stepError, shotId,
-                        step.Final, step.Optional));
+                        shotId = await ShotAsync(purchaseId, page, index, $"After step {index + 1}{(byAi ? " (AI)" : "")}: {description} ({stepStatus})", fullPage: false);
+                    records.Add(new(index, step.Action, description, stepStatus, at, watch.ElapsedMilliseconds, NoQuery(page.Url), stepError, shotId,
+                        step.Final, step.Optional, byAi, note));
+                    return (stepStatus != "failed", stepError);
+                }
+
+                Task RecordNotRun(CheckoutStep step, bool byAi, string? note)
+                {
+                    var index = records.Count;
+                    var description = Describe(step, values);
+                    Log($"{index + 1}. {(byAi ? "[AI] " : "")}{description}: not run (dry run stops here)");
+                    records.Add(new(index, step.Action, description, "notRun", null, null, NoQuery(page.Url), "Dry run: the final step isn't run.", null,
+                        true, step.Optional, byAi, note));
+                    return Task.CompletedTask;
+                }
+
+                // 1. The saved steps.
+                int? brokeAt = null;
+                string? brokeError = null;
+                for (var i = 0; i < steps.Count; i++)
+                {
+                    var step = steps[i];
+                    if (step.Final && dryRun)
+                    {
+                        await RecordNotRun(step, false, null);
+                        (status, message) = (PurchaseStatus.DryRun, $"Dry run reached step {i + 1} ({step.Action}) without errors; the order wasn't placed.");
+                        break;
+                    }
+                    var (ok, stepError) = await RunOne(step, false, null);
+                    if (!ok)
+                    {
+                        brokeAt = i;
+                        brokeError = stepError;
+                        var description = Describe(step, values);
+                        (status, message) = (PurchaseStatus.Failed, $"Step {i + 1} ({step.Action}{(step.Selector is { Length: > 0 } sel ? " " + sel : "")}) failed: {stepError?.Split('\n')[0]}");
+                        error = $"Step {i + 1}: {description}\nPage: {NoQuery(page.Url)}\n\n{stepError}";
+                        break;
+                    }
+                }
+
+                // 2. The AI: does the whole checkout (no steps, or recording), or takes over from the step that broke.
+                var aiFromStart = steps.Count == 0;
+                var aiTakesOver = brokeAt != null && aiAvailable && settings.AiAutofixCheckout && !(finalRan && !dryRun);
+                if (aiAvailable && (aiFromStart || aiTakesOver))
+                {
+                    aiUsed = true;
+                    var planned = brokeAt is { } b ? steps.Skip(b).Select((x, k) => $"  {b + k + 1}. {Describe(x, values)}{(x.Final ? " [final]" : "")}") : [];
+                    var situation = aiFromStart
+                        ? "There are no saved steps for this store: start from the product page and go through the whole checkout."
+                        : $"A saved checkout step just broke (the store's page probably changed). Step {brokeAt + 1} failed: {brokeError?.Split('\n')[0]}\n"
+                          + "Carry on from the current page. The steps that were planned from there (as a hint; selectors may be wrong):\n"
+                          + string.Join("\n", planned);
+                    if (aiFromStart)
+                        await RunOne(new CheckoutStep { Action = "goto", Value = "{{url}}", Note = "Open the product page" }, true, "Open the product page");
+                    Log(aiFromStart ? "The AI goes through the checkout." : $"The AI takes over after step {brokeAt + 1} broke.");
+
+                    var goal = new Ai.CheckoutAgent.Goal(
+                        product.Name, site.Url, product.QuantityPerOrder,
+                        Math.Round(product.MaxPrice * product.QuantityPerOrder * (1 + settings.MaxTaxPercent / 100m), 2),
+                        settings.Currency, dryRun,
+                        values.Where(v => v.Value.Length > 0 && v.Key is not ("url" or "origin" or "price" or "variantId" or "quantity")).Select(v => v.Key).ToList(),
+                        situation);
+                    var result = await agent.RunAsync(page, goal,
+                        (step, note) => RunOne(step, true, note),
+                        (step, note) => RecordNotRun(step, true, note),
+                        () => cardTyped, settings.AiSendScreenshots, settings.AiMaxActions, site.Id, purchaseId,
+                        aiRecord ? "record-checkout" : aiFromStart ? "checkout" : "autofix-checkout", CancellationToken.None);
+
+                    Log($"AI: {result.End}: {result.Message}");
+                    (status, message) = result.End switch
+                    {
+                        Ai.CheckoutAgent.End.Done => (PurchaseStatus.Succeeded, $"Order placed by the AI{(aiTakesOver ? $" after step {brokeAt + 1} broke" : "")}. {result.Message}"),
+                        Ai.CheckoutAgent.End.DryRunStop => (PurchaseStatus.DryRun, $"{(aiTakesOver ? $"Step {brokeAt + 1} broke; the AI fixed it and " : "The AI ")}went through to placing the order (dry run). {result.Message}"),
+                        Ai.CheckoutAgent.End.Uncertain => (PurchaseStatus.Interrupted, $"The order was submitted but no confirmation was seen: check the store. {result.Message}"),
+                        _ => (PurchaseStatus.Failed, (brokeAt != null ? message.TrimEnd('.') + ". " : "") + result.Message),
+                    };
+                    if (result.End is Ai.CheckoutAgent.End.Stuck or Ai.CheckoutAgent.End.PriceCheckFailed)
+                        error = (error == null ? "" : error + "\n\n") + "AI: " + result.Message;
+                    else if (result.End != Ai.CheckoutAgent.End.Uncertain)
+                        error = null;
+
+                    // It worked: keep the steps that ran plus the AI's, so next time runs without the AI.
+                    if (result.End is Ai.CheckoutAgent.End.Done or Ai.CheckoutAgent.End.DryRunStop && (settings.AiSaveFixedSteps || aiRecord || aiFromStart))
+                    {
+                        var fixedSteps = (brokeAt is { } k ? steps.Take(k) : aiFromStart ? [new CheckoutStep { Action = "goto", Value = "{{url}}" }] : [])
+                            .Concat(result.Steps).ToList();
+                        await SaveStepsAsync(site.Id, fixedSteps);
+                        Log($"Saved {fixedSteps.Count} checkout steps for {site.Name}.");
+                        await notifier.LogAsync(EventLevel.Good, aiTakesOver
+                            ? $"AI fixed the checkout at {site.Name}: step {brokeAt + 1} broke, the AI found the way through and saved {fixedSteps.Count} new steps (checkout #{purchaseId})."
+                            : $"AI recorded the checkout at {site.Name}: {fixedSteps.Count} steps saved (checkout #{purchaseId}).", site.Id);
+                    }
+                }
+                else if (brokeAt != null && finalRan && !dryRun)
+                {
+                    // The order was submitted, then a later check (the confirmation) failed: it may well have gone through.
+                    (status, message) = (PurchaseStatus.Interrupted, $"The order was submitted, but step {brokeAt + 1} after it failed: check the store for an order. {message}");
                 }
             }
             finally
@@ -276,6 +370,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                 purchase.BrowserLog = redact(string.Join("\n", browserLog));
             purchase.PageHtml = html == null ? null : box.Encrypt(html.Length > 3_000_000 ? html[..3_000_000] : html);
             purchase.FinalUrl = finalUrl;
+            purchase.AiUsed = aiUsed;
             purchase.FinishedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync();
         }
@@ -291,6 +386,19 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
     }
 
     public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>Replaces a site's checkout steps (with what the AI found), keeping the old ones in the activity log.</summary>
+    private async Task SaveStepsAsync(int siteId, List<CheckoutStep> steps)
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var site = await db.Sites.FirstAsync(s => s.Id == siteId);
+        var old = site.CheckoutSteps;
+        site.CheckoutSteps = CheckoutStep.Serialize(steps);
+        await db.SaveChangesAsync();
+        if (old is { Length: > 2 } && old != site.CheckoutSteps)
+            await notifier.LogAsync(EventLevel.Info, $"Checkout steps of {site.Name} before the AI changed them: {old}", siteId);
+    }
 
     /// <summary>A screenshot of the page, kept encrypted (it can show what was typed). Never fails the checkout.</summary>
     private async Task<long?> ShotAsync(int purchaseId, IPage page, int? stepIndex, string label, bool fullPage)

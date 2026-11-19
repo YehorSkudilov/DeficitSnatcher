@@ -95,6 +95,10 @@ public class Site
     public string? LastError { get; set; }
     public int ConsecutiveErrors { get; set; }
     public DateTimeOffset? LastBuyAttemptAt { get; set; }
+    /// <summary>Checks in a row that read the page but found no price or no stock (the AI re-learns the page after a few).</summary>
+    public int UnreadableCount { get; set; }
+    /// <summary>When the AI last re-learned how to read this page (at most every few hours).</summary>
+    public DateTimeOffset? LastAiFixAt { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 }
@@ -149,6 +153,8 @@ public class Purchase
     public string? PageHtml { get; set; }
     /// <summary>Where it ended, without the query (which can hold what was typed).</summary>
     public string? FinalUrl { get; set; }
+    /// <summary>The AI did some of it: the whole checkout, or took over after a step broke.</summary>
+    public bool AiUsed { get; set; }
 }
 
 /// <summary>A screenshot taken during a checkout: after a step, or of the whole page where it ended.</summary>
@@ -172,6 +178,38 @@ public enum ScanOutcome
     Unknown,
     /// <summary>The page couldn't be fetched or read.</summary>
     Error,
+}
+
+/// <summary>What a scan saw, kept when something changed, it was in range, or it failed: the page's screenshot and
+/// source. Both encrypted (the source can hold a signed-in session's details).</summary>
+public class ScanSnapshot
+{
+    public long ScanId { get; set; }
+    public string Reason { get; set; } = "";
+    /// <summary>JPEG of the page in a browser, encrypted; null when it couldn't be taken.</summary>
+    public byte[]? Screenshot { get; set; }
+    /// <summary>The fetched page (HTML, or a Shopify product's JSON), gzipped and encrypted.</summary>
+    public byte[]? Source { get; set; }
+    public string? SourceType { get; set; }
+    public string? Error { get; set; }
+}
+
+/// <summary>One call to the AI (ChatGPT): what for, how big, how long, and what went wrong.</summary>
+public class AiCall
+{
+    public long Id { get; set; }
+    public DateTimeOffset At { get; set; }
+    /// <summary>setup, checkout, autofix-checkout, autofix-reading…</summary>
+    public string Purpose { get; set; } = "";
+    public int? SiteId { get; set; }
+    public int? PurchaseId { get; set; }
+    public string Model { get; set; } = "";
+    public int InputTokens { get; set; }
+    public int OutputTokens { get; set; }
+    public int DurationMs { get; set; }
+    public bool Ok { get; set; }
+    /// <summary>What the AI answered (its JSON), or the error.</summary>
+    public string Summary { get; set; } = "";
 }
 
 /// <summary>One check of one site, kept whatever it found (the Scans page).</summary>

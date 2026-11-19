@@ -9,6 +9,8 @@ import {
   type CheckoutStep,
   type HistoryPoint,
   type ProbeResponse,
+  type AiStatus,
+  type SetupSuggestion,
   type Product,
   type Settings,
   type Site,
@@ -18,6 +20,7 @@ import {
 import { ago, dateTime, money } from "@/lib/format";
 import { Check, ErrorNote, Field, NumberInput, StockBadge, useAction, useData, useNow } from "./ui";
 import { go } from "./App";
+import { Logs } from "./Logs";
 
 const kindHelp: Record<SiteKind, string> = {
   Auto: "Shopify product JSON if it's a Shopify /products/ page, otherwise the page's structured data, then your selectors.",
@@ -88,6 +91,11 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
   const save = useAction();
   const test = useAction();
   const action = useAction();
+  const aiAction = useAction();
+  const aiStatus = useData(() => api.get<AiStatus>("/api/ai/status"), []);
+  const [suggestion, setSuggestion] = useState<SetupSuggestion | null>(null);
+  const aiOn = !!aiStatus.data?.hasKey && !!aiStatus.data?.enabled;
+  const aiOff = aiStatus.data && !aiOn ? (aiStatus.data.hasKey ? "The AI is turned off in Settings." : "The AI is off: add the OPENAI_API_KEY secret and redeploy.") : null;
   const currency = settings.data?.currency ?? "CAD";
   const site = saved.data;
 
@@ -135,6 +143,35 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
     else void saved.reload();
   };
 
+  // The AI reads the page and fills in the form (checked before it's offered; nothing is saved until Save).
+  const aiSetup = async () => {
+    setSuggestion(null);
+    const r = await aiAction.run(() =>
+      api.post<SetupSuggestion>("/api/ai/setup", { url: form.url, productId: form.productId, siteId: id, cookies: form.cookies || null }),
+    );
+    if (!r) return;
+    setSuggestion(r);
+    setForm({
+      ...form,
+      name: form.name || r.name || form.name,
+      kind: r.kind,
+      priceSelector: r.priceSelector,
+      titleSelector: r.titleSelector,
+      inStockSelector: r.inStockSelector,
+      outOfStockText: r.outOfStockText,
+    });
+    setDirty(true);
+    if (r.result) setProbe({ result: r.result, verdict: r.verdict, error: r.error, buyMessage: null });
+  };
+
+  // The AI goes through the checkout (dry run) and saves the steps it takes.
+  const aiRecord = async () => {
+    if (dirty) return setNotice({ tone: "warn", text: "Save first: the AI records the checkout of the saved page." });
+    const r = await aiAction.run(() => api.post<BuyOutcome>(`/api/ai/record-checkout/${id}`));
+    if (r?.started && r.purchaseId) return go(`purchase/${r.purchaseId}`);
+    if (r) setNotice({ tone: "bad", text: r.message });
+  };
+
   const runTest = async () => {
     setProbe(null);
     const r = await test.run(() => api.post<ProbeResponse>(`/api/sites/test${id ? `?id=${id}` : ""}`, form));
@@ -178,16 +215,6 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
           <h1>{id ? site?.name : "New page"}</h1>
           {site && <StockBadge site={site} />}
           {site?.match && <span className="badge good">BUY ZONE</span>}
-          {id && (
-            <a className="small" href={`#logs/scans?site=${id}`}>
-              Scan history
-            </a>
-          )}
-          {id && (
-            <a className="small" href={`#logs/checkouts?site=${id}`}>
-              Checkouts
-            </a>
-          )}
         </div>
         <div className="row">
           {id && (
@@ -230,8 +257,27 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
           </Field>
         </div>
         <Field label="Product page URL">
-          <input type="url" value={form.url} placeholder="https://store.example.com/products/ps5-pro" onChange={(e) => set({ url: e.target.value })} />
+          <div className="row" style={{ flexWrap: "nowrap" }}>
+            <input type="url" value={form.url} placeholder="https://store.example.com/products/ps5-pro" onChange={(e) => set({ url: e.target.value })} />
+            <button className="btn primary" style={{ flex: "none" }} disabled={!aiOn || aiAction.busy || !form.url} title={aiOff ?? undefined} onClick={aiSetup}>
+              {aiAction.busy ? "AI is looking…" : "✨ Auto-fill with AI"}
+            </button>
+          </div>
         </Field>
+        {aiOff && <div className="faint small">{aiOff}</div>}
+        <ErrorNote error={aiAction.error} />
+        {suggestion && (
+          <div className={`notice ${suggestion.rightProduct === false ? "bad" : suggestion.works ? "good" : "warn"}`}>
+            <b>
+              {suggestion.rightProduct === false
+                ? "The AI thinks this isn't the right product."
+                : suggestion.works
+                  ? "Filled in by the AI, and a check with these settings worked."
+                  : "Filled in by the AI, but a check with these settings didn't find everything."}
+            </b>{" "}
+            {suggestion.notes} Review, then Save.
+          </div>
+        )}
         <div className="fields">
           <Field label="Check every (seconds)" hint={`Empty: the default (${settings.data?.defaultIntervalSeconds ?? 60} s).`}>
             <NumberInput value={form.intervalSeconds} min={5} placeholder={String(settings.data?.defaultIntervalSeconds ?? 60)} onChange={(v) => set({ intervalSeconds: v })} />
@@ -297,13 +343,24 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
           <h2>Try the checkout</h2>
           <p className="muted small">
             A dry run goes through every step except the final ones (marked red), so you can see each step works without buying. The log and a
-            screenshot of every step open as soon as it starts.
+            screenshot of every step open as soon as it starts. <b>Record checkout with AI</b>: ChatGPT goes through this store&apos;s checkout
+            itself (dry run, stopping before the order is placed) and the steps it takes are saved here.
+            {aiOn && settings.data && (
+              <>
+                {" "}
+                {settings.data.aiAutofixCheckout && "If a saved step breaks, the AI takes over from that screen and saves the fix. "}
+                {settings.data.aiCheckoutWithoutSteps && "Without steps, the AI does the checkout itself."}
+              </>
+            )}
           </p>
           <div className="row">
-            <button className="btn" disabled={action.busy || form.checkoutSteps.length === 0} onClick={() => buy(true)}>
+            <button className="btn" disabled={action.busy || (form.checkoutSteps.length === 0 && !aiOn)} onClick={() => buy(true)}>
               Dry-run checkout
             </button>
-            <button className="btn danger" disabled={action.busy || form.checkoutSteps.length === 0 || site?.lastPrice == null} onClick={() => buy(false)}>
+            <button className="btn primary" disabled={!aiOn || aiAction.busy} title={aiOff ?? undefined} onClick={aiRecord}>
+              ✨ Record checkout with AI
+            </button>
+            <button className="btn danger" disabled={action.busy || (form.checkoutSteps.length === 0 && !aiOn) || site?.lastPrice == null} onClick={() => buy(false)}>
               Buy now for real
             </button>
           </div>
@@ -332,6 +389,8 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
       </div>
 
       {id && <History siteId={id} min={products.data?.find((p) => p.id === form.productId)?.minPrice} max={products.data?.find((p) => p.id === form.productId)?.maxPrice} currency={currency} />}
+
+      {id && <Logs key={id} siteId={id} />}
 
       {id && (
         <div className="row">
@@ -456,7 +515,12 @@ function StepsEditor({ steps, onChange }: { steps: CheckoutStep[]; onChange: (s:
         <b>final</b>: dry runs stop before it, and real buys need one. Card fields are usually inside an iframe: put the iframe&apos;s selector in
         &quot;in frame&quot;.
       </p>
-      {steps.length === 0 && <p className="faint">No steps: this site can be watched, but not bought automatically.</p>}
+      {steps.length === 0 && (
+        <p className="faint">
+          No steps yet. Record them with AI below, start from a template, or add them by hand. Without steps, the AI does the checkout itself
+          when it&apos;s on (Settings).
+        </p>
+      )}
       {steps.map((s, i) => (
         <div className={`step ${s.final ? "final" : ""}`} key={i}>
           <span className="idx">{i + 1}</span>

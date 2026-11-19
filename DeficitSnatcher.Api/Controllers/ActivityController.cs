@@ -22,7 +22,8 @@ public sealed record PurchaseDto(
     string Message,
     bool DryRun,
     bool Manual,
-    int Shots);
+    int Shots,
+    bool AiUsed);
 
 public sealed record ShotDto(long Id, int? StepIndex, string Label, DateTimeOffset At);
 
@@ -96,6 +97,7 @@ public sealed class ActivityController(AppDbContext db, SettingsStore settingsSt
         public int Limit { get; set; } = 100;
         public EventLevel? Level { get; set; }
         public int? SiteId { get; set; }
+        public int? ProductId { get; set; }
         public string? Search { get; set; }
         public DateTimeOffset? From { get; set; }
         public DateTimeOffset? To { get; set; }
@@ -120,6 +122,8 @@ public sealed class ActivityController(AppDbContext db, SettingsStore settingsSt
             q = q.Where(e => e.Level == f.Level);
         if (f.SiteId != null)
             q = q.Where(e => e.SiteId == f.SiteId);
+        if (f.ProductId != null)
+            q = q.Where(e => db.Sites.Any(s => s.Id == e.SiteId && s.ProductId == f.ProductId));
         if (f.From != null)
             q = q.Where(e => e.At >= f.From);
         if (f.To != null)
@@ -224,7 +228,7 @@ public sealed class ActivityController(AppDbContext db, SettingsStore settingsSt
         join s in db.Sites on p.SiteId equals s.Id
         join pr in db.Products on p.ProductId equals pr.Id
         select new PurchaseDto(p.Id, p.SiteId, s.Name, p.ProductId, pr.Name, p.StartedAt, p.FinishedAt, p.Price, p.Quantity, p.Status, p.Message,
-            p.DryRun, p.Manual, db.PurchaseShots.Count(x => x.PurchaseId == p.Id));
+            p.DryRun, p.Manual, db.PurchaseShots.Count(x => x.PurchaseId == p.Id), p.AiUsed);
 
     private async Task<List<PurchaseDto>> Purchases(PurchaseFilter f, CancellationToken ct)
     {

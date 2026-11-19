@@ -6,12 +6,12 @@ import { dateTime, money } from "@/lib/format";
 import { AuthImage, ErrorNote, Field, PurchaseBadge, download, useAction, useData } from "./ui";
 import { go } from "./App";
 
-/** Every checkout, real or dry run, with filters: #logs/checkouts?site=3. */
-export function Purchases({ initial }: { initial?: string }) {
+/** Every checkout, real or dry run, with filters (a product's or a page's own, in its Logs). */
+export function Purchases({ initial, productId: fixedProduct, siteId: fixedSite }: { initial?: string; productId?: number; siteId?: number }) {
   const start = new URLSearchParams(initial ?? "");
   const [status, setStatus] = useState(start.get("status") ?? "");
-  const [siteId, setSiteId] = useState(start.get("site") ?? "");
-  const [productId, setProductId] = useState(start.get("product") ?? "");
+  const [siteId, setSiteId] = useState(fixedSite ? String(fixedSite) : (start.get("site") ?? ""));
+  const [productId, setProductId] = useState(fixedProduct ? String(fixedProduct) : (start.get("product") ?? ""));
   const [kind, setKind] = useState("");
   const sites = useData(() => api.get<Site[]>("/api/sites"), []);
   const products = useData(() => api.get<Product[]>("/api/products"), []);
@@ -45,6 +45,7 @@ export function Purchases({ initial }: { initial?: string }) {
             <option value="true">Dry runs only</option>
           </select>
         </Field>
+        {!fixedProduct && !fixedSite && (
         <Field label="Product">
           <select value={productId} onChange={(e) => setProductId(e.target.value)}>
             <option value="">All</option>
@@ -55,16 +56,19 @@ export function Purchases({ initial }: { initial?: string }) {
             ))}
           </select>
         </Field>
-        <Field label="Site">
+        )}
+        {!fixedSite && (
+        <Field label="Page">
           <select value={siteId} onChange={(e) => setSiteId(e.target.value)}>
             <option value="">All</option>
-            {sites.data?.map((s) => (
+            {sites.data?.filter((s) => !productId || String(s.productId) === productId).map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
             ))}
           </select>
         </Field>
+        )}
       </div>
       <div className="card">
         {list.data?.length === 0 && <p className="muted">No checkouts match.</p>}
@@ -143,21 +147,22 @@ export function PurchaseDetail({ id }: { id: number }) {
   const remove = async () => {
     if (!confirm(`Delete checkout #${id} with its screenshots and logs?`)) return;
     const ok = await action.run(async () => (await api.del(`/api/purchases/${id}`), true));
-    if (ok) go("logs/checkouts");
+    if (ok) go(`site/${data?.purchase.siteId}`);
   };
 
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="page-head">
         <div className="row">
-          <a href="#logs/checkouts" className="btn ghost small">
-            ← Checkouts
+          <a href={`#site/${p.siteId}`} className="btn ghost small">
+            ← {p.siteName}
           </a>
           <h1>
             Checkout #{p.id}
           </h1>
           <PurchaseBadge status={p.status} />
           {p.dryRun && <span className="badge warn">dry run</span>}
+          {p.aiUsed && <span className="badge info">AI</span>}
         </div>
         <div className="row">
           {data.hasHtml && (
@@ -218,7 +223,7 @@ export function PurchaseDetail({ id }: { id: number }) {
               <>
                 <dt>Triggered by</dt>
                 <dd>
-                  <a href={`#logs/scans?site=${p.siteId}`}>Scan #{data.scan.id}</a> at {dateTime(data.scan.at)}
+                  <a href={`#site/${p.siteId}`}>Scan #{data.scan.id}</a> at {dateTime(data.scan.at)}
                 </dd>
               </>
             )}
@@ -306,11 +311,17 @@ function Timeline({ id, steps, running }: { id: number; steps: StepRecord[]; run
               <span className={`badge ${{ ok: "good", failed: "bad", skipped: "warn", notRun: "" }[s.status]}`}>
                 {{ ok: "ok", failed: "failed", skipped: "failed, optional", notRun: "not run" }[s.status]}
               </span>
+              {s.ai && <span className="badge info">AI</span>}
               {s.final && <span className="badge bad">final</span>}
               {s.optional && <span className="badge">optional</span>}
               {s.ms !== null && <span className="faint">{s.ms} ms</span>}
               {s.url && <span className="faint ellipsis" style={{ maxWidth: 420 }}>{s.url}</span>}
             </div>
+            {s.note && (
+              <div className="small muted" style={{ marginTop: 4 }}>
+                AI: {s.note}
+              </div>
+            )}
             {s.error && (s.status === "notRun" ? <div className="faint small" style={{ marginTop: 6 }}>{s.error}</div> : <pre className="log">{s.error}</pre>)}
           </div>
           <div>

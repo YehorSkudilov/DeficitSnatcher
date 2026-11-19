@@ -17,6 +17,11 @@ public sealed record PageResult
     public string? VariantId { get; init; }
     /// <summary>Where each value came from (e.g. "json-ld", "selector"), for the site's Test button.</summary>
     public List<string> Notes { get; init; } = [];
+    /// <summary>What was fetched (HTML or JSON), for the scan's snapshot; not sent to the web.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? Source { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? SourceType { get; init; }
 }
 
 /// <summary>Reads price, stock and title from a Shopify product's JSON or from a page's HTML.</summary>

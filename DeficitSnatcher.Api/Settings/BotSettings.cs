@@ -36,6 +36,30 @@ public sealed record BotSettings
     public int CheckoutHistoryDays { get; init; } = 0;
     /// <summary>A screenshot after every checkout step (about a tenth of a second each), not only where it ended.</summary>
     public bool StepScreenshots { get; init; } = true;
+    /// <summary>Off, Changes (when stock or price changes, it's in range, or the check fails), or Every (each check).
+    /// Each is the page's screenshot and source.</summary>
+    public string ScanSnapshots { get; init; } = "Changes";
+
+    // AI (ChatGPT): off while OpenAI__ApiKey is unset.
+    public bool AiEnabled { get; init; } = true;
+    public string AiModel { get; init; } = "gpt-5-mini";
+    /// <summary>Sent as reasoning_effort (gpt-5 models): minimal, low, medium, high; empty: not sent (older models).</summary>
+    public string AiReasoningEffort { get; init; } = "low";
+    /// <summary>A page without checkout steps is bought by the AI going through the checkout itself.</summary>
+    public bool AiCheckoutWithoutSteps { get; init; } = true;
+    /// <summary>When a checkout step breaks, the AI takes over from that screen and finishes the checkout.</summary>
+    public bool AiAutofixCheckout { get; init; } = true;
+    /// <summary>The steps the AI took replace the broken ones, so the next checkout runs them without the AI.</summary>
+    public bool AiSaveFixedSteps { get; init; } = true;
+    /// <summary>When a page keeps failing or showing no price or stock, the AI re-learns how to read it.</summary>
+    public bool AiAutofixReading { get; init; } = true;
+    /// <summary>Most actions the AI may take in one checkout.</summary>
+    public int AiMaxActions { get; init; } = 30;
+    /// <summary>Screenshots go to the AI too (never once card details are typed).</summary>
+    public bool AiSendScreenshots { get; init; } = true;
+    /// <summary>Before the AI places a real order it must read the order total; it may be at most the product's maximum
+    /// (times units) plus this much tax and fees.</summary>
+    public int MaxTaxPercent { get; init; } = 15;
 
     // Notifications
     public string DiscordWebhookUrl { get; init; } = "";
@@ -65,6 +89,11 @@ public sealed record BotSettings
         ScanHistoryDays = Math.Clamp(ScanHistoryDays, 0, 3650),
         CheckoutHistoryDays = Math.Clamp(CheckoutHistoryDays, 0, 3650),
         ErrorThreshold = Math.Clamp(ErrorThreshold, 1, 1000),
+        ScanSnapshots = ScanSnapshots is "Off" or "Every" ? ScanSnapshots : "Changes",
+        AiModel = string.IsNullOrWhiteSpace(AiModel) ? "gpt-5-mini" : AiModel.Trim(),
+        AiReasoningEffort = (AiReasoningEffort ?? "").Trim().ToLowerInvariant(),
+        AiMaxActions = Math.Clamp(AiMaxActions, 5, 100),
+        MaxTaxPercent = Math.Clamp(MaxTaxPercent, 0, 50),
         DiscordWebhookUrl = DiscordWebhookUrl?.Trim() ?? "",
         TelegramBotToken = TelegramBotToken?.Trim() ?? "",
         TelegramChatId = TelegramChatId?.Trim() ?? "",

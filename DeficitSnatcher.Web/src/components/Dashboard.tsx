@@ -90,9 +90,6 @@ export function Dashboard() {
         <div className="card">
           <div className="card-head">
             <h2>Recent activity</h2>
-            <a href="#logs/activity" className="small">
-              All
-            </a>
           </div>
           <div className="events">
             {d?.recentEvents.length === 0 && <p className="muted">Nothing yet.</p>}
@@ -109,10 +106,7 @@ export function Dashboard() {
         </div>
         <div className="card">
           <div className="card-head">
-            <h2>Purchases</h2>
-            <a href="#logs/checkouts" className="small">
-              All
-            </a>
+            <h2>Checkouts</h2>
           </div>
           {d?.recentPurchases.length === 0 && <p className="muted">No checkouts yet.</p>}
           <div className="events">

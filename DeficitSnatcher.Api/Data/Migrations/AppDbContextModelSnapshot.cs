@@ -22,6 +22,59 @@ namespace DeficitSnatcher.Api.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.AiCall", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DurationMs")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("InputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("Ok")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("OutputTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PurchaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int?>("SiteId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("At");
+
+                    b.HasIndex("SiteId", "At");
+
+                    b.ToTable("AiCalls");
+                });
+
             modelBuilder.Entity("DeficitSnatcher.Api.Data.Event", b =>
                 {
                     b.Property<long>("Id")
@@ -136,6 +189,9 @@ namespace DeficitSnatcher.Api.Data.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("AiUsed")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("BrowserLog")
                         .IsRequired()
@@ -315,6 +371,35 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.ToTable("Scans");
                 });
 
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.ScanSnapshot", b =>
+                {
+                    b.Property<long>("ScanId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<byte[]>("Screenshot")
+                        .HasColumnType("bytea");
+
+                    b.Property<byte[]>("Source")
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("SourceType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("ScanId");
+
+                    b.ToTable("ScanSnapshots");
+                });
+
             modelBuilder.Entity("DeficitSnatcher.Api.Data.Site", b =>
                 {
                     b.Property<int>("Id")
@@ -352,6 +437,9 @@ namespace DeficitSnatcher.Api.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<DateTimeOffset?>("LastAiFixAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset?>("LastBuyAttemptAt")
                         .HasColumnType("timestamp with time zone");
@@ -399,6 +487,9 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.Property<string>("TitleSelector")
                         .HasColumnType("text");
 
+                    b.Property<int>("UnreadableCount")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Url")
                         .IsRequired()
                         .HasMaxLength(2000)
@@ -427,6 +518,14 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.HasKey("Key");
 
                     b.ToTable("StoredValues");
+                });
+
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.AiCall", b =>
+                {
+                    b.HasOne("DeficitSnatcher.Api.Data.Site", null)
+                        .WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("DeficitSnatcher.Api.Data.PricePoint", b =>
@@ -461,6 +560,15 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.HasOne("DeficitSnatcher.Api.Data.Site", null)
                         .WithMany()
                         .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.ScanSnapshot", b =>
+                {
+                    b.HasOne("DeficitSnatcher.Api.Data.Scan", null)
+                        .WithOne()
+                        .HasForeignKey("DeficitSnatcher.Api.Data.ScanSnapshot", "ScanId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

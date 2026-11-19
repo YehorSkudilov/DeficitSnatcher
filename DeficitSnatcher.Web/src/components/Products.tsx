@@ -6,6 +6,7 @@ import { money } from "@/lib/format";
 import { Check, ErrorNote, Field, NumberInput, useAction, useData, useNow } from "./ui";
 import { SiteTable } from "./Dashboard";
 import { go } from "./App";
+import { Logs } from "./Logs";
 
 const blank: ProductInput = {
   name: "",
@@ -110,14 +111,9 @@ export function ProductPage({ id }: { id: number | null }) {
           {p && !p.enabled && <span className="badge">Off</span>}
         </div>
         {p && (
-          <div className="row">
-            <a className="small" href={`#logs/scans?product=${p.id}`}>
-              Scans
-            </a>
-            <a className="small" href={`#logs/checkouts?product=${p.id}`}>
-              Checkouts
-            </a>
-          </div>
+          <button className="btn small" onClick={() => document.getElementById("logs")?.scrollIntoView({ behavior: "smooth" })}>
+            Logs ↓
+          </button>
         )}
       </div>
 
@@ -143,6 +139,12 @@ export function ProductPage({ id }: { id: number | null }) {
           </div>
           <ErrorNote error={check.error} />
           <SiteTable sites={sites.data ?? []} currency={currency} now={now} onCheck={checkNow} busy={check.busy} />
+        </div>
+      )}
+
+      {p && (
+        <div id="logs">
+          <Logs key={p.id} productId={p.id} />
         </div>
       )}
     </div>

@@ -6,19 +6,28 @@ import { Dashboard } from "./Dashboard";
 import { ProductPage, Products } from "./Products";
 import { SiteEditor } from "./SiteEditor";
 import { PurchaseDetail } from "./Purchases";
-import { Logs } from "./Logs";
 import { Deploy } from "./Deploy";
 import { SettingsPage } from "./Settings";
 import { Login } from "./Login";
 import { useData } from "./ui";
 
-/** The screen from the address's #part: #products, #product/3, #site/12, #logs/scans?site=3, #purchase/7… */
+/** The screen from the address's #part: #products, #product/3, #site/12, #purchase/7… */
 function subscribeHash(f: () => void) {
   window.addEventListener("hashchange", f);
   return () => window.removeEventListener("hashchange", f);
 }
 // Addresses from before the menu was merged (bookmarks, notification links) still land in the right place.
-const moved: Record<string, string> = { sites: "products", scans: "logs/scans", purchases: "logs/checkouts", activity: "logs/activity" };
+// Logs now live in each product and page.
+const moved: Record<string, string> = {
+  sites: "products",
+  scans: "products",
+  purchases: "products",
+  activity: "products",
+  logs: "products",
+  "logs/scans": "products",
+  "logs/checkouts": "products",
+  "logs/activity": "products",
+};
 const readHash = () => {
   const route = window.location.hash.replace(/^#\/?/, "") || "dashboard";
   const [path, search] = route.split("?");
@@ -32,7 +41,6 @@ export function go(route: string) {
 const nav = [
   ["dashboard", "Dashboard"],
   ["products", "Products"],
-  ["logs", "Logs"],
   ["settings", "Settings"],
   ["deploy", "Deploy"],
 ] as const;
@@ -57,7 +65,7 @@ function Shell({ route, onSignOut }: { route: string; onSignOut: () => void }) {
   const { data: status } = useData(() => api.get<DashboardData>("/api/dashboard"), [], 10000);
   const [path, search] = route.split("?");
   const [screen, arg] = path.split("/");
-  const section = screen === "site" || screen === "product" ? "products" : screen === "purchase" ? "logs" : screen;
+  const section = ["site", "product", "purchase"].includes(screen) ? "products" : screen;
 
   return (
     <div className="shell">
@@ -87,7 +95,6 @@ function Shell({ route, onSignOut }: { route: string; onSignOut: () => void }) {
             productId={Number(new URLSearchParams(search ?? "").get("product")) || undefined}
           />
         )}
-        {screen === "logs" && <Logs tab={arg} search={search} />}
         {screen === "purchase" && <PurchaseDetail key={arg} id={Number(arg)} />}
         {screen === "deploy" && <Deploy />}
         {screen === "settings" && <SettingsPage />}

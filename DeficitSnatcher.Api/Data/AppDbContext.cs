@@ -11,6 +11,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Event> Events => Set<Event>();
     public DbSet<Scan> Scans => Set<Scan>();
     public DbSet<PurchaseShot> PurchaseShots => Set<PurchaseShot>();
+    public DbSet<ScanSnapshot> ScanSnapshots => Set<ScanSnapshot>();
+    public DbSet<AiCall> AiCalls => Set<AiCall>();
     public DbSet<StoredValue> StoredValues => Set<StoredValue>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -64,6 +66,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Error).HasMaxLength(2000);
             e.Property(x => x.Notes).HasMaxLength(1000);
             e.Property(x => x.Action).HasMaxLength(1000);
+            e.HasOne<Site>().WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<ScanSnapshot>(e =>
+        {
+            e.HasKey(x => x.ScanId);
+            e.Property(x => x.Reason).HasMaxLength(300);
+            e.Property(x => x.SourceType).HasMaxLength(50);
+            e.Property(x => x.Error).HasMaxLength(1000);
+            e.HasOne<Scan>().WithOne().HasForeignKey<ScanSnapshot>(x => x.ScanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<AiCall>(e =>
+        {
+            e.HasIndex(x => x.At);
+            e.HasIndex(x => new { x.SiteId, x.At });
+            e.Property(x => x.Purpose).HasMaxLength(50);
+            e.Property(x => x.Model).HasMaxLength(100);
+            e.Property(x => x.Summary).HasMaxLength(8000);
             e.HasOne<Site>().WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<Event>(e =>

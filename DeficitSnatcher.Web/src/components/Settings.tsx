@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, type Profile, type Settings } from "@/lib/api";
+import { api, type AiStatus, type Profile, type Settings } from "@/lib/api";
 import { Check, ErrorNote, Field, NumberInput, useAction, useData } from "./ui";
 
 export function SettingsPage() {
@@ -94,6 +94,13 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <Field label="Keep price history and activity (days)" hint="0 keeps it all.">
             <NumberInput value={s.historyDays} min={0} onChange={(v) => set({ historyDays: v ?? 0 })} />
           </Field>
+          <Field label="Scan snapshots" hint="The page's screenshot and source, kept with a scan.">
+            <select value={s.scanSnapshots} onChange={(e) => set({ scanSnapshots: e.target.value as Settings["scanSnapshots"] })}>
+              <option value="Changes">When something changes, it&apos;s in range, or it fails</option>
+              <option value="Every">Every scan (slower, more storage)</option>
+              <option value="Off">Off</option>
+            </select>
+          </Field>
           <Field label="Keep scans (days)" hint="Every check is a scan. 0 keeps them all.">
             <NumberInput value={s.scanHistoryDays} min={0} onChange={(v) => set({ scanHistoryDays: v ?? 0 })} />
           </Field>
@@ -139,6 +146,8 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <NumberInput value={s.errorThreshold} min={1} onChange={(v) => set({ errorThreshold: v ?? 5 })} />
         </Field>
       </div>
+
+      <AiSettings s={s} set={set} />
 
       <ErrorNote error={save.error} />
       <div className="row">
@@ -224,6 +233,52 @@ function ProfileFields({ initial }: { initial: Profile }) {
             Remove card
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function AiSettings({ s, set }: { s: Settings; set: (patch: Partial<Settings>) => void }) {
+  const status = useData(() => api.get<AiStatus>("/api/ai/status"), []);
+  return (
+    <div className="card stack">
+      <div className="card-head" style={{ marginBottom: 0 }}>
+        <h2>AI (ChatGPT)</h2>
+        {status.data &&
+          (status.data.hasKey ? <span className="badge good">API key set</span> : <span className="badge warn">No API key: add the OPENAI_API_KEY secret</span>)}
+      </div>
+      <p className="muted small">
+        Sets pages up from a link, goes through checkouts, and fixes them when a store changes its pages. The AI never sees your card or
+        address: it writes placeholders like <code>{"{{card.number}}"}</code> that are filled in here, and it gets no screenshots once card
+        details are typed. Every call is in each page&apos;s Logs → AI.
+      </p>
+      <Check label={<b>AI on</b>} checked={s.aiEnabled} onChange={(aiEnabled) => set({ aiEnabled })} />
+      <div className="fields">
+        <Field label="Model" hint="E.g. gpt-5-mini (fast, cheap) or gpt-5 (smarter).">
+          <input type="text" value={s.aiModel} onChange={(e) => set({ aiModel: e.target.value })} />
+        </Field>
+        <Field label="Reasoning effort" hint="For gpt-5 models; empty for older models like gpt-4o.">
+          <select value={s.aiReasoningEffort} onChange={(e) => set({ aiReasoningEffort: e.target.value })}>
+            <option value="">(not sent)</option>
+            <option value="minimal">minimal</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </Field>
+        <Field label="Most AI actions per checkout">
+          <NumberInput value={s.aiMaxActions} min={5} onChange={(v) => set({ aiMaxActions: v ?? 30 })} />
+        </Field>
+        <Field label="Tax and fees allowed (%)" hint="Before the AI places a real order it reads the total: at most the maximum price plus this.">
+          <NumberInput value={s.maxTaxPercent} min={0} onChange={(v) => set({ maxTaxPercent: v ?? 15 })} />
+        </Field>
+      </div>
+      <div className="stack" style={{ gap: 8 }}>
+        <Check label="Fix broken checkouts: when a step fails, the AI takes over from that screen" checked={s.aiAutofixCheckout} onChange={(aiAutofixCheckout) => set({ aiAutofixCheckout })} />
+        <Check label="Save the fix: the AI's steps replace the broken ones, so next time runs without the AI" checked={s.aiSaveFixedSteps} onChange={(aiSaveFixedSteps) => set({ aiSaveFixedSteps })} />
+        <Check label="Pages without checkout steps are bought by the AI going through the checkout itself" checked={s.aiCheckoutWithoutSteps} onChange={(aiCheckoutWithoutSteps) => set({ aiCheckoutWithoutSteps })} />
+        <Check label="Fix reading: when a page keeps failing or showing no price or stock, the AI re-learns it (at most every 6 hours)" checked={s.aiAutofixReading} onChange={(aiAutofixReading) => set({ aiAutofixReading })} />
+        <Check label="Send screenshots to the AI (never once card details are typed)" checked={s.aiSendScreenshots} onChange={(aiSendScreenshots) => set({ aiSendScreenshots })} />
       </div>
     </div>
   );

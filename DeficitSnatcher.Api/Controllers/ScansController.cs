@@ -1,4 +1,6 @@
 using DeficitSnatcher.Api.Data;
+using DeficitSnatcher.Api.Settings;
+using DeficitSnatcher.Api.Tracking;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -22,7 +24,10 @@ public sealed record ScanDto(
     string? Notes,
     string? Action,
     int? PurchaseId,
-    bool Manual);
+    bool Manual,
+    bool HasSnapshot);
+
+public sealed record SnapshotDto(string Reason, bool HasScreenshot, bool HasSource, string? SourceType, string? Error);
 
 /// <summary>How many scans the filter matches, by outcome (the filter chips' numbers; the outcome filter itself left out).</summary>
 public sealed record ScanCounts(int All, int InStock, int OutOfStock, int Unknown, int Error, int Match, int Bought);
@@ -32,7 +37,7 @@ public sealed record ScansPage(List<ScanDto> Scans, ScanCounts Counts);
 /// <summary>Every check of every site, whatever it found: the Scans page.</summary>
 [ApiController]
 [Route("api/scans")]
-public sealed class ScansController(AppDbContext db) : ControllerBase
+public sealed class ScansController(AppDbContext db, SecretBox box, ScanFollowUp followUp) : ControllerBase
 {
     public sealed class ScanFilter
     {
@@ -96,9 +101,38 @@ public sealed class ScansController(AppDbContext db) : ControllerBase
                            join p in db.Products on s.ProductId equals p.Id
                            orderby s.Id descending
                            select new ScanDto(s.Id, s.SiteId, site.Name, s.ProductId, p.Name, s.At, s.DurationMs, s.Outcome, s.Price, s.TotalPrice,
-                               s.Title, s.Match, s.Verdict, s.Error, s.Notes, s.Action, s.PurchaseId, s.Manual))
+                               s.Title, s.Match, s.Verdict, s.Error, s.Notes, s.Action, s.PurchaseId, s.Manual,
+                               db.ScanSnapshots.Any(x => x.ScanId == s.Id)))
             .Take(Math.Clamp(f.Limit, 1, 500)).ToListAsync(ct);
         return new ScansPage(scans, counts);
+    }
+
+    [HttpGet("{id:long}/snapshot")]
+    public async Task<ActionResult<SnapshotDto>> Snapshot(long id, CancellationToken ct)
+    {
+        var s = await db.ScanSnapshots.AsNoTracking().Where(x => x.ScanId == id)
+            .Select(x => new SnapshotDto(x.Reason, x.Screenshot != null, x.Source != null, x.SourceType, x.Error)).FirstOrDefaultAsync(ct);
+        return s == null ? NotFound() : s;
+    }
+
+    [HttpGet("{id:long}/screenshot")]
+    public async Task<IActionResult> Screenshot(long id, CancellationToken ct)
+    {
+        var shot = await db.ScanSnapshots.Where(x => x.ScanId == id).Select(x => x.Screenshot).FirstOrDefaultAsync(ct);
+        if (shot == null)
+            return NotFound();
+        Response.Headers.CacheControl = "private, max-age=86400";
+        return File(box.DecryptBytes(shot), "image/jpeg");
+    }
+
+    /// <summary>The fetched page as it was, as a download (never rendered here).</summary>
+    [HttpGet("{id:long}/source")]
+    public async Task<IActionResult> Source(long id, CancellationToken ct)
+    {
+        var s = await db.ScanSnapshots.Where(x => x.ScanId == id).Select(x => new { x.Source, x.SourceType }).FirstOrDefaultAsync(ct);
+        if (s?.Source == null)
+            return NotFound();
+        return File(followUp.ReadSource(s.Source), "application/octet-stream", $"scan-{id}.{(s.SourceType == "application/json" ? "json" : "html")}");
     }
 
     [HttpDelete]

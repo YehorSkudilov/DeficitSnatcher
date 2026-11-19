@@ -3,7 +3,8 @@
 import { Fragment, useState } from "react";
 import { api, query, type Product, type Scan, type ScansPage, type Settings, type Site } from "@/lib/api";
 import { dateTime, money } from "@/lib/format";
-import { ErrorNote, Field, OutcomeBadge, useAction, useData } from "./ui";
+import { AuthImage, ErrorNote, Field, OutcomeBadge, download, useAction, useData } from "./ui";
+import type { ScanSnapshot } from "@/lib/api";
 
 type Filters = {
   productId: string;
@@ -22,13 +23,15 @@ const empty: Filters = { productId: "", siteId: "", outcome: "", from: "", to: "
 /** datetime-local → ISO (local time to UTC). */
 const iso = (local: string) => (local ? new Date(local).toISOString() : "");
 
-/** Every check of every page, found or not: #logs/scans, or #logs/scans?site=3&outcome=InStock. */
-export function Scans({ initial }: { initial?: string }) {
+/** Every check, found or not (a product's or a page's own, in its Logs). */
+export function Scans({ initial, productId, siteId }: { initial?: string; productId?: number; siteId?: number }) {
   const start = new URLSearchParams(initial ?? "");
+  // A product's or a page's own scans: that filter is fixed.
+  const fixed = { ...empty, productId: productId ? String(productId) : "", siteId: siteId ? String(siteId) : "" };
   const [f, setF] = useState<Filters>({
-    ...empty,
-    productId: start.get("product") ?? "",
-    siteId: start.get("site") ?? "",
+    ...fixed,
+    productId: fixed.productId || (start.get("product") ?? ""),
+    siteId: fixed.siteId || (start.get("site") ?? ""),
     outcome: start.get("outcome") ?? "",
   });
   const [older, setOlder] = useState<Scan[]>([]);
@@ -102,7 +105,7 @@ export function Scans({ initial }: { initial?: string }) {
           about it. Kept {settings.data?.scanHistoryDays ? `${settings.data.scanHistoryDays} days` : "forever"} (Settings).
         </p>
         <div className="row">
-          <button className="btn small" onClick={() => set(empty)}>
+          <button className="btn small" onClick={() => set(fixed)}>
             Reset filters
           </button>
           <button className="btn small danger" disabled={clear.busy} onClick={clearAll}>
@@ -123,6 +126,7 @@ export function Scans({ initial }: { initial?: string }) {
           {chip("Error", "Errors", counts?.error)}
         </div>
         <div className="filters">
+          {!productId && !siteId && (
           <Field label="Product">
             <select value={f.productId} onChange={(e) => set({ productId: e.target.value, siteId: "" })}>
               <option value="">All</option>
@@ -133,16 +137,19 @@ export function Scans({ initial }: { initial?: string }) {
               ))}
             </select>
           </Field>
-          <Field label="Site">
-            <select value={f.siteId} onChange={(e) => set({ siteId: e.target.value })}>
-              <option value="">All</option>
-              {siteOptions.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </Field>
+          )}
+          {!siteId && (
+            <Field label="Page">
+              <select value={f.siteId} onChange={(e) => set({ siteId: e.target.value })}>
+                <option value="">All</option>
+                {siteOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="From">
             <input type="datetime-local" value={f.from} onChange={(e) => set({ from: e.target.value })} />
           </Field>
@@ -191,6 +198,7 @@ export function Scans({ initial }: { initial?: string }) {
                       <td className="small" style={{ whiteSpace: "nowrap" }}>
                         {dateTime(s.at)}
                         {s.manual && <div className="faint">Check now</div>}
+                        {s.hasSnapshot && <div className="faint">📷 snapshot</div>}
                       </td>
                       <td>
                         <b>{s.siteName}</b>
@@ -247,11 +255,12 @@ export function Scans({ initial }: { initial?: string }) {
                                 </>
                               )}
                             </dd>
-                            <dt>Site</dt>
+                            <dt>Page</dt>
                             <dd>
                               <a href={`#site/${s.siteId}`}>{s.siteName}</a>
                             </dd>
                           </dl>
+                          {s.hasSnapshot ? <SnapshotView id={s.id} /> : <p className="faint small" style={{ marginTop: 10 }}>No snapshot kept for this scan (nothing changed).</p>}
                         </td>
                       </tr>
                     )}
@@ -267,6 +276,28 @@ export function Scans({ initial }: { initial?: string }) {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** What a scan saw: the page's screenshot and its source. */
+function SnapshotView({ id }: { id: number }) {
+  const { data, error } = useData(() => api.get<ScanSnapshot>(`/api/scans/${id}/snapshot`), [id]);
+  const dl = useAction();
+  if (!data) return <ErrorNote error={error} />;
+  return (
+    <div className="stack" style={{ marginTop: 12, gap: 8 }}>
+      <div className="row small">
+        <span className="badge info">Snapshot: {data.reason}</span>
+        {data.hasSource && (
+          <button className="btn small" disabled={dl.busy} onClick={() => dl.run(() => download(`/api/scans/${id}/source`, `scan-${id}.${data.sourceType === "application/json" ? "json" : "html"}`))}>
+            Page source
+          </button>
+        )}
+        {data.error && <span className="faint">{data.error}</span>}
+      </div>
+      <ErrorNote error={dl.error} />
+      {data.hasScreenshot && <AuthImage path={`/api/scans/${id}/screenshot`} alt={`Scan #${id}: ${data.reason}`} className="screenshot" />}
     </div>
   );
 }

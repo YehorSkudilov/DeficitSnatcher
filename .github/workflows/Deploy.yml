@@ -55,6 +55,8 @@ jobs:
             App__PublicUrl=${{ vars.PUBLIC_URL }}
             WEB_PORT=${{ vars.WEB_PORT || '8090' }}
 
+            OpenAI__ApiKey=${{ secrets.OPENAI_API_KEY }}
+
             Deploy__GitHubToken=${{ secrets.DEPLOY_GITHUB_TOKEN }}
             Deploy__Repository=${{ github.repository }}
             Deploy__Workflow=Deploy.yml

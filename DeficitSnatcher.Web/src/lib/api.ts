@@ -191,6 +191,7 @@ export type Purchase = {
   dryRun: boolean;
   manual: boolean;
   shots: number;
+  aiUsed: boolean;
 };
 
 export type StepRecord = {
@@ -206,6 +207,9 @@ export type StepRecord = {
   shotId: number | null;
   final: boolean;
   optional: boolean;
+  /** Done by the AI, with what it saw and why. */
+  ai: boolean;
+  note: string | null;
 };
 
 export type Shot = { id: number; stepIndex: number | null; label: string; at: string };
@@ -245,6 +249,41 @@ export type Scan = {
   action: string | null;
   purchaseId: number | null;
   manual: boolean;
+  hasSnapshot: boolean;
+};
+
+export type ScanSnapshot = { reason: string; hasScreenshot: boolean; hasSource: boolean; sourceType: string | null; error: string | null };
+
+export type AiStatus = { hasKey: boolean; enabled: boolean; model: string };
+
+export type SetupSuggestion = {
+  name: string | null;
+  kind: SiteKind;
+  priceSelector: string | null;
+  titleSelector: string | null;
+  inStockSelector: string | null;
+  outOfStockText: string | null;
+  rightProduct: boolean | null;
+  notes: string;
+  result: PageResult | null;
+  verdict: Verdict | null;
+  error: string | null;
+  works: boolean;
+};
+
+export type AiCall = {
+  id: number;
+  at: string;
+  purpose: string;
+  siteId: number | null;
+  siteName: string | null;
+  purchaseId: number | null;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  durationMs: number;
+  ok: boolean;
+  summary: string;
 };
 
 export type ScanCounts = { all: number; inStock: number; outOfStock: number; unknown: number; error: number; match: number; bought: number };
@@ -327,6 +366,17 @@ export type Settings = {
   scanHistoryDays: number;
   checkoutHistoryDays: number;
   stepScreenshots: boolean;
+  scanSnapshots: "Off" | "Changes" | "Every";
+  aiEnabled: boolean;
+  aiModel: string;
+  aiReasoningEffort: string;
+  aiCheckoutWithoutSteps: boolean;
+  aiAutofixCheckout: boolean;
+  aiSaveFixedSteps: boolean;
+  aiAutofixReading: boolean;
+  aiMaxActions: number;
+  aiSendScreenshots: boolean;
+  maxTaxPercent: number;
   discordWebhookUrl: string;
   telegramBotToken: string;
   telegramChatId: string;
