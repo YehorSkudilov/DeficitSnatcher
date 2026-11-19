@@ -7,6 +7,7 @@ import { Check, ErrorNote, Field, NumberInput, useAction, useData, useNow } from
 import { CheckAllButton, rowResults, SiteTable } from "./Dashboard";
 import { go } from "./App";
 import { Logs } from "./Logs";
+import { FindPages } from "./FindPages";
 
 const blank: ProductInput = {
   name: "",
@@ -86,6 +87,7 @@ export function ProductPage({ id }: { id: number | null }) {
   const currency = settings.data?.currency ?? "CAD";
   const p = id ? products.data?.find((x) => x.id === id) : undefined;
   const [checked, setChecked] = useState<Record<number, { ok: boolean; text: string }>>({});
+  const [finding, setFinding] = useState(false);
 
   if (id && !p)
     return products.data ? (
@@ -136,11 +138,19 @@ export function ProductPage({ id }: { id: number | null }) {
                 currency={currency}
                 onDone={(items) => (setChecked(rowResults(items, currency)), void sites.reload())}
               />
+              <button className="btn small" onClick={() => setFinding(!finding)}>
+                ✨ Find pages
+              </button>
               <a className="btn small primary" href={`#site/new?product=${p.id}`}>
                 Add page
               </a>
             </div>
           </div>
+          {finding && (
+            <div style={{ marginBottom: 14 }}>
+              <FindPages productId={p.id} productName={p.name} currency={currency} onAdded={() => (void sites.reload(), void products.reload())} onClose={() => setFinding(false)} />
+            </div>
+          )}
           <SiteTable sites={sites.data ?? []} currency={currency} now={now} onChanged={() => void sites.reload()} results={checked} />
         </div>
       )}

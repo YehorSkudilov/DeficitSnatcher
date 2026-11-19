@@ -125,6 +125,99 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
         }
     }
 
+    /// <summary>
+    /// Asks with OpenAI's web search (the Responses API's web_search tool) and returns the JSON object in the answer. For
+    /// finding a product's pages at stores; logged like every other call.
+    /// </summary>
+    public async Task<JsonElement> SearchWebJsonAsync(string purpose, string instructions, string question, CancellationToken ct)
+    {
+        if (!HasKey)
+            throw new AiException("The AI is off: set the OPENAI_API_KEY secret.");
+        var settings = await settingsStore.GetAsync(ct);
+        if (!settings.AiEnabled)
+            throw new AiException("The AI is turned off in Settings.");
+        if (settings.AiDailyTokenLimit > 0 && await TokensTodayAsync(ct) >= settings.AiDailyTokenLimit)
+            throw new AiException($"Today's AI limit of {settings.AiDailyTokenLimit:N0} tokens is used up; it starts again at midnight UTC.");
+
+        var body = new Dictionary<string, object>
+        {
+            ["model"] = settings.AiModel,
+            ["instructions"] = instructions,
+            ["input"] = question,
+            ["tools"] = new object[] { new { type = "web_search" } },
+        };
+        // Web search doesn't take "minimal".
+        if (settings.AiReasoningEffort.Length > 0)
+            body["reasoning"] = new { effort = settings.AiReasoningEffort == "minimal" ? "low" : settings.AiReasoningEffort };
+
+        var watch = Stopwatch.StartNew();
+        string? error = null;
+        var answer = "";
+        int inTokens = 0, outTokens = 0;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/responses")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json"),
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _key);
+            using var response = await http.SendAsync(request, ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+                throw new AiException($"OpenAI answered {(int)response.StatusCode}: {Short(ErrorMessage(text), 500)}");
+            using var doc = JsonDocument.Parse(text);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("usage", out var usage))
+            {
+                inTokens = usage.TryGetProperty("input_tokens", out var i) ? i.GetInt32() : 0;
+                outTokens = usage.TryGetProperty("output_tokens", out var o) ? o.GetInt32() : 0;
+            }
+            // The answer is the text of the message items (the rest are the searches it made).
+            var sb = new System.Text.StringBuilder();
+            foreach (var item in root.GetProperty("output").EnumerateArray())
+                if (item.TryGetProperty("type", out var t) && t.GetString() == "message" && item.TryGetProperty("content", out var content))
+                    foreach (var c in content.EnumerateArray())
+                        if (c.TryGetProperty("text", out var ct2))
+                            sb.Append(ct2.GetString());
+            answer = sb.ToString();
+            var start = answer.IndexOf('{');
+            var end = answer.LastIndexOf('}');
+            if (start < 0 || end <= start)
+                throw new AiException("The AI's answer had no JSON: " + Short(answer, 300));
+            using var parsed = JsonDocument.Parse(answer[start..(end + 1)]);
+            return parsed.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            error = "The AI's answer wasn't JSON: " + Short(answer, 300);
+            throw new AiException(error);
+        }
+        catch (AiException e)
+        {
+            error = e.Message;
+            throw;
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            error = e is TaskCanceledException ? "The AI took too long to answer." : "Couldn't reach OpenAI: " + e.Message;
+            throw new AiException(error);
+        }
+        finally
+        {
+            await RecordAsync(new AiCall
+            {
+                At = DateTimeOffset.UtcNow,
+                Purpose = purpose,
+                Model = settings.AiModel,
+                InputTokens = inTokens,
+                OutputTokens = outTokens,
+                DurationMs = (int)watch.ElapsedMilliseconds,
+                Ok = error == null,
+                Summary = Short(error ?? answer, 8000),
+            });
+        }
+    }
+
     /// <summary>Tokens used since midnight UTC.</summary>
     public async Task<int> TokensTodayAsync(CancellationToken ct = default)
     {

@@ -42,6 +42,13 @@ Turned on by the `OPENAI_API_KEY` secret; model and options in Settings. Every c
   gets no screenshots once card details are typed. Before a real order it must read the order total, which must be within
   the maximum price plus the allowed tax (15% by default), or the order isn't placed.
 
+## Finding pages
+
+On a product: **✨ Find pages**. Either ChatGPT searches the web (OpenAI's web search, one call) for stores selling it new
+in your country, or you paste links. Every link is checked first (reads / needs setup / blocked / wrong product / in
+range), you tick the ones you want, and they're added together with auto-buy off. Optionally the AI then sets up the ones
+that didn't read on their own, within the daily token limit; blocked ones are suggested for **Run on my PC**.
+
 ## PC helper (Walmart and other stores that block servers)
 
 `DeficitSnatcher.Runner` runs on your own computer and lends the site its Chrome: your home internet and your sign-ins.
