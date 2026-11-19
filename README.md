@@ -54,7 +54,7 @@ The site is on `http://localhost:8090` (`WEB_PORT`).
 
 ```bash
 cp .env.example .env
-docker compose up -d db
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
 cd DeficitSnatcher.Api
 dotnet run -- install-browser   # once: headless Chromium
 dotnet run                      # http://localhost:5210, reads ../.env
@@ -88,4 +88,5 @@ Run it the first time from GitHub (Actions → Deploy → Run workflow); after t
 | `DEPLOY_GITHUB_TOKEN` | Optional, turns on the Deploy tab: a fine-grained token for this repository with Actions (read and write) and Contents (read). |
 
 **Variables** (all optional): `WEB_PORT` (default 8090), `PUBLIC_URL` (the site's address, for links in
-notifications), `SERVER_SSH_PORT`, `DB_PORT`, `POSTGRES_USER`, `POSTGRES_DB`, `TOKEN_DAYS`.
+notifications), `SERVER_SSH_PORT`, `POSTGRES_USER`, `POSTGRES_DB`, `TOKEN_DAYS`. The database opens no port on the
+server; only the site's `WEB_PORT` is used.

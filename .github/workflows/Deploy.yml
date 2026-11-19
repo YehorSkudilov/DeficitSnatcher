@@ -54,7 +54,6 @@ jobs:
 
             App__PublicUrl=${{ vars.PUBLIC_URL }}
             WEB_PORT=${{ vars.WEB_PORT || '8090' }}
-            DB_PORT=${{ vars.DB_PORT || '55433' }}
 
             Deploy__GitHubToken=${{ secrets.DEPLOY_GITHUB_TOKEN }}
             Deploy__Repository=${{ github.repository }}

@@ -2,7 +2,9 @@
 # Settings come from .env next to this file (copy .env.example); on the server the Deploy workflow writes it.
 #
 #   docker compose up -d --build        everything, on http://localhost:${WEB_PORT}
-#   docker compose up -d db             only the database (then run the API with dotnet run, the site with npm run dev)
+#
+# For development, the database alone on localhost:${DB_PORT} (then dotnet run, npm run dev):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
 name: deficitsnatcher
 
 services:
@@ -59,9 +61,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    # Loopback only, for a locally run API; the API container uses the internal "db" host.
-    ports:
-      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    # No port on the host: only the API reaches it, inside Docker (docker-compose.dev.yml opens one for development).
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
