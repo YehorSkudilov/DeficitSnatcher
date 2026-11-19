@@ -1,0 +1,64 @@
+using System.Text.Json;
+using DeficitSnatcher.Api.Data;
+using Microsoft.EntityFrameworkCore;
+
+namespace DeficitSnatcher.Api.Settings;
+
+/// <summary>The settings and the checkout profile: kept encrypted in the database, cached here once read.</summary>
+public sealed class SettingsStore(IServiceScopeFactory scopes, SecretBox box)
+{
+    private const string SettingsKey = "settings";
+    private const string ProfileKey = "checkout-profile";
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    private BotSettings? _settings;
+    private readonly SemaphoreSlim _lock = new(1, 1);
+
+    public async Task<BotSettings> GetAsync(CancellationToken ct = default) =>
+        _settings ??= (await ReadAsync<BotSettings>(SettingsKey, ct) ?? new BotSettings()).Normalized();
+
+    public async Task<BotSettings> SaveAsync(BotSettings settings, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            var normalized = settings.Normalized();
+            await WriteAsync(SettingsKey, normalized, ct);
+            _settings = normalized;
+            return normalized;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public async Task<BotSettings> UpdateAsync(Func<BotSettings, BotSettings> change, CancellationToken ct = default) =>
+        await SaveAsync(change(await GetAsync(ct)), ct);
+
+    public async Task<CheckoutProfile> GetProfileAsync(CancellationToken ct = default) =>
+        await ReadAsync<CheckoutProfile>(ProfileKey, ct) ?? new CheckoutProfile();
+
+    public Task SaveProfileAsync(CheckoutProfile profile, CancellationToken ct = default) => WriteAsync(ProfileKey, profile, ct);
+
+    private async Task<T?> ReadAsync<T>(string key, CancellationToken ct)
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var row = await db.StoredValues.AsNoTracking().FirstOrDefaultAsync(v => v.Key == key, ct);
+        return row == null ? default : JsonSerializer.Deserialize<T>(box.Decrypt(row.Value), Json);
+    }
+
+    private async Task WriteAsync<T>(string key, T value, CancellationToken ct)
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var sealedValue = box.Encrypt(JsonSerializer.Serialize(value, Json));
+        var row = await db.StoredValues.FirstOrDefaultAsync(v => v.Key == key, ct);
+        if (row == null)
+            db.StoredValues.Add(new StoredValue { Key = key, Value = sealedValue });
+        else
+            row.Value = sealedValue;
+        await db.SaveChangesAsync(ct);
+    }
+}

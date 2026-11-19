@@ -1,0 +1,14 @@
+# The web. Settings come from .env next to this file (see .env.example); on the server the Publish Web workflow writes it.
+#
+#   docker compose up -d --build
+name: deficitsnatcher-web
+
+services:
+  web:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:?WEB_PORT is not set}:80"
