@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, type CheckAllItem, type Dashboard as DashboardData, type ProbeResponse, type Product, type Settings, type Site } from "@/lib/api";
+import { api, type RestockForecast, type CheckAllItem, type Dashboard as DashboardData, type ProbeResponse, type Product, type Settings, type Site } from "@/lib/api";
 import { ago, dateTime, host, money, until } from "@/lib/format";
 import { ErrorNote, LevelDot, PurchaseBadge, StockBadge, useAction, useData, useNow } from "./ui";
 import { go } from "./App";
@@ -14,6 +14,7 @@ export function Dashboard() {
   const now = useNow();
   const d = dash.data;
   const [checked, setChecked] = useState<Record<number, RowResult>>({});
+  const forecasts = useData(() => api.get<Record<number, RestockForecast>>("/api/restock/product/0"), [], 60000);
 
   const setArmed = async (armed: boolean) => {
     if (armed && !d?.dryRun && !confirm("Arm auto-buy for REAL purchases? Matches in your price range will be ordered and paid for.")) return;
@@ -85,7 +86,7 @@ export function Dashboard() {
               </a>
             </div>
           </div>
-          <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={d?.currency} now={now} onChanged={refresh} results={checked} />
+          <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={d?.currency} now={now} onChanged={refresh} results={checked} forecasts={forecasts.data ?? undefined} />
         </div>
       ))}
 
@@ -193,6 +194,7 @@ export function SiteTable({
   now,
   onChanged,
   results: outside,
+  forecasts,
 }: {
   sites: Site[];
   currency?: string;
@@ -200,6 +202,8 @@ export function SiteTable({
   onChanged: () => void;
   /** Results of a Check all, shown on the rows. */
   results?: Record<number, RowResult>;
+  /** Each page's restock forecast. */
+  forecasts?: Record<number, RestockForecast>;
 }) {
   const [checking, setChecking] = useState<Set<number>>(new Set());
   const [results, setResults] = useState<Record<number, RowResult>>({});
@@ -233,7 +237,8 @@ export function SiteTable({
             <th>Stock</th>
             <th>Verdict</th>
             <th>Checked</th>
-            <th>Next</th>
+            <th>Next check</th>
+            <th>Next restock</th>
             <th />
           </tr>
         </thead>
@@ -263,6 +268,9 @@ export function SiteTable({
               </td>
               <td className="small muted">{s.checking || checking.has(s.id) ? "checking…" : ago(s.lastCheckedAt, now)}</td>
               <td className="small muted">{s.enabled ? until(s.nextCheckAt, now) : "—"}</td>
+              <td className="small" style={{ minWidth: 130 }}>
+                <RestockCell f={forecasts?.[s.id]} />
+              </td>
               <td style={{ minWidth: 120 }}>
                 <button
                   className="btn small"
@@ -297,4 +305,20 @@ export function SiteTable({
 /** Check all's results by page, for the rows. */
 export function rowResults(items: CheckAllItem[], currency?: string): Record<number, RowResult> {
   return Object.fromEntries(items.map((i) => [i.siteId, describe(i, currency)]));
+}
+
+/** A page's next restock in a word: when, and how sure (details on its page). */
+export function RestockCell({ f }: { f?: RestockForecast }) {
+  if (!f) return <span className="faint">—</span>;
+  if (f.inStockNow) return <span className="badge good">In stock now</span>;
+  if (!f.when) return <span className="faint" title={f.explanation}>Learning…</span>;
+  const cls = { low: "", medium: "info", high: "good" }[f.confidence];
+  return (
+    <span title={f.explanation}>
+      {f.when}
+      <div>
+        <span className={`badge ${cls}`}>{f.confidence === "high" ? "likely" : f.confidence === "medium" ? "maybe" : "guess"}</span>
+      </div>
+    </span>
+  );
 }

@@ -68,6 +68,9 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <Field label="Retry a site after (minutes)" hint="After a failed or dry-run checkout.">
             <NumberInput value={s.buyRetryMinutes} min={0} onChange={(v) => set({ buyRetryMinutes: v ?? 0 })} />
           </Field>
+          <Field label="Time zone" hint="For restock days and times, e.g. America/Toronto, America/Vancouver, America/Edmonton.">
+            <input type="text" value={s.timeZone} onChange={(e) => set({ timeZone: e.target.value })} />
+          </Field>
           <Field label="Currency" hint="For showing prices; sites' prices are taken as they are.">
             <input type="text" value={s.currency} onChange={(e) => set({ currency: e.target.value })} />
           </Field>
@@ -362,6 +365,11 @@ function AiSettings({ s, set }: { s: Settings; set: (patch: Partial<Settings>) =
         <Check label="Save the fix: the AI's steps replace the broken ones, so next time runs without the AI" checked={s.aiSaveFixedSteps} onChange={(aiSaveFixedSteps) => set({ aiSaveFixedSteps })} />
         <Check label="Pages without checkout steps are bought by the AI going through the checkout itself" checked={s.aiCheckoutWithoutSteps} onChange={(aiCheckoutWithoutSteps) => set({ aiCheckoutWithoutSteps })} />
         <Check label="Fix reading: when a page keeps failing or showing no price or stock, the AI re-learns it (at most every 6 hours)" checked={s.aiAutofixReading} onChange={(aiAutofixReading) => set({ aiAutofixReading })} />
+        <Check
+          label="Restock forecasts: look up each store's restock pattern online about once a week (one web search per store)"
+          checked={s.aiRestockForecast}
+          onChange={(aiRestockForecast) => set({ aiRestockForecast })}
+        />
         <Check label="Send screenshots to the AI (never once card details are typed)" checked={s.aiSendScreenshots} onChange={(aiSendScreenshots) => set({ aiSendScreenshots })} />
       </div>
     </div>

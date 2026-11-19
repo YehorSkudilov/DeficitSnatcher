@@ -16,6 +16,10 @@ public sealed record BotSettings
     public int BuyRetryMinutes { get; init; } = 10;
 
     public string Currency { get; init; } = "CAD";
+    /// <summary>For restock days and times (IANA, e.g. America/Toronto, America/Vancouver).</summary>
+    public string TimeZone { get; init; } = "America/Toronto";
+    /// <summary>The AI looks up each store's restock pattern online about once a week (one web search per store).</summary>
+    public bool AiRestockForecast { get; init; } = true;
 
     // Checking
     public bool TrackingEnabled { get; init; } = true;
@@ -113,6 +117,7 @@ public sealed record BotSettings
         TotalBudget = Math.Max(0, TotalBudget),
         BuyRetryMinutes = Math.Clamp(BuyRetryMinutes, 0, 24 * 60),
         Currency = string.IsNullOrWhiteSpace(Currency) ? "CAD" : Currency.Trim().ToUpperInvariant(),
+        TimeZone = string.IsNullOrWhiteSpace(TimeZone) ? "America/Toronto" : TimeZone.Trim(),
         DefaultIntervalSeconds = Math.Clamp(DefaultIntervalSeconds, 5, 24 * 3600),
         JitterPercent = Math.Clamp(JitterPercent, 0, 90),
         MinSecondsPerHost = Math.Clamp(MinSecondsPerHost, 0, 3600),

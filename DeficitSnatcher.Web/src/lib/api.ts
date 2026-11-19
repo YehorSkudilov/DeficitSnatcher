@@ -370,6 +370,8 @@ export type Settings = {
   totalBudget: number;
   buyRetryMinutes: number;
   currency: string;
+  timeZone: string;
+  aiRestockForecast: boolean;
   trackingEnabled: boolean;
   defaultIntervalSeconds: number;
   jitterPercent: number;
@@ -437,4 +439,21 @@ export type Profile = {
   cardCvv: string;
   hasCvv: boolean;
   clearCard: boolean;
+};
+
+export type RestockForecast = {
+  nextAt: string | null;
+  when: string | null;
+  confidence: "low" | "medium" | "high";
+  basis: "history" | "online" | "both" | "none";
+  explanation: string;
+  inStockNow: boolean;
+  restocks: string[];
+  historyPattern: string | null;
+  onlinePattern: string | null;
+  onlineSummary: string | null;
+  sources: { title: string; url: string }[];
+  onlineCheckedAt: string | null;
+  onlineError: string | null;
+  timeZone: string;
 };

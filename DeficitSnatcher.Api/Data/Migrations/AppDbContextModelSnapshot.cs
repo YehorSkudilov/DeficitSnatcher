@@ -299,6 +299,58 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.ToTable("PurchaseShots");
                 });
 
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.RestockInsight", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Confidence")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Domain")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTimeOffset>("FetchedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("NextLikely")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Pattern")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Sources")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId", "Domain")
+                        .IsUnique();
+
+                    b.ToTable("RestockInsights");
+                });
+
             modelBuilder.Entity("DeficitSnatcher.Api.Data.Scan", b =>
                 {
                     b.Property<long>("Id")
@@ -557,6 +609,15 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.HasOne("DeficitSnatcher.Api.Data.Purchase", null)
                         .WithMany()
                         .HasForeignKey("PurchaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.RestockInsight", b =>
+                {
+                    b.HasOne("DeficitSnatcher.Api.Data.Product", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

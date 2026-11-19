@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, type Product, type ProductInput, type Settings, type Site } from "@/lib/api";
+import { api, type Product, type ProductInput, type RestockForecast, type Settings, type Site } from "@/lib/api";
 import { money } from "@/lib/format";
 import { Check, ErrorNote, Field, NumberInput, useAction, useData, useNow } from "./ui";
 import { CheckAllButton, rowResults, SiteTable } from "./Dashboard";
@@ -28,6 +28,7 @@ export function Products() {
   const now = useNow();
   const currency = settings.data?.currency ?? "CAD";
   const [checked, setChecked] = useState<Record<number, { ok: boolean; text: string }>>({});
+  const forecasts = useData(() => api.get<Record<number, RestockForecast>>("/api/restock/product/0"), [], 60000);
 
   return (
     <div className="stack" style={{ gap: 16 }}>
@@ -71,7 +72,7 @@ export function Products() {
               </a>
             </div>
           </div>
-          <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={currency} now={now} onChanged={() => void sites.reload()} results={checked} />
+          <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={currency} now={now} onChanged={() => void sites.reload()} results={checked} forecasts={forecasts.data ?? undefined} />
         </div>
       ))}
     </div>
@@ -87,6 +88,7 @@ export function ProductPage({ id }: { id: number | null }) {
   const currency = settings.data?.currency ?? "CAD";
   const p = id ? products.data?.find((x) => x.id === id) : undefined;
   const [checked, setChecked] = useState<Record<number, { ok: boolean; text: string }>>({});
+  const forecasts = useData(() => api.get<Record<number, RestockForecast>>(`/api/restock/product/${id ?? 0}`), [id], 60000);
   const [finding, setFinding] = useState(false);
 
   if (id && !p)
@@ -151,7 +153,7 @@ export function ProductPage({ id }: { id: number | null }) {
               <FindPages productId={p.id} productName={p.name} currency={currency} onAdded={() => (void sites.reload(), void products.reload())} onClose={() => setFinding(false)} />
             </div>
           )}
-          <SiteTable sites={sites.data ?? []} currency={currency} now={now} onChanged={() => void sites.reload()} results={checked} />
+          <SiteTable sites={sites.data ?? []} currency={currency} now={now} onChanged={() => void sites.reload()} results={checked} forecasts={forecasts.data ?? undefined} />
         </div>
       )}
 

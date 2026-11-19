@@ -81,6 +81,7 @@ builder.Services.AddHttpClient<DeficitSnatcher.Api.Ai.OpenAiClient>(c => c.Timeo
 builder.Services.AddSingleton<DeficitSnatcher.Api.Ai.CheckoutAgent>();
 builder.Services.AddSingleton<DeficitSnatcher.Api.Ai.PageSetup>();
 builder.Services.AddSingleton<ScanFollowUp>();
+builder.Services.AddSingleton<DeficitSnatcher.Api.Ai.RestockForecaster>();
 builder.Services.AddSingleton<Buyer>();
 builder.Services.AddSingleton<CheckService>();
 builder.Services.AddSingleton<Tracker>();

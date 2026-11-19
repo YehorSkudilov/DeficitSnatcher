@@ -13,6 +13,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PurchaseShot> PurchaseShots => Set<PurchaseShot>();
     public DbSet<ScanSnapshot> ScanSnapshots => Set<ScanSnapshot>();
     public DbSet<AiCall> AiCalls => Set<AiCall>();
+    public DbSet<RestockInsight> RestockInsights => Set<RestockInsight>();
     public DbSet<StoredValue> StoredValues => Set<StoredValue>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -75,6 +76,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.SourceType).HasMaxLength(50);
             e.Property(x => x.Error).HasMaxLength(1000);
             e.HasOne<Scan>().WithOne().HasForeignKey<ScanSnapshot>(x => x.ScanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<RestockInsight>(e =>
+        {
+            e.HasIndex(x => new { x.ProductId, x.Domain }).IsUnique();
+            e.Property(x => x.Domain).HasMaxLength(200);
+            e.Property(x => x.Pattern).HasMaxLength(500);
+            e.Property(x => x.Confidence).HasMaxLength(20);
+            e.Property(x => x.Summary).HasMaxLength(4000);
+            e.Property(x => x.Error).HasMaxLength(1000);
+            e.HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<AiCall>(e =>
         {

@@ -9,7 +9,8 @@ namespace DeficitSnatcher.Api.Tracking;
 /// Checks every enabled site on its interval (with jitter, so checks don't land on a fixed beat), a few at a time,
 /// never two of the same host closer than the settings allow, and backing off a site that keeps failing.
 /// </summary>
-public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsStore, CheckService checks, ILogger<Tracker> log)
+public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsStore, CheckService checks, Ai.RestockForecaster forecaster,
+    ILogger<Tracker> log)
     : BackgroundService
 {
     private readonly ConcurrentDictionary<int, DateTimeOffset> _nextDue = new();
@@ -50,6 +51,18 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
         if (DateTimeOffset.UtcNow - _lastCleanup > TimeSpan.FromHours(1))
         {
             _lastCleanup = DateTimeOffset.UtcNow;
+            // Once an hour: one store's restock pattern looked up online, if it's missing or a week old.
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await forecaster.RefreshOneStaleAsync(CancellationToken.None);
+                }
+                catch (Exception e)
+                {
+                    log.LogWarning("Restock lookup failed: {Error}", e.Message);
+                }
+            });
             if (settings.HistoryDays > 0)
             {
                 var cutoff = DateTimeOffset.UtcNow.AddDays(-settings.HistoryDays);

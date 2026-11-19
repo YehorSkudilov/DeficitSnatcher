@@ -52,6 +52,13 @@ One page per store: a store (its domain, e.g. bestbuy.ca) that's already watched
 your country are added (from the checkout profile's country and province, or the currency): amazon.com or a `/en-us/`
 page is left out for someone in Canada, and so is a page priced in another currency.
 
+## Restock forecast
+
+Each page shows its **next restock**: from its own history (the times it came back into stock: usual weekday and time,
+or the usual gap) and from what ChatGPT finds online about the store (web search: restock reports, trackers, patterns;
+with links), looked up about once a week per store (Settings → AI) or with *Look online now*. When the two disagree the
+sooner one is shown and the other mentioned. A guess, labelled with how sure it is; times in Settings → Time zone.
+
 ## Notifications
 
 Discord, Telegram, any webhook (ntfy.sh…) and email (SMTP; IONOS by default: `smtp.ionos.com`, port 587, the mailbox's

@@ -201,6 +201,25 @@ public class ScanSnapshot
     public string? Error { get; set; }
 }
 
+/// <summary>What the AI found online about when a store restocks a product (web search), kept a week per store.</summary>
+public class RestockInsight
+{
+    public int Id { get; set; }
+    public int ProductId { get; set; }
+    /// <summary>The store, e.g. bestbuy.ca.</summary>
+    public string Domain { get; set; } = "";
+    public DateTimeOffset FetchedAt { get; set; }
+    /// <summary>The usual pattern, e.g. "Thursdays, 11 am–1 pm ET".</summary>
+    public string? Pattern { get; set; }
+    /// <summary>When the next restock looks likely, if anything points to one.</summary>
+    public DateTimeOffset? NextLikely { get; set; }
+    public string Confidence { get; set; } = "low";
+    public string Summary { get; set; } = "";
+    /// <summary>JSON array of { title, url }.</summary>
+    public string Sources { get; set; } = "[]";
+    public string? Error { get; set; }
+}
+
 /// <summary>One call to the AI (ChatGPT): what for, how big, how long, and what went wrong.</summary>
 public class AiCall
 {

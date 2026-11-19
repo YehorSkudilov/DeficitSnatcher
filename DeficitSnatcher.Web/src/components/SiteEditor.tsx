@@ -11,6 +11,7 @@ import {
   type ProbeResponse,
   type AiStatus,
   type RunnerStatus,
+  type RestockForecast,
   type SetupSuggestion,
   type Product,
   type Settings,
@@ -418,6 +419,8 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
         )}
       </div>
 
+      {id && <RestockCard siteId={id} aiOn={aiOn} />}
+
       {id && <History siteId={id} min={products.data?.find((p) => p.id === form.productId)?.minPrice} max={products.data?.find((p) => p.id === form.productId)?.maxPrice} currency={currency} />}
 
       {id && <Logs key={id} siteId={id} />}
@@ -691,6 +694,82 @@ function AutoBuyNotice({ settings, product }: { settings: Settings; product?: Pr
     <div className="notice bad small">
       <b>Armed for real:</b> when this page is in stock in range, it&apos;s ordered and paid for right away, {limits}.
       {settings.aiEnabled && settings.aiCheckOrder && " The AI checks the order (only this product, the right quantity, the total) before it's placed."}
+    </div>
+  );
+}
+
+/** The page's restock forecast: when, how sure, why, and what's reported online (with sources). */
+function RestockCard({ siteId, aiOn }: { siteId: number; aiOn: boolean }) {
+  const { data, error, setData } = useData(() => api.get<RestockForecast>(`/api/restock/site/${siteId}`), [siteId], 60000);
+  const refresh = useAction();
+  const now = useNow(60000);
+  if (!data) return <ErrorNote error={error} />;
+  const f = data;
+  const look = async () => {
+    const r = await refresh.run(() => api.post<RestockForecast>(`/api/restock/site/${siteId}/refresh`));
+    if (r) setData(r);
+  };
+  return (
+    <div className="card stack">
+      <div className="card-head" style={{ marginBottom: 0 }}>
+        <h2>Next restock</h2>
+        <button className="btn small" disabled={!aiOn || refresh.busy} onClick={look} title={aiOn ? "One AI web search" : "The AI is off"}>
+          {refresh.busy ? (
+            <>
+              <span className="spin" /> Looking online…
+            </>
+          ) : (
+            "✨ Look online now"
+          )}
+        </button>
+      </div>
+      <div className="row" style={{ gap: 12 }}>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>{f.inStockNow ? "In stock now" : (f.when ?? "Not enough to go on yet")}</div>
+        {!f.inStockNow && f.when && (
+          <span className={`badge ${{ low: "", medium: "info", high: "good" }[f.confidence]}`}>
+            {f.confidence} confidence · from {f.basis === "both" ? "history and online" : f.basis}
+          </span>
+        )}
+      </div>
+      <div className="muted small">{f.explanation}</div>
+      <ErrorNote error={refresh.error} />
+      <dl className="kv">
+        <dt>Seen here</dt>
+        <dd>
+          {f.restocks.length === 0
+            ? "No restocks seen yet."
+            : `${f.restocks.length} restock${f.restocks.length === 1 ? "" : "s"}${f.historyPattern ? `: ${f.historyPattern}` : ""}. Last: ${dateTime(f.restocks[0])} (${ago(f.restocks[0], now)}).`}
+        </dd>
+        <dt>Online</dt>
+        <dd>
+          {f.onlineError ? (
+            <span style={{ color: "var(--danger)" }}>{f.onlineError}</span>
+          ) : f.onlineCheckedAt ? (
+            <>
+              {f.onlinePattern && <b>{f.onlinePattern}. </b>}
+              {f.onlineSummary}
+              <span className="faint"> (looked {ago(f.onlineCheckedAt, now)})</span>
+            </>
+          ) : (
+            <span className="faint">Not looked up yet{aiOn ? ": it's done once a week by itself, or now with the button." : " (the AI is off)."}</span>
+          )}
+        </dd>
+        {f.sources.length > 0 && (
+          <>
+            <dt>Sources</dt>
+            <dd>
+              {f.sources.map((s, i) => (
+                <div key={i} className="ellipsis" style={{ maxWidth: 640 }}>
+                  <a href={s.url} target="_blank" rel="noreferrer noopener">
+                    {s.title}
+                  </a>
+                </div>
+              ))}
+            </dd>
+          </>
+        )}
+      </dl>
+      <div className="faint small">A guess from patterns, never a promise: stores restock when they choose. Times in {f.timeZone}.</div>
     </div>
   );
 }
