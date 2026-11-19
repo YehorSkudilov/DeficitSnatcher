@@ -13,8 +13,11 @@ EXPOSE 8080
 COPY --from=build /app/publish .
 # Chromium and the system libraries it needs, somewhere the app's user can read (Program.cs: install-browser).
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN dotnet DeficitSnatcher.Api.dll install-browser --with-deps \
-    && chmod -R a+rX /ms-playwright \
+# libatomic1: the Node that Playwright's installer runs on needs it, and the slim runtime image doesn't have it.
+# The chmod lets the app's (non-root) user run that Node and the browsers: they're only executable by root otherwise.
+RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 \
+    && dotnet DeficitSnatcher.Api.dll install-browser --with-deps \
+    && chmod -R a+rX /ms-playwright /app/.playwright \
     && rm -rf /var/lib/apt/lists/*
 # What's deployed, for the site's Deploy tab (docker-compose.yml passes them).
 ARG GIT_SHA=dev
