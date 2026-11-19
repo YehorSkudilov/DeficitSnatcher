@@ -131,9 +131,15 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             await notifier.NotifyAsync(NotifyKind.InStock, EventLevel.Good,
                 $"{product.Name} is IN STOCK at {site.Name} for {verdict.TotalPrice:0.00} {money} (your range {product.MinPrice:0.00}–{product.MaxPrice:0.00}).",
                 site.Id, site.Url);
-        else if (previousPrice is { } old && result.Price is { } price && price < old)
+        // Came into stock, but not in the range: worth knowing (e.g. the price went up). Never for going out of stock.
+        else if (inStock && previousInStock != true && !firstScan)
+            await notifier.NotifyAsync(NotifyKind.InStockOutOfRange, EventLevel.Info,
+                $"{product.Name} is in stock at {site.Name}{(result.Price is { } p2 ? $" for {p2 + site.ShippingCost:0.00} {money}" : "")}, but not bought: {verdict.Reason}.",
+                site.Id, site.Url);
+        // A lower price while it can be bought (out of stock prices don't matter).
+        else if (inStock && previousPrice is { } old && result.Price is { } price && price < old)
             await notifier.NotifyAsync(NotifyKind.PriceDrop, EventLevel.Info,
-                $"{product.Name} at {site.Name}: price dropped {old:0.00} → {price:0.00} {money}{(inStock ? "" : " (out of stock)")}.", site.Id, site.Url);
+                $"{product.Name} at {site.Name}: price dropped {old:0.00} → {price:0.00} {money}, in stock.", site.Id, site.Url);
         else if (!verdict.Match && before.Match)
             await notifier.LogAsync(EventLevel.Info, $"{product.Name} at {site.Name} no longer a match: {verdict.Reason}.", site.Id);
 

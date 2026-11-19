@@ -150,13 +150,57 @@ function SettingsForm({ initial }: { initial: Settings }) {
             <input type="text" value={s.telegramChatId} onChange={(e) => set({ telegramChatId: e.target.value })} />
           </Field>
         </div>
-        <div className="row" style={{ gap: 20 }}>
-          <Check label="In stock in range" checked={s.notifyInStock} onChange={(notifyInStock) => set({ notifyInStock })} />
-          <Check label="Price drops" checked={s.notifyPriceDrop} onChange={(notifyPriceDrop) => set({ notifyPriceDrop })} />
-          <Check label="Purchases" checked={s.notifyPurchase} onChange={(notifyPurchase) => set({ notifyPurchase })} />
-          <Check label="Failing sites" checked={s.notifyErrors} onChange={(notifyErrors) => set({ notifyErrors })} />
+        <h3 style={{ marginTop: 6 }}>Email</h3>
+        <p className="muted small" style={{ marginTop: -6 }}>
+          Set up for IONOS mail: the mailbox&apos;s full address as the username and its password. Server{" "}
+          <code>smtp.ionos.com</code> (North America), <code>smtp.ionos.co.uk</code> (UK) or <code>smtp.ionos.de</code>; port 587.
+        </p>
+        <div className="fields">
+          <Field label="Send alerts to" hint="Your email; several: comma-separated.">
+            <input type="text" value={s.emailTo} placeholder="you@example.com" onChange={(e) => set({ emailTo: e.target.value })} />
+          </Field>
+          <Field label="SMTP username" hint="IONOS: the mailbox's full email address.">
+            <input type="text" autoComplete="off" value={s.smtpUser} placeholder="alerts@yourdomain.com" onChange={(e) => set({ smtpUser: e.target.value })} />
+          </Field>
+          <Field label="SMTP password">
+            <input type="password" autoComplete="new-password" value={s.smtpPassword} onChange={(e) => set({ smtpPassword: e.target.value })} />
+          </Field>
+          <Field label="SMTP server">
+            <select
+              value={["smtp.ionos.com", "smtp.ionos.co.uk", "smtp.ionos.de"].includes(s.smtpHost) ? s.smtpHost : "other"}
+              onChange={(e) => e.target.value !== "other" && set({ smtpHost: e.target.value, smtpPort: 587 })}
+            >
+              <option value="smtp.ionos.com">IONOS North America (smtp.ionos.com)</option>
+              <option value="smtp.ionos.co.uk">IONOS UK (smtp.ionos.co.uk)</option>
+              <option value="smtp.ionos.de">IONOS Germany (smtp.ionos.de)</option>
+              <option value="other">Other…</option>
+            </select>
+          </Field>
+          <Field label="Server address">
+            <input type="text" value={s.smtpHost} onChange={(e) => set({ smtpHost: e.target.value })} />
+          </Field>
+          <Field label="Port" hint="587 (STARTTLS) or 465 (TLS).">
+            <NumberInput value={s.smtpPort} min={1} onChange={(v) => set({ smtpPort: v ?? 587 })} />
+          </Field>
+          <Field label="Send from" hint="Empty: the username. IONOS only sends from your own addresses.">
+            <input type="text" value={s.emailFrom} onChange={(e) => set({ emailFrom: e.target.value })} />
+          </Field>
         </div>
-        <Field label="A site is failing after (checks in a row)">
+        <h3 style={{ marginTop: 6 }}>Tell me when</h3>
+        <p className="muted small" style={{ marginTop: -6 }}>
+          Sent to every channel set above. Never for going out of stock. When a store wants you to prove you&apos;re human on your PC, you&apos;re
+          always told.
+        </p>
+        <div className="stack" style={{ gap: 8 }}>
+          <Check label={<><b>In stock in my price range</b> (a match: it&apos;s bought if auto-buy is on)</>} checked={s.notifyInStock} onChange={(notifyInStock) => set({ notifyInStock })} />
+          <Check label={<><b>In stock, outside my range</b> (too expensive, suspiciously cheap, or not the right item)</>} checked={s.notifyInStockOutOfRange} onChange={(notifyInStockOutOfRange) => set({ notifyInStockOutOfRange })} />
+          <Check label={<><b>Price drops</b> while in stock</>} checked={s.notifyPriceDrop} onChange={(notifyPriceDrop) => set({ notifyPriceDrop })} />
+          <Check label={<><b>Bought</b></>} checked={s.notifyPurchase} onChange={(notifyPurchase) => set({ notifyPurchase })} />
+          <Check label={<><b>Not bought</b>: a real checkout failed or was cut off (with what went wrong)</>} checked={s.notifyNotBought} onChange={(notifyNotBought) => set({ notifyNotBought })} />
+          <Check label={<><b>Dry runs</b> finished (off: while armed in dry run they&apos;d come every few minutes)</>} checked={s.notifyDryRun} onChange={(notifyDryRun) => set({ notifyDryRun })} />
+          <Check label={<><b>Problems</b>: a page keeps failing, the PC helper disconnected, the AI couldn&apos;t fix a page</>} checked={s.notifyErrors} onChange={(notifyErrors) => set({ notifyErrors })} />
+        </div>
+        <Field label="A page is failing after (checks in a row)">
           <NumberInput value={s.errorThreshold} min={1} onChange={(v) => set({ errorThreshold: v ?? 5 })} />
         </Field>
       </div>

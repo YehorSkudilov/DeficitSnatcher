@@ -62,7 +62,8 @@ public sealed class SettingsController(SettingsStore store, Notifier notifier) :
     public async Task<NotificationTestResponse> TestNotification(CancellationToken ct)
     {
         var s = await store.GetAsync(ct);
-        if (s.DiscordWebhookUrl.Length == 0 && s.WebhookUrl.Length == 0 && (s.TelegramBotToken.Length == 0 || s.TelegramChatId.Length == 0))
+        if (s.DiscordWebhookUrl.Length == 0 && s.WebhookUrl.Length == 0 && (s.TelegramBotToken.Length == 0 || s.TelegramChatId.Length == 0)
+            && !Notifier.EmailReady(s))
             return new(false, ["No notification channel is set up."]);
         var problems = await notifier.SendAsync(s, "Deficit Snatcher test: notifications work.");
         return new(problems.Count == 0, problems);

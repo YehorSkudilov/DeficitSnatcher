@@ -9,7 +9,7 @@ type Found = { store: string; url: string; title: string | null; price: string |
 type Probed = {
   url: string;
   name: string;
-  status: "reads" | "blocked" | "unread" | "error";
+  status: "reads" | "blocked" | "unread" | "error" | "foreign";
   price: number | null;
   inStock: boolean | null;
   title: string | null;
@@ -17,6 +17,8 @@ type Probed = {
   inRange: boolean;
   message: string;
   alreadyAdded: boolean;
+  /** The store (e.g. bestbuy.ca): one page per store. */
+  domain: string;
 };
 type Row = Probed & { pick: boolean; runOnPc: boolean; note?: string | null };
 
@@ -38,17 +40,25 @@ export function FindPages({ productId, productName, currency, onAdded, onClose }
     setRows(null);
     setDone(null);
     const r = await probe.run(() => api.post<Probed[]>("/api/find-pages/probe", { productId, urls }));
+    const seen = new Set<string>();
     if (r)
       setRows(
-        r.map((p) => ({
+        r.map((p) => {
+          // Already watched, or a second page of a store in this list: shown, but not added.
+          const sameStore = p.alreadyAdded || seen.has(p.domain);
+          seen.add(p.domain);
+          return {
           ...p,
           // The store's name as the AI found it, when it searched.
           name: names[p.url] ?? p.name,
           note: notes[p.url] ?? null,
-          // Picked: not added yet, works (or the AI can set it up), and not another product.
-          pick: !p.alreadyAdded && p.status !== "error" && p.titleMatches !== false,
+          alreadyAdded: sameStore,
+          message: p.alreadyAdded ? `You already watch ${p.domain}.` : sameStore ? `Another ${p.domain} page is above.` : p.message,
+          // Picked: a new store, works (or the AI can set it up), and not another product.
+          pick: !sameStore && p.status !== "error" && p.status !== "foreign" && p.titleMatches !== false,
           runOnPc: p.status === "blocked",
-        })),
+          };
+        }),
       );
   };
 
@@ -97,6 +107,7 @@ export function FindPages({ productId, productName, currency, onAdded, onClose }
       unread: <span className="badge warn">Needs setup</span>,
       blocked: <span className="badge bad">Blocked</span>,
       error: <span className="badge bad">Error</span>,
+      foreign: <span className="badge bad">Other country</span>,
     })[r.status];
 
   return (
@@ -119,8 +130,8 @@ export function FindPages({ productId, productName, currency, onAdded, onClose }
       {mode === "ai" ? (
         <div className="stack" style={{ gap: 8 }}>
           <p className="muted small">
-            ChatGPT searches the web for stores selling it new in your country (from your currency), leaving out pages you already have.
-            One AI call with web search.
+            ChatGPT searches the web for stores that sell it new and ship to you (the country and province of your checkout profile, or
+            your currency&apos;s country), leaving out stores you already watch and stores of other countries. One AI call with web search.
           </p>
           <div className="row" style={{ flexWrap: "nowrap" }}>
             <input type="text" value={hint} placeholder="Optional: e.g. include Costco and London Drugs, skip marketplaces" onChange={(e) => setHint(e.target.value)} />
@@ -185,7 +196,7 @@ export function FindPages({ productId, productName, currency, onAdded, onClose }
                       </div>
                     </td>
                     <td>
-                      {r.alreadyAdded ? <span className="badge">Already added</span> : statusBadge(r)}
+                      {r.alreadyAdded ? <span className="badge">Store already watched</span> : statusBadge(r)}
                       {r.inRange && <div style={{ marginTop: 4 }}><span className="badge good">IN RANGE</span></div>}
                     </td>
                     <td className="num">{r.price != null ? money(r.price, currency) : "—"}</td>

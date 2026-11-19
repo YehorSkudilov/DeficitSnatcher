@@ -6,10 +6,22 @@ namespace DeficitSnatcher.Api.Notifications;
 
 public enum NotifyKind
 {
+    /// <summary>In stock, in the price range (a match).</summary>
     InStock,
+    /// <summary>In stock, but over or under the range (or the title doesn't fit).</summary>
+    InStockOutOfRange,
+    /// <summary>A lower price while in stock (never for out of stock).</summary>
     PriceDrop,
+    /// <summary>An order went through.</summary>
     Purchase,
+    /// <summary>A real checkout failed or was cut off.</summary>
+    NotBought,
+    /// <summary>A dry run finished.</summary>
+    DryRun,
+    /// <summary>A page keeps failing, the PC helper went away, the AI couldn't fix something.</summary>
     Error,
+    /// <summary>The owner has to do something now (a store's human check on the PC): always sent.</summary>
+    ActionNeeded,
     Test,
 }
 
@@ -48,8 +60,11 @@ public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settings
         var wanted = kind switch
         {
             NotifyKind.InStock => s.NotifyInStock,
+            NotifyKind.InStockOutOfRange => s.NotifyInStockOutOfRange,
             NotifyKind.PriceDrop => s.NotifyPriceDrop,
             NotifyKind.Purchase => s.NotifyPurchase,
+            NotifyKind.NotBought => s.NotifyNotBought,
+            NotifyKind.DryRun => s.NotifyDryRun,
             NotifyKind.Error => s.NotifyErrors,
             _ => true,
         };
@@ -93,6 +108,8 @@ public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settings
                     request.Headers.TryAddWithoutValidation("Click", url);
                 return http.SendAsync(request);
             }));
+        if (EmailReady(s))
+            tasks.Add(EmailAsync(s, message, url, problems));
         await Task.WhenAll(tasks);
         foreach (var p in problems)
             log.LogWarning("Notification failed: {Problem}", p);
@@ -100,4 +117,33 @@ public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settings
     }
 
     private static string Limit(string s, int n) => s.Length > n ? s[..n] : s;
+
+    public static bool EmailReady(BotSettings s) => s.EmailTo.Length > 0 && s.SmtpUser.Length > 0 && s.SmtpPassword.Length > 0;
+
+    /// <summary>Emails the alert (SMTP; IONOS by default): the subject is the message's start, the body all of it.</summary>
+    private async Task EmailAsync(BotSettings s, string message, string? url, List<string> problems)
+    {
+        try
+        {
+            var mail = new MimeKit.MimeMessage();
+            mail.From.Add(new MimeKit.MailboxAddress("Deficit Snatcher", s.EmailFrom.Length > 0 ? s.EmailFrom : s.SmtpUser));
+            foreach (var to in s.EmailTo.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                mail.To.Add(MimeKit.MailboxAddress.Parse(to));
+            var firstLine = message.Split('\n')[0];
+            mail.Subject = firstLine.Length > 120 ? firstLine[..117] + "…" : firstLine;
+            mail.Body = new MimeKit.TextPart("plain") { Text = url == null ? message : $"{message}\n\n{url}" };
+
+            using var smtp = new MailKit.Net.Smtp.SmtpClient { Timeout = 20000 };
+            await smtp.ConnectAsync(s.SmtpHost, s.SmtpPort,
+                s.SmtpPort == 465 ? MailKit.Security.SecureSocketOptions.SslOnConnect : MailKit.Security.SecureSocketOptions.StartTls);
+            await smtp.AuthenticateAsync(s.SmtpUser, s.SmtpPassword);
+            await smtp.SendAsync(new MailKit.SendRequest(mail));
+            await smtp.DisconnectAsync(true);
+        }
+        catch (Exception e)
+        {
+            lock (problems)
+                problems.Add("Email: " + e.Message);
+        }
+    }
 }

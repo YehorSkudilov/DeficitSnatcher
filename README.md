@@ -48,6 +48,16 @@ On a product: **✨ Find pages**. Either ChatGPT searches the web (OpenAI's web 
 in your country, or you paste links. Every link is checked first (reads / needs setup / blocked / wrong product / in
 range), you tick the ones you want, and they're added together with auto-buy off. Optionally the AI then sets up the ones
 that didn't read on their own, within the daily token limit; blocked ones are suggested for **Run on my PC**.
+One page per store: a store (its domain, e.g. bestbuy.ca) that's already watched is never added again. Only stores for
+your country are added (from the checkout profile's country and province, or the currency): amazon.com or a `/en-us/`
+page is left out for someone in Canada, and so is a page priced in another currency.
+
+## Notifications
+
+Discord, Telegram, any webhook (ntfy.sh…) and email (SMTP; IONOS by default: `smtp.ionos.com`, port 587, the mailbox's
+full address and password). Settings → Notifications chooses what you're told about: in stock in range, in stock outside
+the range, price drops while in stock, bought, not bought (with what went wrong), dry runs (off by default), and problems.
+Never for going out of stock. A store's human check on your PC always alerts you.
 
 ## PC helper (Walmart and other stores that block servers)
 

@@ -400,7 +400,16 @@ export type Settings = {
   telegramBotToken: string;
   telegramChatId: string;
   webhookUrl: string;
+  emailTo: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPassword: string;
+  emailFrom: string;
   notifyInStock: boolean;
+  notifyInStockOutOfRange: boolean;
+  notifyNotBought: boolean;
+  notifyDryRun: boolean;
   notifyPriceDrop: boolean;
   notifyPurchase: boolean;
   notifyErrors: boolean;

@@ -420,7 +420,13 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
             PurchaseStatus.DryRun => (EventLevel.Info, $"Dry run #{purchaseId} for {product.Name} at {site.Name} ({price:0.00} {settings.Currency}): {message}"),
             _ => (EventLevel.Error, $"Couldn't buy {product.Name} at {site.Name} ({price:0.00} {settings.Currency}), checkout #{purchaseId}: {message}"),
         };
-        await notifier.NotifyAsync(NotifyKind.Purchase, level, text, site.Id, link ?? site.Url);
+        var kind = status switch
+        {
+            PurchaseStatus.Succeeded => NotifyKind.Purchase,
+            PurchaseStatus.DryRun => NotifyKind.DryRun,
+            _ => NotifyKind.NotBought,
+        };
+        await notifier.NotifyAsync(kind, level, text, site.Id, link ?? site.Url);
     }
 
     public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);

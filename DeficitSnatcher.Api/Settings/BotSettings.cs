@@ -79,7 +79,26 @@ public sealed record BotSettings
     public string TelegramChatId { get; init; } = "";
     /// <summary>Any URL that takes a plain-text POST (ntfy.sh topics, for one).</summary>
     public string WebhookUrl { get; init; } = "";
+    // Email (SMTP), IONOS's settings by default: on once the address to send to, the username and password are set.
+    /// <summary>Where alerts are emailed (several: comma-separated).</summary>
+    public string EmailTo { get; init; } = "";
+    /// <summary>IONOS: smtp.ionos.com (North America), smtp.ionos.co.uk, smtp.ionos.de…</summary>
+    public string SmtpHost { get; init; } = "smtp.ionos.com";
+    /// <summary>587 (STARTTLS), or 465 (TLS from the start).</summary>
+    public int SmtpPort { get; init; } = 587;
+    /// <summary>IONOS: the mailbox's full email address.</summary>
+    public string SmtpUser { get; init; } = "";
+    public string SmtpPassword { get; init; } = "";
+    /// <summary>Sent from; empty: the SMTP username.</summary>
+    public string EmailFrom { get; init; } = "";
+    /// <summary>In stock in the price range.</summary>
     public bool NotifyInStock { get; init; } = true;
+    /// <summary>Came into stock, but outside the range (too expensive, too cheap to be real, or not the right title).</summary>
+    public bool NotifyInStockOutOfRange { get; init; } = true;
+    /// <summary>A real checkout failed or was cut off.</summary>
+    public bool NotifyNotBought { get; init; } = true;
+    /// <summary>A dry run finished (off: dry runs while armed would alert every few minutes).</summary>
+    public bool NotifyDryRun { get; init; }
     public bool NotifyPriceDrop { get; init; } = true;
     public bool NotifyPurchase { get; init; } = true;
     public bool NotifyErrors { get; init; } = true;
@@ -112,6 +131,12 @@ public sealed record BotSettings
         TelegramBotToken = TelegramBotToken?.Trim() ?? "",
         TelegramChatId = TelegramChatId?.Trim() ?? "",
         WebhookUrl = WebhookUrl?.Trim() ?? "",
+        EmailTo = EmailTo?.Trim() ?? "",
+        SmtpHost = string.IsNullOrWhiteSpace(SmtpHost) ? "smtp.ionos.com" : SmtpHost.Trim(),
+        SmtpPort = SmtpPort is > 0 and < 65536 ? SmtpPort : 587,
+        SmtpUser = SmtpUser?.Trim() ?? "",
+        SmtpPassword = SmtpPassword ?? "",
+        EmailFrom = EmailFrom?.Trim() ?? "",
         ProxyUrl = ProxyUrl?.Trim() ?? "",
     };
 }

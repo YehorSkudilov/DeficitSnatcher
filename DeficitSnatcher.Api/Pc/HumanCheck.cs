@@ -41,7 +41,7 @@ public sealed class HumanCheck(Notifier notifier)
         if (!_lastAlert.TryGetValue(siteId, out var last) || now - last > TimeSpan.FromMinutes(10))
         {
             _lastAlert[siteId] = now;
-            await notifier.NotifyAsync(NotifyKind.InStock, Data.EventLevel.Warning,
+            await notifier.NotifyAsync(NotifyKind.ActionNeeded, Data.EventLevel.Warning,
                 $"{siteName}: the store wants you to prove you're human ({vendor}). Do it in the Chrome window of the PC helper on your computer; "
                 + $"the bot waits {Wait.TotalMinutes:0} minutes.", siteId);
         }
