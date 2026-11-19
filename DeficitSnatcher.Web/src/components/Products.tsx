@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api, type Product, type ProductInput, type Settings, type Site } from "@/lib/api";
 import { money } from "@/lib/format";
 import { Check, ErrorNote, Field, NumberInput, useAction, useData, useNow } from "./ui";
-import { SiteTable } from "./Dashboard";
+import { CheckAllButton, rowResults, SiteTable } from "./Dashboard";
 import { go } from "./App";
 import { Logs } from "./Logs";
 
@@ -24,14 +24,9 @@ export function Products() {
   const products = useData(() => api.get<Product[]>("/api/products"), []);
   const sites = useData(() => api.get<Site[]>("/api/sites"), [], 5000);
   const settings = useData(() => api.get<Settings>("/api/settings"), []);
-  const check = useAction();
   const now = useNow();
   const currency = settings.data?.currency ?? "CAD";
-
-  const checkNow = async (id: number) => {
-    await check.run(() => api.post(`/api/sites/${id}/check`));
-    void sites.reload();
-  };
+  const [checked, setChecked] = useState<Record<number, { ok: boolean; text: string }>>({});
 
   return (
     <div className="stack" style={{ gap: 16 }}>
@@ -45,7 +40,7 @@ export function Products() {
         Each product has a price range and the store pages that sell it. A page is a match when it&apos;s in stock, its title fits the
         keywords, and its price plus shipping is within the range. Only matches are ever bought.
       </p>
-      <ErrorNote error={products.error || check.error} />
+      <ErrorNote error={products.error} />
       {products.data?.length === 0 && <div className="card muted">No products yet.</div>}
       {products.data?.map((p) => (
         <div className="card" key={p.id}>
@@ -61,6 +56,12 @@ export function Products() {
               </span>
             </a>
             <div className="row">
+              <CheckAllButton
+                productId={p.id}
+                count={(sites.data ?? []).filter((s) => s.productId === p.id).length}
+                currency={currency}
+                onDone={(items) => (setChecked((c) => ({ ...c, ...rowResults(items, currency) })), void sites.reload())}
+              />
               <a className="btn small" href={`#product/${p.id}`}>
                 Edit
               </a>
@@ -69,7 +70,7 @@ export function Products() {
               </a>
             </div>
           </div>
-          <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={currency} now={now} onCheck={checkNow} busy={check.busy} />
+          <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={currency} now={now} onChanged={() => void sites.reload()} results={checked} />
         </div>
       ))}
     </div>
@@ -81,15 +82,10 @@ export function ProductPage({ id }: { id: number | null }) {
   const products = useData(() => api.get<Product[]>("/api/products"), [id]);
   const sites = useData(() => (id ? api.get<Site[]>(`/api/sites?productId=${id}`) : Promise.resolve([] as Site[])), [id], 5000);
   const settings = useData(() => api.get<Settings>("/api/settings"), []);
-  const check = useAction();
   const now = useNow();
   const currency = settings.data?.currency ?? "CAD";
   const p = id ? products.data?.find((x) => x.id === id) : undefined;
-
-  const checkNow = async (siteId: number) => {
-    await check.run(() => api.post(`/api/sites/${siteId}/check`));
-    void sites.reload();
-  };
+  const [checked, setChecked] = useState<Record<number, { ok: boolean; text: string }>>({});
 
   if (id && !p)
     return products.data ? (
@@ -133,12 +129,19 @@ export function ProductPage({ id }: { id: number | null }) {
         <div className="card">
           <div className="card-head">
             <h2>Pages</h2>
-            <a className="btn small primary" href={`#site/new?product=${p.id}`}>
-              Add page
-            </a>
+            <div className="row">
+              <CheckAllButton
+                productId={p.id}
+                count={sites.data?.length ?? 0}
+                currency={currency}
+                onDone={(items) => (setChecked(rowResults(items, currency)), void sites.reload())}
+              />
+              <a className="btn small primary" href={`#site/new?product=${p.id}`}>
+                Add page
+              </a>
+            </div>
           </div>
-          <ErrorNote error={check.error} />
-          <SiteTable sites={sites.data ?? []} currency={currency} now={now} onCheck={checkNow} busy={check.busy} />
+          <SiteTable sites={sites.data ?? []} currency={currency} now={now} onChanged={() => void sites.reload()} results={checked} />
         </div>
       )}
 

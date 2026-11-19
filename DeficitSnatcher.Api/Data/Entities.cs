@@ -75,6 +75,10 @@ public class Site
     /// <summary>Shopify: only this variant (id) is looked at; null: the first available one.</summary>
     public string? VariantId { get; set; }
 
+    /// <summary>Checked and bought in the Chrome of the PC helper on the owner's computer (their home connection and
+    /// sign-ins), for stores that block servers.</summary>
+    public bool RunOnPc { get; set; }
+
     /// <summary>Buy automatically when it's in stock in the product's range (and auto-buy is armed in settings).</summary>
     public bool AutoBuy { get; set; }
 

@@ -38,6 +38,25 @@ Turned on by the `OPENAI_API_KEY` secret; model and options in Settings. Every c
   gets no screenshots once card details are typed. Before a real order it must read the order total, which must be within
   the maximum price plus the allowed tax (15% by default), or the order isn't placed.
 
+## PC helper (Walmart and other stores that block servers)
+
+`DeficitSnatcher.Runner` runs on your own computer and lends the site its Chrome: your home internet and your sign-ins.
+Pages with **Run on my PC** are checked and bought there (checks, checkouts, screenshots, AI auto-fill all work the same);
+while the helper isn't connected they're checked from the server as usual (Walmart sometimes answers).
+
+1. Download the zip for your computer from the [pc-helper release](../../releases/tag/pc-helper) (built by the
+   *PC helper* workflow) and unzip it.
+2. On the site: Settings → PC helper → Make a key.
+3. Run it once with `DeficitSnatcher.Runner --site https://your-site --key dsr_…` (remembered; afterwards just run it).
+   A Chrome window opens with its own profile: sign in to Walmart there once.
+
+It only connects out to the site (WebSocket through `/api`); nothing on the PC listens to the network. If a store shows
+its human check (Walmart's Press & Hold), you get an alert, do it in that window, and the bot carries on (it waits 2
+minutes). Uses Google Chrome when installed, otherwise downloads Chromium the first time.
+
+**Amazon** has built-in settings (its buy box price, Add to Cart for stock, "See All Buying Options" counts as out of
+stock so resellers' markups aren't bought); the AI is only asked when those don't read the page.
+
 ## How buying works
 
 A site is a **match** when it's in stock, the title fits the keywords, and price + shipping is within the range. A match

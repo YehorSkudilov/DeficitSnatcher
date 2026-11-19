@@ -5,7 +5,7 @@ using DeficitSnatcher.Api.Settings;
 namespace DeficitSnatcher.Api.Tracking;
 
 /// <summary>Fetches a site's product page and reads it (see PageParser), the way the site's kind says.</summary>
-public sealed class PageFetcher(HttpClient http, BrowserPool browsers)
+public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanCheck humanCheck)
 {
     public static SocketsHttpHandler CreateHandler() => new()
     {
@@ -19,6 +19,16 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers)
     public async Task<PageResult> FetchAsync(Site site, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct)
     {
         var url = new Uri(site.Url);
+        var selectors0 = new PageParser.Selectors(site.PriceSelector, site.TitleSelector, site.InStockSelector, site.OutOfStockText);
+        // On the owner's PC everything goes through their Chrome (the store blocks the server). Without the PC helper
+        // connected, the page is read from the server like any other.
+        if (site.RunOnPc && browsers.PcAvailable)
+        {
+            var rendered = await RenderAsync(url, cookies, settings, ct, site);
+            if (BlockDetector.Detect(rendered) is { } pcVendor)
+                throw new BlockedException(BlockDetector.Message(pcVendor, browser: true));
+            return PageParser.ParseHtml(rendered, selectors0) with { Source = rendered, SourceType = "text/html" };
+        }
         if (site.Kind == SiteKind.Shopify || site.Kind == SiteKind.Auto && LooksLikeShopifyProduct(url))
         {
             var jsonUrl = new UriBuilder(url) { Query = "", Fragment = "" }.Uri.ToString().TrimEnd('/') + ".js";
@@ -65,10 +75,11 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers)
         return (response.StatusCode, body);
     }
 
-    private async Task<string> RenderAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct)
+    private async Task<string> RenderAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site? site = null)
     {
-        await using var context = await browsers.NewContextAsync(settings, cookies, ct);
-        var page = await context.NewPageAsync();
+        await using var lease = await browsers.OpenAsync(settings, cookies, site?.RunOnPc == true, ct);
+        var onPc = lease.OnPc;
+        var page = await lease.NewPageAsync();
         await page.GotoAsync(url.ToString(), new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = settings.RequestTimeoutSeconds * 1000 });
         try
         {
@@ -78,6 +89,8 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers)
         {
             // Pages that keep polling never go idle; what's there by now is enough.
         }
+        if (onPc)
+            await humanCheck.WaitIfBlockedAsync(page, site!.Id, site.Name, ct);
         return await page.ContentAsync();
     }
 

@@ -17,6 +17,7 @@ public static class BlockDetector
         ("HUMAN (PerimeterX)", ["px-captcha", "Press &amp; Hold", "Press & Hold", "_pxCaptcha"]),
         ("DataDome", ["captcha-delivery.com", "geo.captcha-delivery", "datadome"]),
         ("Imperva", ["Pardon Our Interruption", "_Incapsula_Resource", "incap_ses"]),
+        ("Amazon's robot check", ["/errors/validateCaptcha", "Enter the characters you see below", "Sorry, we just need to make sure you're not a robot"]),
     ];
 
     /// <summary>The bot protection that answered, or null for a normal page. Only short pages count: a real product page
@@ -25,7 +26,7 @@ public static class BlockDetector
     {
         if (string.IsNullOrEmpty(html))
             return status is 403 or 429 ? "the store's bot protection" : null;
-        var head = html.Length > 60_000 && status is not (403 or 429) ? null : html;
+        var head = html.Length > 60_000 && status is not (403 or 429 or 503) ? null : html;
         if (head == null)
             return null;
         foreach (var (name, signs) in Vendors)

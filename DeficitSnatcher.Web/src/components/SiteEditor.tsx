@@ -10,6 +10,7 @@ import {
   type HistoryPoint,
   type ProbeResponse,
   type AiStatus,
+  type RunnerStatus,
   type SetupSuggestion,
   type Product,
   type Settings,
@@ -77,6 +78,7 @@ function toInput(s: Site): SiteInput {
     autoBuy: s.autoBuy,
     checkoutSteps: s.checkoutSteps,
     cookies: null,
+    runOnPc: s.runOnPc,
   };
 }
 
@@ -93,6 +95,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
   const action = useAction();
   const aiAction = useAction();
   const aiStatus = useData(() => api.get<AiStatus>("/api/ai/status"), []);
+  const runner = useData(() => api.get<RunnerStatus>("/api/runner/status"), [], 10000);
   const [suggestion, setSuggestion] = useState<SetupSuggestion | null>(null);
   const aiOn = !!aiStatus.data?.hasKey && !!aiStatus.data?.enabled;
   const aiOff = aiStatus.data && !aiOn ? (aiStatus.data.hasKey ? "The AI is turned off in Settings." : "The AI is off: add the OPENAI_API_KEY secret and redeploy.") : null;
@@ -122,6 +125,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
         autoBuy: false,
         checkoutSteps: [],
         cookies: null,
+        runOnPc: false,
       });
     }
   }, [id, site, products.data, productId, form]);
@@ -147,7 +151,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
   const aiSetup = async () => {
     setSuggestion(null);
     const r = await aiAction.run(() =>
-      api.post<SetupSuggestion>("/api/ai/setup", { url: form.url, productId: form.productId, siteId: id, cookies: form.cookies || null }),
+      api.post<SetupSuggestion>("/api/ai/setup", { url: form.url, productId: form.productId, siteId: id, cookies: form.cookies || null, runOnPc: form.runOnPc }),
     );
     if (!r) return;
     setSuggestion(r);
@@ -304,7 +308,31 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
             checked={form.autoBuy}
             onChange={(autoBuy) => set({ autoBuy })}
           />
+          <Check
+            label={
+              <>
+                <b>Run on my PC</b> (stores that block servers, like Walmart)
+              </>
+            }
+            checked={form.runOnPc}
+            onChange={(runOnPc) => set({ runOnPc })}
+          />
         </div>
+        {form.runOnPc && runner.data && (
+          <div className={`notice small ${runner.data.connected ? "good" : "warn"}`}>
+            {runner.data.connected ? (
+              <>
+                Checked and bought in Chrome on <b>{runner.data.machine}</b> (PC helper connected). If the store asks you to prove you&apos;re human,
+                you get an alert: do it in that window and the bot carries on.
+              </>
+            ) : (
+              <>
+                The PC helper isn&apos;t connected, so this page is checked from the server for now (the store sometimes answers). Start the
+                helper on your computer: Settings → PC helper.
+              </>
+            )}
+          </div>
+        )}
         {form.autoBuy && settings.data && <AutoBuyNotice settings={settings.data} product={products.data?.find((p) => p.id === form.productId)} />}
       </div>
 

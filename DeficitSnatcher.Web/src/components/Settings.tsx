@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { api, type AiStatus, type Profile, type Settings } from "@/lib/api";
+import { api, type AiStatus, type Profile, type RunnerStatus, type Settings } from "@/lib/api";
+import { dateTime } from "@/lib/format";
 import { Check, ErrorNote, Field, NumberInput, useAction, useData } from "./ui";
 
 export function SettingsPage() {
@@ -13,6 +14,7 @@ export function SettingsPage() {
       </div>
       <ErrorNote error={loaded.error} />
       {loaded.data && <SettingsForm initial={loaded.data} />}
+      <PcHelper />
       <ProfileForm />
     </div>
   );
@@ -296,6 +298,71 @@ function AiSettings({ s, set }: { s: Settings; set: (patch: Partial<Settings>) =
         <Check label="Pages without checkout steps are bought by the AI going through the checkout itself" checked={s.aiCheckoutWithoutSteps} onChange={(aiCheckoutWithoutSteps) => set({ aiCheckoutWithoutSteps })} />
         <Check label="Fix reading: when a page keeps failing or showing no price or stock, the AI re-learns it (at most every 6 hours)" checked={s.aiAutofixReading} onChange={(aiAutofixReading) => set({ aiAutofixReading })} />
         <Check label="Send screenshots to the AI (never once card details are typed)" checked={s.aiSendScreenshots} onChange={(aiSendScreenshots) => set({ aiSendScreenshots })} />
+      </div>
+    </div>
+  );
+}
+
+/** The PC helper: its status, a key for it, and how to start it. */
+function PcHelper() {
+  const status = useData(() => api.get<RunnerStatus>("/api/runner/status"), [], 5000);
+  const make = useAction();
+  const [key, setKey] = useState<string | null>(null);
+  const site = typeof window === "undefined" ? "" : window.location.origin;
+
+  const newKey = async () => {
+    if (status.data?.hasKey && !confirm("Make a new key? The helper running with the old one is disconnected and needs the new one.")) return;
+    const r = await make.run(() => api.post<{ key: string }>("/api/runner/key"));
+    if (r) {
+      setKey(r.key);
+      void status.reload();
+    }
+  };
+
+  const s = status.data;
+  return (
+    <div className="card stack">
+      <div className="card-head" style={{ marginBottom: 0 }}>
+        <h2>PC helper</h2>
+        {s && (s.connected ? <span className="badge good">Connected: {s.machine}</span> : <span className="badge warn">Not connected</span>)}
+      </div>
+      <p className="muted small">
+        For stores that block servers (Walmart): a small program on your computer lends the bot its Chrome, on your home internet, with
+        your sign-ins. Pages with <b>Run on my PC</b> are checked and bought there; while it isn&apos;t connected they&apos;re checked from the
+        server as usual. If a store asks you to prove you&apos;re human (Press &amp; Hold), you get an alert and do it in that window.
+      </p>
+      {s?.connected && (
+        <div className="small muted">
+          {s.browser} · connected {s.since ? dateTime(s.since) : ""}
+        </div>
+      )}
+      <ol className="small" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+        <li>
+          Download the helper for your computer from the{" "}
+          <a href="https://github.com/YehorSkudilov/DeficitSnatcher/releases/tag/pc-helper" target="_blank" rel="noreferrer noopener">
+            PC helper release
+          </a>{" "}
+          (Windows, Mac or Linux zip) and unzip it.
+        </li>
+        <li>Make a key below (it&apos;s shown once).</li>
+        <li>
+          Start it once with your site and key; both are remembered:
+          <pre className="log" style={{ marginTop: 6 }}>
+            {`DeficitSnatcher.Runner --site ${site} --key ${key ?? "dsr_…"}`}
+          </pre>
+          After that, just start <code>DeficitSnatcher.Runner</code>. A Chrome window opens: sign in to Walmart there once. Keep it running.
+        </li>
+      </ol>
+      <ErrorNote error={make.error} />
+      {key && (
+        <div className="notice warn small">
+          Your new key (copy it now, it isn&apos;t shown again): <code style={{ userSelect: "all" }}>{key}</code>
+        </div>
+      )}
+      <div className="row">
+        <button className="btn" disabled={make.busy} onClick={newKey}>
+          {s?.hasKey ? "Make a new key" : "Make a key"}
+        </button>
       </div>
     </div>
   );

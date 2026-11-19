@@ -23,7 +23,9 @@ public sealed record SiteInput(
     bool AutoBuy,
     List<CheckoutStep>? CheckoutSteps,
     /// <summary>null: keep the saved cookies; "": remove them.</summary>
-    string? Cookies);
+    string? Cookies,
+    /// <summary>Checked and bought in the Chrome of the PC helper.</summary>
+    bool RunOnPc = false);
 
 public sealed record SiteDto(
     int Id,
@@ -53,10 +55,12 @@ public sealed record SiteDto(
     bool Match,
     string Verdict,
     DateTimeOffset? NextCheckAt,
-    bool Checking);
+    bool Checking,
+    bool RunOnPc);
 
 public sealed record ProbeResponse(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage);
 public sealed record BuyRequest(bool DryRun);
+public sealed record CheckAllItem(int SiteId, string Name, decimal? Price, bool? InStock, bool Match, string? Verdict, string? Error, string? BuyMessage);
 public sealed record HistoryPoint(DateTimeOffset At, decimal? Price, bool InStock);
 
 [ApiController]
@@ -125,6 +129,31 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
     {
         var o = await checks.CheckAsync(id, ct, manual: true);
         return new(o.Result, o.Verdict, o.Error, o.BuyMessage);
+    }
+
+    /// <summary>Checks every page (of one product, or all), a few at a time, now: the same as scheduled checks (and buys if
+    /// one is a match with auto-buy on). Turned-off pages are included: it's what was asked for.</summary>
+    [HttpPost("check-all")]
+    public async Task<List<CheckAllItem>> CheckAll([FromQuery] int? productId, [FromServices] Settings.SettingsStore settingsStore, CancellationToken ct)
+    {
+        var sites = await db.Sites.AsNoTracking().Where(s => productId == null || s.ProductId == productId)
+            .Select(s => new { s.Id, s.Name }).ToListAsync(ct);
+        var settings = await settingsStore.GetAsync(ct);
+        using var slots = new SemaphoreSlim(settings.MaxConcurrentChecks);
+        var results = await Task.WhenAll(sites.Select(async s =>
+        {
+            await slots.WaitAsync(ct);
+            try
+            {
+                var o = await checks.CheckAsync(s.Id, ct, manual: true);
+                return new CheckAllItem(s.Id, s.Name, o.Result?.Price, o.Result?.InStock, o.Verdict?.Match == true, o.Verdict?.Reason, o.Error, o.BuyMessage);
+            }
+            finally
+            {
+                slots.Release();
+            }
+        }));
+        return [.. results];
     }
 
     /// <summary>Checks the page as set on the form, saving nothing.</summary>
@@ -200,6 +229,7 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
         site.OutOfStockText = Blank(i.OutOfStockText);
         site.VariantId = Blank(i.VariantId);
         site.AutoBuy = i.AutoBuy;
+        site.RunOnPc = i.RunOnPc;
         site.CheckoutSteps = CheckoutStep.Serialize(steps);
         if (i.Cookies != null)
             site.CookiesEncrypted = i.Cookies.Trim().Length == 0 ? null : box.Encrypt(i.Cookies.Trim());
@@ -220,6 +250,6 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
         return new SiteDto(s.Id, s.ProductId, s.Product?.Name ?? "", s.Name, s.Url, s.Kind, s.Enabled, s.IntervalSeconds, s.ShippingCost,
             s.PriceSelector, s.TitleSelector, s.InStockSelector, s.OutOfStockText, s.VariantId, s.AutoBuy, CheckoutStep.Parse(s.CheckoutSteps),
             s.CookiesEncrypted != null, s.LastCheckedAt, s.LastChangedAt, s.LastPrice, s.LastInStock, s.LastTitle, s.LastError,
-            s.ConsecutiveErrors, verdict.Match, verdict.Reason, tracker.NextCheck(s.Id), tracker.IsChecking(s.Id));
+            s.ConsecutiveErrors, verdict.Match, verdict.Reason, tracker.NextCheck(s.Id), tracker.IsChecking(s.Id), s.RunOnPc);
     }
 }

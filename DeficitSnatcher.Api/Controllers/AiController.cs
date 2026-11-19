@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DeficitSnatcher.Api.Controllers;
 
 public sealed record AiStatus(bool HasKey, bool Enabled, string Model);
-public sealed record AiSetupRequest(string Url, int ProductId, int? SiteId, string? Cookies);
+public sealed record AiSetupRequest(string Url, int ProductId, int? SiteId, string? Cookies, bool RunOnPc = false);
 public sealed record AiCallDto(long Id, DateTimeOffset At, string Purpose, int? SiteId, string? SiteName, int? PurchaseId, string Model,
     int InputTokens, int OutputTokens, int DurationMs, bool Ok, string Summary);
 
@@ -42,9 +42,14 @@ public sealed class AiController(AppDbContext db, OpenAiClient ai, PageSetup set
                 : null;
         try
         {
-            return await setup.SuggestAsync(uri.ToString(), product, SiteCookies.Parse(cookiesText, uri.ToString()), request.SiteId, "setup", ct);
+            return await setup.SuggestAsync(uri.ToString(), product, SiteCookies.Parse(cookiesText, uri.ToString()), request.SiteId, "setup", ct,
+                request.RunOnPc);
         }
         catch (OpenAiClient.AiException e)
+        {
+            return Problem(e.Message, statusCode: 400);
+        }
+        catch (PcHelperException e)
         {
             return Problem(e.Message, statusCode: 400);
         }

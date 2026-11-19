@@ -57,10 +57,10 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             await db.SaveChangesAsync(CancellationToken.None);
             log.LogInformation("Check of {Site} failed: {Error}", site.Name, message);
             if (settings.ScanSnapshots != "Off")
-                followUp.Snapshot(failed.Id, site.Url, site.CookiesEncrypted, "The check failed", null, null);
+                followUp.Snapshot(failed.Id, site.Url, site.CookiesEncrypted, "The check failed", null, null, site.RunOnPc);
             // Keeps failing in a way a different reader might get past (blocked, timed out, changed page), not a dead link.
             // (Not when the store's bot protection blocks it: re-reading the page can't get past that.)
-            if (site.ConsecutiveErrors >= 3 && !message.Contains("404") && e is not BlockedException)
+            if (site.ConsecutiveErrors >= 3 && !message.Contains("404") && e is not (BlockedException or PcHelperException))
                 await followUp.MaybeRelearnAsync(site.Id, $"{site.ConsecutiveErrors} checks in a row failed ({message})");
             if (site.ConsecutiveErrors == settings.ErrorThreshold)
                 await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning,
@@ -122,7 +122,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             : site.UnreadableCount > 0 ? "No price or stock found"
             : null;
         if (reason != null && settings.ScanSnapshots != "Off")
-            followUp.Snapshot(scan.Id, site.Url, site.CookiesEncrypted, reason, result.Source, result.SourceType);
+            followUp.Snapshot(scan.Id, site.Url, site.CookiesEncrypted, reason, result.Source, result.SourceType, site.RunOnPc);
         if (site.UnreadableCount >= 3)
             await followUp.MaybeRelearnAsync(site.Id, $"{site.UnreadableCount} checks in a row found {(result.Price == null ? "no price" : "no stock")}");
 

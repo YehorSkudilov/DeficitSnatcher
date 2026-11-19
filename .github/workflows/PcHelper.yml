@@ -1,0 +1,37 @@
+name: PC helper
+
+# Builds the PC helper (DeficitSnatcher.Runner) for Windows, Mac and Linux, and puts the zips on the "pc-helper" release,
+# where the site's Settings → PC helper links to.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["DeficitSnatcher.Runner/**", ".github/workflows/PcHelper.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Build
+        run: |
+          set -e
+          mkdir -p dist
+          for rid in win-x64 osx-arm64 osx-x64 linux-x64; do
+            dotnet publish DeficitSnatcher.Runner/DeficitSnatcher.Runner.csproj -c Release -r $rid --self-contained -o out/$rid
+            (cd out/$rid && zip -qr ../../dist/DeficitSnatcher-PC-helper-$rid.zip .)
+          done
+          ls -la dist
+      - name: Publish to the pc-helper release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view pc-helper >/dev/null 2>&1 || gh release create pc-helper --title "PC helper" --latest=false \
+            --notes "The PC helper for stores that block servers (Walmart). Download the zip for your computer, unzip, and start DeficitSnatcher.Runner with --site and --key (see the site: Settings → PC helper)."
+          gh release upload pc-helper dist/*.zip --clobber

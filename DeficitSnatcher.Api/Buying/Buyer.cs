@@ -17,7 +17,7 @@ namespace DeficitSnatcher.Api.Buying;
 /// one lock, so two sites coming into stock together can't buy more than the product's limit between them.
 /// </summary>
 public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore settingsStore, SecretBox box, BrowserPool browsers,
-    Notifier notifier, Ai.OpenAiClient ai, Ai.CheckoutAgent agent, ILogger<Buyer> log)
+    Notifier notifier, Ai.OpenAiClient ai, Ai.CheckoutAgent agent, Pc.HumanCheck humanCheck, ILogger<Buyer> log)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -181,8 +181,12 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
 
             var cookies = site.CookiesEncrypted == null ? [] : SiteCookies.Parse(box.Decrypt(site.CookiesEncrypted), site.Url);
             Log($"Opening a browser ({cookies.Count} cookies, user agent: {settings.UserAgent})");
-            await using var context = await browsers.NewContextAsync(settings, cookies, CancellationToken.None);
-            var page = await context.NewPageAsync();
+            await using var lease = await browsers.OpenAsync(settings, cookies, site.RunOnPc, CancellationToken.None);
+            var page = await lease.NewPageAsync();
+            if (lease.OnPc)
+                Log("Running in Chrome on your PC (PC helper).");
+            else if (site.RunOnPc)
+                Log("The PC helper isn't connected: running on the server instead.");
             page.Console += (_, m) =>
             {
                 if (m.Type is "error" or "warning")
@@ -218,6 +222,9 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                     string? stepError = null;
                     try
                     {
+                        // On the PC: a store's human check is for the owner to do (they're alerted); wait for it.
+                        if (lease.OnPc)
+                            await humanCheck.WaitIfBlockedAsync(page, site.Id, site.Name, CancellationToken.None);
                         await RunStepAsync(page, step, values);
                         stepStatus = "ok";
                         if (step.Value?.Contains("{{card.", StringComparison.OrdinalIgnoreCase) == true)
@@ -226,7 +233,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                             finalRan = true;
                         Log($"{index + 1}. {(byAi ? "[AI] " : "")}{description}: ok ({watch.ElapsedMilliseconds} ms) on {NoQuery(page.Url)}");
                     }
-                    catch (Exception e) when (e is PlaywrightException or TimeoutException or InvalidOperationException)
+                    catch (Exception e) when (e is PlaywrightException or TimeoutException or InvalidOperationException or HttpRequestException)
                     {
                         stepError = redact(e.Message);
                         stepStatus = step.Optional ? "skipped" : "failed";

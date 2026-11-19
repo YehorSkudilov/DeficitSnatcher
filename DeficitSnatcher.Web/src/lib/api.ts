@@ -138,7 +138,21 @@ export type Site = {
   verdict: string;
   nextCheckAt: string | null;
   checking: boolean;
+  runOnPc: boolean;
 };
+
+export type CheckAllItem = {
+  siteId: number;
+  name: string;
+  price: number | null;
+  inStock: boolean | null;
+  match: boolean;
+  verdict: string | null;
+  error: string | null;
+  buyMessage: string | null;
+};
+
+export type RunnerStatus = { hasKey: boolean; connected: boolean; machine: string | null; browser: string | null; since: string | null; lastSeen: string | null };
 
 export type SiteInput = {
   productId: number;
@@ -157,6 +171,7 @@ export type SiteInput = {
   checkoutSteps: CheckoutStep[];
   /** null: keep the saved cookies; "": remove them. */
   cookies: string | null;
+  runOnPc: boolean;
 };
 
 export type PageResult = {

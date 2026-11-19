@@ -480,6 +480,9 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.Property<int>("ProductId")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("RunOnPc")
+                        .HasColumnType("boolean");
+
                     b.Property<decimal>("ShippingCost")
                         .HasPrecision(12, 2)
                         .HasColumnType("numeric(12,2)");

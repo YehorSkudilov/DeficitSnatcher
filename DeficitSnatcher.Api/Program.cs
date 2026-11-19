@@ -68,6 +68,9 @@ builder.Services.AddSingleton<SecretBox>();
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddHttpClient(nameof(Notifier), c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<Notifier>();
+// The PC helper on the owner's computer, for stores that block servers (Pc/).
+builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.RunnerHub>();
+builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.HumanCheck>();
 builder.Services.AddSingleton<BrowserPool>();
 // Timeouts are per request, from settings (PageFetcher).
 builder.Services.AddHttpClient<PageFetcher>(c => c.Timeout = Timeout.InfiniteTimeSpan)
@@ -139,11 +142,14 @@ using (var scope = app.Services.CreateScope())
 if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler();
 
+// The PC helper's sockets (keep-alive pings so proxies don't drop an idle one).
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(25) });
 app.UseCors();
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
 app.MapControllers();
+DeficitSnatcher.Api.Pc.RunnerEndpoints.Map(app);
 app.MapGet("/api/health", async (AppDbContext db, CancellationToken ct) =>
 {
     try

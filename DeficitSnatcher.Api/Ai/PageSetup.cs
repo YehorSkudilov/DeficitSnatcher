@@ -31,7 +31,7 @@ public sealed record SetupSuggestion(
 /// it has it, otherwise CSS selectors it picks from the rendered page), whether a browser is needed, and whether it's
 /// really the product. Every suggestion is checked before it's offered. Also re-learns a page that stopped reading.
 /// </summary>
-public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool browsers, SettingsStore settingsStore)
+public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool browsers, SettingsStore settingsStore, Pc.HumanCheck humanCheck)
 {
     private const string System = """
         You set up a price and stock tracker for one product page of an online store. You get the page's address, what an
@@ -96,12 +96,13 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
         """;
 
     public async Task<SetupSuggestion> SuggestAsync(string url, Product product, List<SiteCookie> cookies, int? siteId, string purpose,
-        CancellationToken ct)
+        CancellationToken ct, bool onPc = false)
     {
         var settings = await settingsStore.GetAsync(ct);
+        onPc = onPc && browsers.PcAvailable;
 
         // 1. What the automatic reader finds on its own (Shopify JSON, structured data).
-        var auto = new Site { Url = url, Kind = SiteKind.Auto, ProductId = product.Id };
+        var auto = new Site { Url = url, Kind = SiteKind.Auto, ProductId = product.Id, RunOnPc = onPc, Id = siteId ?? 0, Name = new Uri(url).Host };
         PageResult? baseline = null;
         string? httpError = null;
         try
@@ -113,12 +114,43 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
             httpError = e.Message.Split('\n')[0];
         }
 
+        // 1b. A store with built-in settings (Amazon): those, when they read the page (no AI needed).
+        if (StorePresets.For(url) is { } preset)
+        {
+            foreach (var kind in onPc ? [SiteKind.Browser] : new[] { preset.Kind, SiteKind.Browser })
+            {
+                var site = new Site
+                {
+                    Url = url, Kind = kind, ProductId = product.Id, RunOnPc = onPc, Id = siteId ?? 0, Name = preset.Name,
+                    PriceSelector = preset.Price, TitleSelector = preset.Title, InStockSelector = preset.InStock, OutOfStockText = preset.OutOfStockText,
+                };
+                try
+                {
+                    var r = await fetcher.FetchAsync(site, cookies, settings, ct);
+                    var s = new SetupSuggestion(preset.Name, kind, preset.Price, preset.Title, preset.InStock, preset.OutOfStockText,
+                        r.Title == null ? null : BuyRules.TitleMatches(product, r.Title, out _), preset.Notes, r, BuyRules.Evaluate(product, site, r), null);
+                    // Out of stock is a fine answer too: the price may simply not be shown then.
+                    if (r.InStock != null && (r.Price != null || r.InStock == false))
+                        return s with { RightProduct = s.RightProduct };
+                }
+                catch (BlockedException e)
+                {
+                    return new SetupSuggestion(preset.Name, kind, preset.Price, preset.Title, preset.InStock, preset.OutOfStockText, null,
+                        preset.Notes, null, null, e.Message);
+                }
+                catch (HttpRequestException)
+                {
+                    // Try the browser next.
+                }
+            }
+        }
+
         // 2. The page in a browser: text, candidate prices, buttons, screenshot.
         PageState state;
         JsonElement extra;
-        await using (var context = await browsers.NewContextAsync(settings, cookies, ct))
+        await using (var lease = await browsers.OpenAsync(settings, cookies, onPc, ct))
         {
-            var page = await context.NewPageAsync();
+            var page = await lease.NewPageAsync();
             await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });
             try
             {
@@ -127,6 +159,8 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
             catch (TimeoutException)
             {
             }
+            if (lease.OnPc)
+                await humanCheck.WaitIfBlockedAsync(page, siteId ?? 0, new Uri(url).Host, ct);
             state = await PageReader.ReadAsync(page, screenshot: true, ct);
             // Blocked in the browser too: there's nothing for the AI to read, so don't ask it.
             if (BlockDetector.Detect(await page.ContentAsync()) is { } vendor)
@@ -172,7 +206,7 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
             InStockSelector = S("inStockSelector"),
             OutOfStockText = S("outOfStockText"),
         };
-        if (!needsBrowser && httpError == null)
+        if (!needsBrowser && httpError == null && !onPc)
             candidates.Add(Copy(withSelectors, SiteKind.Html));
         candidates.Add(Copy(withSelectors, SiteKind.Browser));
 
@@ -180,6 +214,9 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
         foreach (var c in candidates)
         {
             c.ProductId = product.Id;
+            c.RunOnPc = onPc;
+            c.Id = siteId ?? 0;
+            c.Name = new Uri(url).Host;
             PageResult? result = null;
             string? error = null;
             try

@@ -1,6 +1,7 @@
 "use client";
 
-import { api, type Dashboard as DashboardData, type Product, type Settings, type Site } from "@/lib/api";
+import { useState } from "react";
+import { api, type CheckAllItem, type Dashboard as DashboardData, type ProbeResponse, type Product, type Settings, type Site } from "@/lib/api";
 import { ago, dateTime, host, money, until } from "@/lib/format";
 import { ErrorNote, LevelDot, PurchaseBadge, StockBadge, useAction, useData, useNow } from "./ui";
 import { go } from "./App";
@@ -10,9 +11,9 @@ export function Dashboard() {
   const sites = useData(() => api.get<Site[]>("/api/sites"), [], 5000);
   const products = useData(() => api.get<Product[]>("/api/products"), [], 15000);
   const arm = useAction();
-  const check = useAction();
   const now = useNow();
   const d = dash.data;
+  const [checked, setChecked] = useState<Record<number, RowResult>>({});
 
   const setArmed = async (armed: boolean) => {
     if (armed && !d?.dryRun && !confirm("Arm auto-buy for REAL purchases? Matches in your price range will be ordered and paid for.")) return;
@@ -20,8 +21,7 @@ export function Dashboard() {
     if (s) void dash.reload();
   };
 
-  const checkNow = async (id: number) => {
-    await check.run(() => api.post(`/api/sites/${id}/check`));
+  const refresh = () => {
     void sites.reload();
     void dash.reload();
   };
@@ -30,9 +30,12 @@ export function Dashboard() {
     <div className="stack" style={{ gap: 16 }}>
       <div className="page-head">
         <h1>Dashboard</h1>
-        {d && !d.trackingEnabled && <span className="badge warn">Tracking paused (Settings)</span>}
+        <div className="row">
+          {d && !d.trackingEnabled && <span className="badge warn">Tracking paused (Settings)</span>}
+          <CheckAllButton count={sites.data?.length ?? 0} currency={d?.currency} onDone={(items) => (setChecked(rowResults(items, d?.currency)), refresh())} />
+        </div>
       </div>
-      <ErrorNote error={dash.error || arm.error || check.error} />
+      <ErrorNote error={dash.error || arm.error} />
 
       {d && (
         <div className={`arm ${d.autoBuyArmed ? "on" : ""} ${d.dryRun ? "dry" : ""}`}>
@@ -82,7 +85,7 @@ export function Dashboard() {
               </a>
             </div>
           </div>
-          <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={d?.currency} now={now} onCheck={checkNow} busy={check.busy} />
+          <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={d?.currency} now={now} onChanged={refresh} results={checked} />
         </div>
       ))}
 
@@ -138,26 +141,94 @@ function Stat({ label, value, sub, tone }: { label: string; value: React.ReactNo
   );
 }
 
+export type RowResult = { ok: boolean; text: string };
+
+function describe(r: ProbeResponse | CheckAllItem, currency?: string): RowResult {
+  const error = r.error;
+  if (error) return { ok: false, text: error.length > 90 ? error.slice(0, 90) + "…" : error };
+  const price = "result" in r ? r.result?.price : r.price;
+  const inStock = "result" in r ? r.result?.inStock : r.inStock;
+  const match = "verdict" in r && typeof r.verdict === "object" ? r.verdict?.match : (r as CheckAllItem).match;
+  return {
+    ok: true,
+    text: `${money(price ?? null, currency)} · ${inStock === true ? "in stock" : inStock === false ? "out of stock" : "stock unknown"}${match ? " · IN RANGE" : ""}`,
+  };
+}
+
+/** Checks every page (of one product, or all) now, and says how it went. */
+export function CheckAllButton({ productId, count, onDone }: { productId?: number; count: number; currency?: string; onDone: (items: CheckAllItem[]) => void }) {
+  const run = useAction();
+  const [summary, setSummary] = useState<string | null>(null);
+  const checkAll = async () => {
+    setSummary(null);
+    const items = await run.run(() => api.post<CheckAllItem[]>(`/api/sites/check-all${productId ? `?productId=${productId}` : ""}`));
+    if (!items) return;
+    const inStock = items.filter((i) => i.inStock === true).length;
+    const inRange = items.filter((i) => i.match).length;
+    const failed = items.filter((i) => i.error).length;
+    setSummary(`${items.length} checked: ${inStock} in stock${inRange ? `, ${inRange} in range` : ""}${failed ? `, ${failed} failed` : ""}.`);
+    onDone(items);
+  };
+  return (
+    <span className="row" style={{ gap: 8 }}>
+      {summary && <span className="small muted">{summary}</span>}
+      {run.error && <span className="small" style={{ color: "var(--danger)" }}>{run.error}</span>}
+      <button className="btn small" disabled={run.busy || count === 0} onClick={checkAll}>
+        {run.busy ? (
+          <>
+            <span className="spin" /> Checking {count}…
+          </>
+        ) : (
+          "Check all"
+        )}
+      </button>
+    </span>
+  );
+}
+
+/** A product's pages with their latest check; each row's Check button checks that page now and shows what it found. */
 export function SiteTable({
   sites,
   currency,
   now,
-  onCheck,
-  busy,
+  onChanged,
+  results: outside,
 }: {
   sites: Site[];
   currency?: string;
   now: number;
-  onCheck: (id: number) => void;
-  busy: boolean;
+  onChanged: () => void;
+  /** Results of a Check all, shown on the rows. */
+  results?: Record<number, RowResult>;
 }) {
-  if (sites.length === 0) return <p className="muted">No sites yet. Add the product pages of the stores that sell it.</p>;
+  const [checking, setChecking] = useState<Set<number>>(new Set());
+  const [results, setResults] = useState<Record<number, RowResult>>({});
+  const shown = { ...outside, ...results };
+
+  const check = async (id: number) => {
+    setChecking((c) => new Set(c).add(id));
+    try {
+      const r = await api.post<ProbeResponse>(`/api/sites/${id}/check`);
+      setResults((x) => ({ ...x, [id]: describe(r, currency) }));
+    } catch (e) {
+      setResults((x) => ({ ...x, [id]: { ok: false, text: e instanceof Error ? e.message : String(e) } }));
+    } finally {
+      setChecking((c) => {
+        const n = new Set(c);
+        n.delete(id);
+        return n;
+      });
+      onChanged();
+    }
+  };
+
+  if (sites.length === 0) return <p className="muted">No pages yet. Add the product pages of the stores that sell it.</p>;
   return (
     <div className="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Site</th>
+            <th>Page</th>
             <th>Price</th>
             <th>Stock</th>
             <th>Verdict</th>
@@ -175,6 +246,7 @@ export function SiteTable({
                     {s.name}
                   </b>
                   {s.autoBuy && <span className="badge bad">Auto-buy</span>}
+                  {s.runOnPc && <span className="badge info">PC</span>}
                   {!s.enabled && <span className="badge">Off</span>}
                 </div>
                 <div className="faint small">{host(s.url)}</div>
@@ -189,19 +261,30 @@ export function SiteTable({
               <td className="small" style={{ maxWidth: 280 }}>
                 {s.match ? <span className="badge good">BUY ZONE</span> : <span className="muted">{s.lastError ?? s.verdict}</span>}
               </td>
-              <td className="small muted">{s.checking ? "checking…" : ago(s.lastCheckedAt, now)}</td>
+              <td className="small muted">{s.checking || checking.has(s.id) ? "checking…" : ago(s.lastCheckedAt, now)}</td>
               <td className="small muted">{s.enabled ? until(s.nextCheckAt, now) : "—"}</td>
-              <td>
+              <td style={{ minWidth: 120 }}>
                 <button
                   className="btn small"
-                  disabled={busy}
+                  disabled={checking.has(s.id)}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onCheck(s.id);
+                    void check(s.id);
                   }}
                 >
-                  Check
+                  {checking.has(s.id) ? (
+                    <>
+                      <span className="spin" /> Checking
+                    </>
+                  ) : (
+                    "Check"
+                  )}
                 </button>
+                {shown[s.id] && (
+                  <div className="small" style={{ marginTop: 4, color: shown[s.id].ok ? "var(--text-2)" : "var(--danger)", maxWidth: 220 }}>
+                    {shown[s.id].text}
+                  </div>
+                )}
               </td>
             </tr>
           ))}
@@ -209,4 +292,9 @@ export function SiteTable({
       </table>
     </div>
   );
+}
+
+/** Check all's results by page, for the rows. */
+export function rowResults(items: CheckAllItem[], currency?: string): Record<number, RowResult> {
+  return Object.fromEntries(items.map((i) => [i.siteId, describe(i, currency)]));
 }
