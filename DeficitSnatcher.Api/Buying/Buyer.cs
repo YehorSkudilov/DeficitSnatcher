@@ -426,7 +426,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
             PurchaseStatus.DryRun => NotifyKind.DryRun,
             _ => NotifyKind.NotBought,
         };
-        await notifier.NotifyAsync(kind, level, text, site.Id, link ?? site.Url);
+        await notifier.NotifyAsync(kind, level, text, site.Id, site.Url, link);
     }
 
     public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);

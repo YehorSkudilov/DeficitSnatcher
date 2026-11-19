@@ -22,6 +22,9 @@ public sealed record BotSettings
     public int DefaultIntervalSeconds { get; init; } = 60;
     /// <summary>Each wait is randomly up to this much longer or shorter, so checks don't land on a fixed beat.</summary>
     public int JitterPercent { get; init; } = 20;
+    /// <summary>A page that keeps failing (3+ in a row) is checked less often, up to 5× its interval. Off: every page keeps
+    /// its own interval whatever happens.</summary>
+    public bool SlowDownFailingPages { get; init; }
     /// <summary>Two checks of the same host are at least this far apart.</summary>
     public int MinSecondsPerHost { get; init; } = 10;
     public int MaxConcurrentChecks { get; init; } = 4;

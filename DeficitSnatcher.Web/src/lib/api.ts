@@ -373,6 +373,7 @@ export type Settings = {
   trackingEnabled: boolean;
   defaultIntervalSeconds: number;
   jitterPercent: number;
+  slowDownFailingPages: boolean;
   minSecondsPerHost: number;
   maxConcurrentChecks: number;
   requestTimeoutSeconds: number;

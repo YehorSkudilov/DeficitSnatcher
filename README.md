@@ -65,11 +65,14 @@ Never for going out of stock. A store's human check on your PC always alerts you
 Pages with **Run on my PC** are checked and bought there (checks, checkouts, screenshots, AI auto-fill all work the same);
 while the helper isn't connected they're checked from the server as usual (Walmart sometimes answers).
 
-1. Download the zip for your computer from the [pc-helper release](../../releases/tag/pc-helper) (built by the
-   *PC helper* workflow) and unzip it.
-2. On the site: Settings → PC helper → Make a key.
-3. Run it once with `DeficitSnatcher.Runner --site https://your-site --key dsr_…` (remembered; afterwards just run it).
-   A Chrome window opens with its own profile: sign in to Walmart there once.
+1. Settings → PC helper → **Download** (the right zip for your computer, from the
+   [pc-helper release](../../releases/tag/pc-helper)) and unzip it.
+2. Same card → **Make a setup code** (the site's address and a key in one), and copy it.
+3. Double-click `DeficitSnatcher.Runner` and paste the code. It installs itself (in your user folder), starts in the
+   background and again at every login; its Chrome opens once to sign in to the stores, then stays minimised.
+
+Commands, in a new terminal: `deficitsnatcher status | stop | start | restart | window show | window hide |
+autostart on|off | headless on|off | setup <code> | logs | uninstall`.
 
 It only connects out to the site (WebSocket through `/api`); nothing on the PC listens to the network. If a store shows
 its human check (Walmart's Press & Hold), you get an alert, do it in that window, and the bot carries on (it waits 2

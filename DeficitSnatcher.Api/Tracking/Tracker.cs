@@ -111,7 +111,7 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
                 }
                 finally
                 {
-                    _nextDue[id] = DateTimeOffset.UtcNow + NextWait(interval, settings.JitterPercent, errors);
+                    _nextDue[id] = DateTimeOffset.UtcNow + NextWait(interval, settings.JitterPercent, settings.SlowDownFailingPages ? errors : 0);
                     _running.TryRemove(id, out _);
                 }
             }, CancellationToken.None);

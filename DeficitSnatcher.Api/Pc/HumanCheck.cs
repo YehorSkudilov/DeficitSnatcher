@@ -30,6 +30,22 @@ public sealed class HumanCheck(Notifier notifier)
         if (vendor == null)
             return;
 
+        // Up from minimised, in front, on the store's tab.
+        try
+        {
+            var cdp = await page.Context.NewCDPSessionAsync(page);
+            var window = await cdp.SendAsync("Browser.getWindowForTarget");
+            if (window is { } w && w.TryGetProperty("windowId", out var id))
+                await cdp.SendAsync("Browser.setWindowBounds", new Dictionary<string, object>
+                {
+                    ["windowId"] = id.GetInt32(),
+                    ["bounds"] = new Dictionary<string, object> { ["windowState"] = "normal" },
+                });
+            await cdp.DetachAsync();
+        }
+        catch (PlaywrightException)
+        {
+        }
         try
         {
             await page.BringToFrontAsync();
