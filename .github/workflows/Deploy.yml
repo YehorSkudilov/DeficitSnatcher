@@ -85,12 +85,17 @@ jobs:
 
             echo "Waiting for the site and the API..."
             PORT=$(grep '^WEB_PORT=' .env | cut -d= -f2)
-            for i in $(seq 1 60); do
+            for i in $(seq 1 90); do
               if curl -fsS "http://127.0.0.1:$PORT/api/health" > /dev/null; then echo "Up."; break; fi
-              if [ "$i" = 60 ]; then
-                echo "::error::Not healthy after 2 minutes. Recent logs:"
-                docker compose ps
-                docker compose logs --tail 150 api web
+              if [ "$i" = 90 ]; then
+                echo "::error::Not healthy after 3 minutes. Containers and recent logs:"
+                docker compose ps -a
+                echo "----- db -----"
+                docker compose logs --tail 80 db
+                echo "----- api -----"
+                docker compose logs --tail 60 api
+                echo "----- web -----"
+                docker compose logs --tail 20 web
                 exit 1
               fi
               sleep 2

@@ -101,7 +101,21 @@ if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Databas
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    // The database may still be starting (or restarting): wait for it a while rather than crash on the first try.
+    var startLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+    for (var attempt = 1; ; attempt++)
+    {
+        try
+        {
+            db.Database.Migrate();
+            break;
+        }
+        catch (Exception e) when (attempt < 30 && e is Npgsql.NpgsqlException or System.Net.Sockets.SocketException or TimeoutException)
+        {
+            startLog.LogWarning("Database not reachable yet (try {Attempt} of 30): {Error}", attempt, e.Message);
+            await Task.Delay(TimeSpan.FromSeconds(3));
+        }
+    }
     await Seed.RunAsync(db);
 }
 
