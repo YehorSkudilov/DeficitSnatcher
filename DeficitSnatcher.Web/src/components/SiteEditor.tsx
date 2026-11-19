@@ -151,6 +151,11 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
     );
     if (!r) return;
     setSuggestion(r);
+    // Blocked: nothing was read, so nothing to fill in (only the store's name).
+    if (!r.result && r.error) {
+      if (!form.name && r.name) set({ name: r.name });
+      return;
+    }
     setForm({
       ...form,
       name: form.name || r.name || form.name,
@@ -267,15 +272,17 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
         {aiOff && <div className="faint small">{aiOff}</div>}
         <ErrorNote error={aiAction.error} />
         {suggestion && (
-          <div className={`notice ${suggestion.rightProduct === false ? "bad" : suggestion.works ? "good" : "warn"}`}>
+          <div className={`notice ${suggestion.rightProduct === false || (!suggestion.result && suggestion.error) ? "bad" : suggestion.works ? "good" : "warn"}`}>
             <b>
-              {suggestion.rightProduct === false
-                ? "The AI thinks this isn't the right product."
-                : suggestion.works
-                  ? "Filled in by the AI, and a check with these settings worked."
-                  : "Filled in by the AI, but a check with these settings didn't find everything."}
+              {!suggestion.result && suggestion.error
+                ? "The store blocked the page, so nothing could be filled in."
+                : suggestion.rightProduct === false
+                  ? "The AI thinks this isn't the right product."
+                  : suggestion.works
+                    ? "Filled in by the AI, and a check with these settings worked."
+                    : "Filled in by the AI, but a check with these settings didn't find everything."}
             </b>{" "}
-            {suggestion.notes} Review, then Save.
+            {!suggestion.result && suggestion.error ? suggestion.error : `${suggestion.notes} Review, then Save.`}
           </div>
         )}
         <div className="fields">
