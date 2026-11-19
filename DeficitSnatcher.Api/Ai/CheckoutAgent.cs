@@ -59,7 +59,9 @@ public sealed partial class CheckoutAgent(OpenAiClient ai)
           "status": "act" | "done" | "stuck",
           "note": "one short sentence: what you see and why this action",
           "action": { "type": "click|fill|type|select|check|press|goto|wait", "element": "e12", "value": "...", "final": false },
-          "orderTotal": null
+          "orderTotal": null,
+          "orderQuantity": null,
+          "otherItems": null
         }
 
         Rules:
@@ -68,13 +70,15 @@ public sealed partial class CheckoutAgent(OpenAiClient ai)
           an option by its visible text; check ticks a checkbox; press sends a key (value like "Enter") to the element.
         - Never type personal or payment details yourself. Use these placeholders as the value, exactly: {placeholders}.
           Combine them when a field needs it (e.g. "{{card.expiryMonth}}/{{card.expiryYear2}}").
-        - Put the item in the cart (quantity {quantity}), go to checkout, check out as a guest unless already signed in, fill the
+        - Put exactly {quantity} of the item in the cart, never more. If the cart already holds more of it (from an earlier
+          attempt) or other items, remove them or lower the quantity first. Then go to checkout, check out as a guest unless already signed in, fill the
           contact, shipping and payment details, choose the cheapest standard shipping, accept required terms, and close
           cookie banners or pop-ups that block the page.
         - Make sure the item is the right product: {product}. If the page is for something else, or it's sold out, answer
           "stuck" and say so.
         - "final": true only on the one action that places or pays for the order (Place order, Pay now, Complete purchase,
-          Submit order). On that action, also give "orderTotal": the order's grand total as shown on the page, a number.
+          Submit order). On that action, also give "orderTotal": the order's grand total as shown on the page (a number),
+          "orderQuantity": how many of the product the order contains, and "otherItems": true if anything else is in it.
         - After the order is placed, answer "done" once you see the confirmation (order number, thank you).
         - If something fails, look at the error and try another way (another element, close a pop-up, scroll by waiting).
           Answer "stuck" with the reason if you can't go on (captcha, sign-in required, the item can't be added).
@@ -175,8 +179,18 @@ public sealed partial class CheckoutAgent(OpenAiClient ai)
                     return new(End.DryRunStop, "The AI went through the checkout up to placing the order (dry run): " + note, steps, false);
                 }
                 var total = answer.TryGetProperty("orderTotal", out var t) ? Number(t) : null;
+                var quantity = answer.TryGetProperty("orderQuantity", out var oq) ? Number(oq) : null;
+                var others = answer.TryGetProperty("otherItems", out var oi) && oi.ValueKind == JsonValueKind.True;
                 if (total == null)
                     return new(End.PriceCheckFailed, "Not placing the order: the AI couldn't read the order total on the page.", steps, false);
+                if (quantity == null || quantity > goal.Quantity || quantity < 1)
+                    return new(End.PriceCheckFailed,
+                        quantity == null
+                            ? "Not placing the order: the AI couldn't tell how many are in it."
+                            : $"Not placing the order: it has {quantity} of the product, but only {goal.Quantity} may be bought.",
+                        steps, false);
+                if (others)
+                    return new(End.PriceCheckFailed, "Not placing the order: it has other items in it too.", steps, false);
                 if (total > goal.MaxTotal)
                     return new(End.PriceCheckFailed,
                         $"Not placing the order: the total is {total:0.00} {goal.Currency}, over the limit of {goal.MaxTotal:0.00} (maximum price plus tax).",
@@ -207,6 +221,55 @@ public sealed partial class CheckoutAgent(OpenAiClient ai)
                 return new(finalExecuted ? End.Uncertain : End.Stuck, $"Four actions in a row failed; last: {error?.Split('\n')[0]}", steps, finalExecuted);
         }
         return new(finalExecuted ? End.Uncertain : End.Stuck, $"The AI used all {maxActions} actions without finishing.", steps, finalExecuted);
+    }
+
+    public sealed record OrderCheck(bool Ok, string Message);
+
+    private const string CheckSystem = """
+        You check an online store's order review page just before the order is placed. Read the order as shown and answer
+        with JSON only:
+        { "orderTotal": 0.0, "orderQuantity": 0, "otherItems": false, "note": "what the order contains, briefly" }
+        orderTotal: the grand total (with tax and shipping) as a number, or null if the page doesn't show one. orderQuantity: how
+        many of the wanted product the order contains, or null if you can't tell. otherItems: true if anything else is in it.
+        """;
+
+    /// <summary>
+    /// Before a saved checkout's final step places a real order: the AI reads the order off the page, and it must hold only
+    /// the wanted product, at most the allowed number of it, for at most the allowed total.
+    /// </summary>
+    public async Task<OrderCheck> CheckOrderAsync(IPage page, Goal goal, bool sendScreenshot, int siteId, int purchaseId, CancellationToken ct)
+    {
+        var state = await PageReader.ReadAsync(page, sendScreenshot, ct);
+        var parts = new List<object>
+        {
+            OpenAiClient.Text($"Wanted: {goal.Quantity} × {goal.ProductName}. Allowed total: at most {goal.MaxTotal:0.00} {goal.Currency}.\n\n{state.Describe(6000)}"),
+        };
+        if (state.Screenshot != null)
+            parts.Add(OpenAiClient.Image(state.Screenshot));
+        JsonElement a;
+        try
+        {
+            a = await ai.AskJsonAsync("check-order", siteId, purchaseId, CheckSystem, parts, ct);
+        }
+        catch (OpenAiClient.AiException e)
+        {
+            return new(false, "The AI couldn't check the order: " + e.Message);
+        }
+        var total = a.TryGetProperty("orderTotal", out var t) ? Number(t) : null;
+        var quantity = a.TryGetProperty("orderQuantity", out var q) ? Number(q) : null;
+        var others = a.TryGetProperty("otherItems", out var o) && o.ValueKind == JsonValueKind.True;
+        var note = Str(a, "note") ?? "";
+        if (quantity == null)
+            return new(false, $"Couldn't tell how many are in the order. {note}");
+        if (quantity > goal.Quantity || quantity < 1)
+            return new(false, $"The order has {quantity} of the product; only {goal.Quantity} may be bought. {note}");
+        if (others)
+            return new(false, $"The order has other items in it too. {note}");
+        if (total == null)
+            return new(false, $"Couldn't read the order total. {note}");
+        if (total > goal.MaxTotal)
+            return new(false, $"The total is {total:0.00} {goal.Currency}, over the limit of {goal.MaxTotal:0.00}. {note}");
+        return new(true, $"{quantity} × {goal.ProductName}, total {total:0.00} {goal.Currency}: within limits. {note}");
     }
 
     private static string? Str(JsonElement e, string name) =>

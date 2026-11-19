@@ -286,6 +286,11 @@ function AiSettings({ s, set }: { s: Settings; set: (patch: Partial<Settings>) =
         </Field>
       </div>
       <div className="stack" style={{ gap: 8 }}>
+        <Check
+          label="Check the order before a real one is placed: only this product, no more than the units per order, total within the limit"
+          checked={s.aiCheckOrder}
+          onChange={(aiCheckOrder) => set({ aiCheckOrder })}
+        />
         <Check label="Fix broken checkouts: when a step fails, the AI takes over from that screen" checked={s.aiAutofixCheckout} onChange={(aiAutofixCheckout) => set({ aiAutofixCheckout })} />
         <Check label="Save the fix: the AI's steps replace the broken ones, so next time runs without the AI" checked={s.aiSaveFixedSteps} onChange={(aiSaveFixedSteps) => set({ aiSaveFixedSteps })} />
         <Check label="Pages without checkout steps are bought by the AI going through the checkout itself" checked={s.aiCheckoutWithoutSteps} onChange={(aiCheckoutWithoutSteps) => set({ aiCheckoutWithoutSteps })} />

@@ -298,12 +298,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
             onChange={(autoBuy) => set({ autoBuy })}
           />
         </div>
-        {form.autoBuy && (
-          <div className="notice warn small">
-            Buys only while auto-buy is armed on the Dashboard{settings.data?.dryRun ? " (dry run is on, so checkouts stop before placing the order)" : ""}, up to the
-            product&apos;s units in all and the total budget. Set up the checkout below and test it with a dry run first.
-          </div>
-        )}
+        {form.autoBuy && settings.data && <AutoBuyNotice settings={settings.data} product={products.data?.find((p) => p.id === form.productId)} />}
       </div>
 
       <div className="card stack">
@@ -626,6 +621,41 @@ function History({ siteId, min, max, currency }: { siteId: number; min?: number;
         </select>
       </div>
       {chart}
+    </div>
+  );
+}
+
+/** What auto-buy on this page will do right now: real orders, dry runs, or nothing (follows Settings and the Dashboard switch). */
+function AutoBuyNotice({ settings, product }: { settings: Settings; product?: Product }) {
+  const limits = product
+    ? `at most ${product.maxQuantity - product.bought} more ${product.name} (${product.bought} of ${product.maxQuantity} bought, ${product.quantityPerOrder} per order)` +
+      (settings.totalBudget > 0 ? `, within the total budget of ${money(settings.totalBudget, settings.currency)}` : "")
+    : "up to the product's units in all and the total budget";
+  if (!settings.autoBuyArmed)
+    return (
+      <div className="notice small">
+        <b>Auto-buy is off on the Dashboard:</b> when this page is in stock in range you&apos;re notified, but nothing is bought. Arm it on the
+        Dashboard to buy.
+      </div>
+    );
+  if (settings.dryRun)
+    return (
+      <div className="notice warn small">
+        <b>Armed, in dry run:</b> when this page is in stock in range, the checkout runs up to placing the order, then stops. Nothing is
+        bought. Turn dry run off in Settings to buy for real.
+      </div>
+    );
+  if (product && product.bought >= product.maxQuantity)
+    return (
+      <div className="notice good small">
+        <b>Armed for real, but done:</b> {product.bought} of {product.maxQuantity} {product.name} already bought, so nothing more is bought.
+        Raise &quot;Units to buy in all&quot; on the product to buy more.
+      </div>
+    );
+  return (
+    <div className="notice bad small">
+      <b>Armed for real:</b> when this page is in stock in range, it&apos;s ordered and paid for right away, {limits}.
+      {settings.aiEnabled && settings.aiCheckOrder && " The AI checks the order (only this product, the right quantity, the total) before it's placed."}
     </div>
   );
 }

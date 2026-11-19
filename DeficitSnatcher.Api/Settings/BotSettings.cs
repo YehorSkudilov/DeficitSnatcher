@@ -63,6 +63,9 @@ public sealed record BotSettings
     /// <summary>Before the AI places a real order it must read the order total; it may be at most the product's maximum
     /// (times units) plus this much tax and fees.</summary>
     public int MaxTaxPercent { get; init; } = 15;
+    /// <summary>Before a saved checkout's final step places a real order, the AI reads the order: only the product, at most
+    /// the units per order, total within the limit. Off: saved steps place the order without that check.</summary>
+    public bool AiCheckOrder { get; init; } = true;
 
     // Notifications
     public string DiscordWebhookUrl { get; init; } = "";

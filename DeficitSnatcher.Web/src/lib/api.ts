@@ -378,6 +378,7 @@ export type Settings = {
   aiMaxActions: number;
   aiSendScreenshots: boolean;
   maxTaxPercent: number;
+  aiCheckOrder: boolean;
   discordWebhookUrl: string;
   telegramBotToken: string;
   telegramChatId: string;

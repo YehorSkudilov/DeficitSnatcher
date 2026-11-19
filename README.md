@@ -47,6 +47,9 @@ Chromium (goto, click, fill, select, type, wait, expectText…), filling in the 
 
 - **Dry run** (on by default) runs every step up to the final one, then stops. Test each store with it first.
 - Before every purchase, under one lock: armed, units left for the product, total budget, retry wait per site.
+- Before the saved steps place a real order, the AI reads the order review page (Settings → AI, on by default): only
+  this product, at most the units per order, total within the maximum plus tax. A cart still holding the console from
+  an earlier attempt is refused instead of paying for two. The AI's own checkouts check the same before placing.
 - A real checkout cut off by a restart is **Interrupted** and keeps counting against the limits until you mark it
   as not bought, so a restart can never cause a second order.
 - Card number and CVV are masked in every log, error and saved page; screenshots, page HTML, the card, cookies and

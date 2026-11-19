@@ -250,6 +250,13 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                     return Task.CompletedTask;
                 }
 
+                Ai.CheckoutAgent.Goal MakeGoal(string situation) => new(
+                    product.Name, site.Url, product.QuantityPerOrder,
+                    Math.Round(product.MaxPrice * product.QuantityPerOrder * (1 + settings.MaxTaxPercent / 100m), 2),
+                    settings.Currency, dryRun,
+                    values.Where(v => v.Value.Length > 0 && v.Key is not ("url" or "origin" or "price" or "variantId" or "quantity")).Select(v => v.Key).ToList(),
+                    situation);
+
                 // 1. The saved steps.
                 int? brokeAt = null;
                 string? brokeError = null;
@@ -261,6 +268,22 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                         await RecordNotRun(step, false, null);
                         (status, message) = (PurchaseStatus.DryRun, $"Dry run reached step {i + 1} ({step.Action}) without errors; the order wasn't placed.");
                         break;
+                    }
+                    // A real order: the AI reads it first. Only the product, no more than allowed, total within the limit
+                    // (a cart can still hold the item from an earlier attempt, and this would pay for both).
+                    if (step.Final && !dryRun && aiAvailable && settings.AiCheckOrder)
+                    {
+                        var check = await agent.CheckOrderAsync(page, MakeGoal(""), settings.AiSendScreenshots && !cardTyped, site.Id, purchaseId,
+                            CancellationToken.None);
+                        Log($"{records.Count + 1}. [AI] Order check: {(check.Ok ? "ok" : "REFUSED")}: {check.Message}");
+                        records.Add(new(records.Count, "check-order", "AI checks the order before it's placed", check.Ok ? "ok" : "failed",
+                            DateTimeOffset.UtcNow, null, NoQuery(page.Url), check.Ok ? null : check.Message, null, false, false, true, check.Message));
+                        if (!check.Ok)
+                        {
+                            (status, message) = (PurchaseStatus.Failed, "Not placing the order: " + check.Message);
+                            error = $"Order check before step {i + 1} ({Describe(step, values)}):\n{check.Message}";
+                            break;
+                        }
                     }
                     var (ok, stepError) = await RunOne(step, false, null);
                     if (!ok)
@@ -290,12 +313,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                         await RunOne(new CheckoutStep { Action = "goto", Value = "{{url}}", Note = "Open the product page" }, true, "Open the product page");
                     Log(aiFromStart ? "The AI goes through the checkout." : $"The AI takes over after step {brokeAt + 1} broke.");
 
-                    var goal = new Ai.CheckoutAgent.Goal(
-                        product.Name, site.Url, product.QuantityPerOrder,
-                        Math.Round(product.MaxPrice * product.QuantityPerOrder * (1 + settings.MaxTaxPercent / 100m), 2),
-                        settings.Currency, dryRun,
-                        values.Where(v => v.Value.Length > 0 && v.Key is not ("url" or "origin" or "price" or "variantId" or "quantity")).Select(v => v.Key).ToList(),
-                        situation);
+                    var goal = MakeGoal(situation);
                     var result = await agent.RunAsync(page, goal,
                         (step, note) => RunOne(step, true, note),
                         (step, note) => RecordNotRun(step, true, note),
