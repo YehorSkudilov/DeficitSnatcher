@@ -24,7 +24,6 @@ jobs:
           command_timeout: 30m
           script: |
             set -e
-            echo "Deploying Deficit Snatcher ${{ github.sha }}..."
 
             # The first deploy clones the repository; later ones move it to this commit.
             DIR=/opt/DeficitSnatcher
@@ -33,9 +32,12 @@ jobs:
             fi
             cd "$DIR"
             git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-            git fetch origin
-            git reset --hard ${{ github.sha }}
+            # Always the newest main, even when this is a re-run of an older run (a re-run keeps its old commit).
+            git fetch origin main
+            git reset --hard origin/main
             git remote set-url origin "https://github.com/${{ github.repository }}.git"
+            SHA=$(git rev-parse HEAD)
+            echo "Deploying Deficit Snatcher $SHA: $(git log -1 --format=%s)"
 
             # Every setting - see .env.example. The one login is APP_USERNAME / APP_PASSWORD.
             echo "Writing .env..."
@@ -63,9 +65,8 @@ jobs:
             Logging__LogLevel__Microsoft.AspNetCore=Warning
             Logging__LogLevel__Microsoft.EntityFrameworkCore=Warning
             RateLimiting__AuthPerMinute=5
-
-            GIT_SHA=${{ github.sha }}
             ENVEOF
+            echo "GIT_SHA=$SHA" >> .env
             echo "BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> .env
             chmod 600 .env
 
@@ -96,4 +97,4 @@ jobs:
             done
 
             docker image prune -f || echo "Couldn't remove old images; skipped."
-            echo "Deployed ${{ github.sha }}."
+            echo "Deployed $SHA."
