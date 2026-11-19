@@ -116,6 +116,9 @@ public enum PurchaseStatus
     DryRun,
     Succeeded,
     Failed,
+    /// <summary>A real checkout cut off by a server restart: it may have gone through, so it counts against the limits
+    /// until it's marked as not bought.</summary>
+    Interrupted,
 }
 
 public class Purchase
@@ -129,10 +132,73 @@ public class Purchase
     public int Quantity { get; set; }
     public PurchaseStatus Status { get; set; }
     public string Message { get; set; } = "";
-    /// <summary>Each step as it ran.</summary>
+    public bool DryRun { get; set; }
+    /// <summary>Started from the web (Buy now / Dry-run checkout) rather than by a check.</summary>
+    public bool Manual { get; set; }
+    /// <summary>Why it ran: what the check saw and the limits at the time.</summary>
+    public string Context { get; set; } = "";
+    /// <summary>Each step as it ran (JSON array of Buying.StepRecord).</summary>
+    public string Steps { get; set; } = "[]";
+    /// <summary>Plain-text log of the whole checkout.</summary>
     public string Log { get; set; } = "";
-    /// <summary>The page at the end (PNG).</summary>
-    public byte[]? Screenshot { get; set; }
+    /// <summary>The full error of the step that failed (Playwright's call log included).</summary>
+    public string? Error { get; set; }
+    /// <summary>Browser console errors, failed requests and error responses during the checkout.</summary>
+    public string BrowserLog { get; set; } = "";
+    /// <summary>The page's HTML where the checkout ended (failed or not).</summary>
+    public string? PageHtml { get; set; }
+    /// <summary>Where it ended, without the query (which can hold what was typed).</summary>
+    public string? FinalUrl { get; set; }
+}
+
+/// <summary>A screenshot taken during a checkout: after a step, or of the whole page where it ended.</summary>
+public class PurchaseShot
+{
+    public long Id { get; set; }
+    public int PurchaseId { get; set; }
+    /// <summary>The step (0-based) it was taken after; null: the final full-page one.</summary>
+    public int? StepIndex { get; set; }
+    public string Label { get; set; } = "";
+    public string ContentType { get; set; } = "image/jpeg";
+    public byte[] Data { get; set; } = [];
+    public DateTimeOffset At { get; set; }
+}
+
+public enum ScanOutcome
+{
+    InStock,
+    OutOfStock,
+    /// <summary>The page was read but didn't say whether it can be bought.</summary>
+    Unknown,
+    /// <summary>The page couldn't be fetched or read.</summary>
+    Error,
+}
+
+/// <summary>One check of one site, kept whatever it found (the Scans page).</summary>
+public class Scan
+{
+    public long Id { get; set; }
+    public int SiteId { get; set; }
+    public int ProductId { get; set; }
+    public DateTimeOffset At { get; set; }
+    public int DurationMs { get; set; }
+    public ScanOutcome Outcome { get; set; }
+    public decimal? Price { get; set; }
+    /// <summary>Price plus the site's shipping: what's compared with the range.</summary>
+    public decimal? TotalPrice { get; set; }
+    public string? Title { get; set; }
+    /// <summary>In stock, the right title, in range.</summary>
+    public bool Match { get; set; }
+    /// <summary>Why it is or isn't a match.</summary>
+    public string Verdict { get; set; } = "";
+    public string? Error { get; set; }
+    /// <summary>Where the values came from on the page.</summary>
+    public string? Notes { get; set; }
+    /// <summary>What was done about it: a checkout started, or why not.</summary>
+    public string? Action { get; set; }
+    public int? PurchaseId { get; set; }
+    /// <summary>Started from the web (Check now) rather than on schedule.</summary>
+    public bool Manual { get; set; }
 }
 
 public enum EventLevel

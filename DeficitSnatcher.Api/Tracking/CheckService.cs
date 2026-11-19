@@ -13,9 +13,11 @@ namespace DeficitSnatcher.Api.Tracking;
 public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetcher, SettingsStore settingsStore, SecretBox box,
     Notifier notifier, Buyer buyer, ILogger<CheckService> log)
 {
-    public sealed record CheckOutcome(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage);
+    public sealed record CheckOutcome(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage, long? ScanId = null,
+        int? PurchaseId = null);
 
-    public async Task<CheckOutcome> CheckAsync(int siteId, CancellationToken ct)
+    /// <summary>Checks the site and keeps a scan of it, whatever it found. <paramref name="manual"/>: Check now on the web.</summary>
+    public async Task<CheckOutcome> CheckAsync(int siteId, CancellationToken ct, bool manual = false)
     {
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -25,6 +27,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         var product = site.Product;
         var settings = await settingsStore.GetAsync(ct);
         var now = DateTimeOffset.UtcNow;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
 
         PageResult result;
         try
@@ -38,13 +41,27 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             site.LastCheckedAt = now;
             site.LastError = message;
             site.ConsecutiveErrors++;
+            var failed = new Scan
+            {
+                SiteId = site.Id,
+                ProductId = product.Id,
+                At = now,
+                DurationMs = (int)watch.ElapsedMilliseconds,
+                Outcome = ScanOutcome.Error,
+                Verdict = "Check failed",
+                Error = Cut(message, 2000),
+                Notes = $"{site.Kind} · failed {site.ConsecutiveErrors} in a row",
+                Manual = manual,
+            };
+            db.Scans.Add(failed);
             await db.SaveChangesAsync(CancellationToken.None);
             log.LogInformation("Check of {Site} failed: {Error}", site.Name, message);
             if (site.ConsecutiveErrors == settings.ErrorThreshold)
                 await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning,
                     $"{site.Name} failed {site.ConsecutiveErrors} checks in a row: {message}", site.Id, site.Url);
-            return new(null, null, message, null);
+            return new(null, null, message, null, failed.Id);
         }
+        var duration = (int)watch.ElapsedMilliseconds;
 
         if (site.ConsecutiveErrors >= settings.ErrorThreshold)
             await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Info, $"{site.Name} is working again.", site.Id);
@@ -66,6 +83,24 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         site.LastVariantId = result.VariantId;
         site.LastError = null;
         site.ConsecutiveErrors = 0;
+
+        var scan = new Scan
+        {
+            SiteId = site.Id,
+            ProductId = product.Id,
+            At = now,
+            DurationMs = duration,
+            Outcome = result.InStock switch { true => ScanOutcome.InStock, false => ScanOutcome.OutOfStock, _ => ScanOutcome.Unknown },
+            Price = result.Price,
+            TotalPrice = result.Price is { } p ? p + site.ShippingCost : null,
+            Title = Cut(result.Title, 300),
+            Match = verdict.Match,
+            Verdict = Cut(verdict.Reason, 500) ?? "",
+            Notes = Cut(string.Join(" · ", new[] { site.Kind.ToString() }.Concat(result.Notes)
+                .Concat(result.VariantId != null ? [$"variant {result.VariantId}"] : [])), 1000),
+            Manual = manual,
+        };
+        db.Scans.Add(scan);
         await db.SaveChangesAsync(CancellationToken.None);
 
         var money = $"{settings.Currency}";
@@ -80,16 +115,29 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             await notifier.LogAsync(EventLevel.Info, $"{product.Name} at {site.Name} no longer a match: {verdict.Reason}.", site.Id);
 
         string? buyMessage = null;
-        if (verdict.Match && site.AutoBuy && product.Enabled)
+        int? purchaseId = null;
+        if (verdict.Match && !site.AutoBuy)
+            scan.Action = "Auto-buy is off for this site: only notified.";
+        else if (verdict.Match && site.AutoBuy && product.Enabled)
         {
-            var outcome = await buyer.BuyAsync(site.Id, verdict.TotalPrice!.Value, manual: false, forceDryRun: false, ct);
+            var trigger = $"{(manual ? "Check now" : "Scheduled check")} #{scan.Id} at {now:yyyy-MM-dd HH:mm:ss} UTC: {verdict.Reason}"
+                + $"\nListing: {result.Title} · price {result.Price:0.00}{(site.ShippingCost > 0 ? $" + {site.ShippingCost:0.00} shipping" : "")}"
+                + $"{(result.VariantId != null ? $" · variant {result.VariantId}" : "")} · read from {string.Join(", ", result.Notes)}";
+            var outcome = await buyer.BuyAsync(site.Id, verdict.TotalPrice!.Value, manual: false, forceDryRun: false, trigger, ct);
             buyMessage = outcome.Message;
+            purchaseId = outcome.PurchaseId;
+            scan.Action = Cut(outcome.Started ? outcome.Message : "Not buying: " + outcome.Message, 1000);
+            scan.PurchaseId = outcome.PurchaseId;
             // Why it didn't buy, once per time it comes into stock (not every check).
             if (!outcome.Started && !before.Match)
                 await notifier.LogAsync(EventLevel.Warning, $"Not buying at {site.Name}: {outcome.Message}", site.Id);
         }
-        return new(result, verdict, null, buyMessage);
+        if (scan.Action != null)
+            await db.SaveChangesAsync(CancellationToken.None);
+        return new(result, verdict, null, buyMessage, scan.Id, purchaseId);
     }
+
+    private static string? Cut(string? s, int n) => s == null ? null : s.Length > n ? s[..n] : s;
 
     /// <summary>Checks a site as set on the edit form, without saving anything: the form's Test button.</summary>
     public async Task<CheckOutcome> ProbeAsync(Site site, Product product, string? cookiesText, CancellationToken ct)

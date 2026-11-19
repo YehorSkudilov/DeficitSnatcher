@@ -56,6 +56,18 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
                 await db.PricePoints.Where(p => p.At < cutoff).ExecuteDeleteAsync(ct);
                 await db.Events.Where(e => e.At < cutoff).ExecuteDeleteAsync(ct);
             }
+            if (settings.ScanHistoryDays > 0)
+            {
+                var cutoff = DateTimeOffset.UtcNow.AddDays(-settings.ScanHistoryDays);
+                await db.Scans.Where(x => x.At < cutoff).ExecuteDeleteAsync(ct);
+            }
+            if (settings.CheckoutHistoryDays > 0)
+            {
+                // Screenshots go with them (cascade). Bought orders are kept: they count against the limits.
+                var cutoff = DateTimeOffset.UtcNow.AddDays(-settings.CheckoutHistoryDays);
+                await db.Purchases.Where(p => p.StartedAt < cutoff && !Buying.Buyer.CountsAsBought.Contains(p.Status))
+                    .ExecuteDeleteAsync(ct);
+            }
         }
 
         if (!settings.TrackingEnabled)

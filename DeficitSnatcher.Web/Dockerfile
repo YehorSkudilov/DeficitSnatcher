@@ -8,7 +8,7 @@ RUN npm ci
 
 COPY . .
 
-# The API it signs in to and calls, baked in at build time (see src/lib/api.ts).
+# Empty: the API is on this same site under /api (nginx.conf). Set only to call an API elsewhere.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build

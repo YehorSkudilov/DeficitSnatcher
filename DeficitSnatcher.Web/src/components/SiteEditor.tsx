@@ -153,10 +153,11 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
     if (dirty) return setNotice({ tone: "warn", text: "Save first: the checkout runs the saved steps." });
     if (!dryRun && !confirm(`Run the checkout for REAL at ${site?.name}? This places an order at ${money((site?.lastPrice ?? 0) + (site?.shippingCost ?? 0), currency)}.`)) return;
     const r = await action.run(() => api.post<BuyOutcome>(`/api/sites/${id}/buy`, { dryRun }));
+    if (r?.started && r.purchaseId) return go(`purchase/${r.purchaseId}`);
     if (r)
       setNotice(
         r.started
-          ? { tone: "good", text: `${r.message} Follow it on the Purchases page.` }
+          ? { tone: "good", text: `${r.message} Opening it…` }
           : { tone: "bad", text: r.message },
       );
   };
@@ -177,6 +178,16 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
           <h1>{id ? site?.name : "New site"}</h1>
           {site && <StockBadge site={site} />}
           {site?.match && <span className="badge good">BUY ZONE</span>}
+          {id && (
+            <a className="small" href={`#scans?site=${id}`}>
+              Scan history
+            </a>
+          )}
+          {id && (
+            <a className="small" href="#purchases">
+              Checkouts
+            </a>
+          )}
         </div>
         <div className="row">
           {id && (
@@ -286,7 +297,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
           <h2>Try the checkout</h2>
           <p className="muted small">
             A dry run goes through every step except the final ones (marked red), so you can see each step works without buying. The log and a
-            screenshot of where it stopped are on the Purchases page.
+            screenshot of every step open as soon as it starts.
           </p>
           <div className="row">
             <button className="btn" disabled={action.busy || form.checkoutSteps.length === 0} onClick={() => buy(true)}>

@@ -123,7 +123,7 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
     [HttpPost("{id:int}/check")]
     public async Task<ProbeResponse> CheckNow(int id, CancellationToken ct)
     {
-        var o = await checks.CheckAsync(id, ct);
+        var o = await checks.CheckAsync(id, ct, manual: true);
         return new(o.Result, o.Verdict, o.Error, o.BuyMessage);
     }
 
@@ -151,7 +151,10 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
         if (!request.DryRun && site.LastPrice == null)
             return Problem("No price seen yet: check the site first.", statusCode: StatusCodes.Status400BadRequest);
         var price = (site.LastPrice ?? 0) + site.ShippingCost;
-        return await buyer.BuyAsync(id, price, manual: true, forceDryRun: request.DryRun, ct);
+        var trigger = $"Started by hand from the web ({(request.DryRun ? "Dry-run checkout" : "Buy now")}) at {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC"
+            + $"\nLast seen: {site.LastTitle ?? "—"} · price {site.LastPrice:0.00}{(site.ShippingCost > 0 ? $" + {site.ShippingCost:0.00} shipping" : "")}"
+            + $" · {(site.LastInStock == true ? "in stock" : site.LastInStock == false ? "out of stock" : "stock unknown")}, checked {site.LastCheckedAt:yyyy-MM-dd HH:mm:ss} UTC";
+        return await buyer.BuyAsync(id, price, manual: true, forceDryRun: request.DryRun, trigger, ct);
     }
 
     [HttpGet("{id:int}/history")]

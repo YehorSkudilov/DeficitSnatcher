@@ -18,8 +18,9 @@ using Microsoft.IdentityModel.Tokens;
 if (args is ["install-browser", ..])
     return Microsoft.Playwright.Program.Main(["install", .. args.Skip(1), "chromium"]);
 
-// Settings from .env next to the project, the same file docker-compose uses (see .env.example).
+// Settings from .env: next to the project, or the repository's (the one docker-compose uses; see .env.example).
 DotEnv.Load(Path.Combine(Directory.GetCurrentDirectory(), ".env"));
+DotEnv.Load(Path.Combine(Directory.GetCurrentDirectory(), "..", ".env"));
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -57,7 +58,8 @@ builder.Services.AddRateLimiter(o =>
         _ => new FixedWindowRateLimiterOptions { PermitLimit = builder.Configuration.GetValue("RateLimiting:AuthPerMinute", 10), Window = TimeSpan.FromMinutes(1) }));
 });
 
-// The web (DeficitSnatcher.Web) calls the API from its own site: its origin(s), from Cors__AllowedOrigins (comma-separated).
+// In Docker the site's nginx passes /api through, so it's one origin and CORS isn't needed. Only for `npm run dev` against
+// a separately run API: its origin(s), from Cors__AllowedOrigins (comma-separated).
 var corsOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
     .Select(o => o.TrimEnd('/')).ToArray();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod()));
@@ -75,6 +77,11 @@ builder.Services.AddSingleton<Buyer>();
 builder.Services.AddSingleton<CheckService>();
 builder.Services.AddSingleton<Tracker>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Tracker>());
+// The Deploy tab (Deploy/DeployController.cs).
+builder.Services.AddSingleton(builder.Configuration.GetSection("Deploy").Get<DeficitSnatcher.Api.Deploy.DeployOptions>()
+    ?? new DeficitSnatcher.Api.Deploy.DeployOptions());
+builder.Services.AddSingleton<DeficitSnatcher.Api.Deploy.ServerVersion>();
+builder.Services.AddHttpClient(DeficitSnatcher.Api.Deploy.DeployController.ClientName, DeficitSnatcher.Api.Deploy.DeployController.Configure);
 
 builder.Services.AddProblemDetails();
 builder.Services.AddControllers(o => o.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true)
@@ -84,7 +91,8 @@ var app = builder.Build();
 
 // Behind the reverse proxy: trust X-Forwarded-* from loopback plus ReverseProxy:KnownNetworks (comma-separated CIDRs),
 // so rate limiting sees the client's address.
-var forwarded = new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto };
+// The site's nginx and the server's reverse proxy are both in front: read past every trusted hop.
+var forwarded = new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto, ForwardLimit = null };
 foreach (var network in (app.Configuration["ReverseProxy:KnownNetworks"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
     forwarded.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
 app.UseForwardedHeaders(forwarded);
@@ -97,6 +105,18 @@ if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Databas
     await Seed.RunAsync(db);
 }
 
+// A checkout still "running" was cut off by a restart (a deploy, for one): it didn't finish, so it's failed.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Purchases.Where(p => p.Status == PurchaseStatus.Running).ExecuteUpdateAsync(u => u
+        .SetProperty(p => p.Status, p => p.DryRun ? PurchaseStatus.Failed : PurchaseStatus.Interrupted)
+        .SetProperty(p => p.Message, p => p.DryRun
+            ? "Interrupted: the server restarted during the dry run."
+            : "Interrupted: the server restarted during the checkout. Check the store for an order, then mark this as not bought if there's none.")
+        .SetProperty(p => p.FinishedAt, DateTimeOffset.UtcNow));
+}
+
 if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler();
 
@@ -105,7 +125,7 @@ app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
 app.MapControllers();
-app.MapGet("/health", async (AppDbContext db, CancellationToken ct) =>
+app.MapGet("/api/health", async (AppDbContext db, CancellationToken ct) =>
 {
     try
     {
@@ -115,7 +135,7 @@ app.MapGet("/health", async (AppDbContext db, CancellationToken ct) =>
     {
         return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     }
-}).AllowAnonymous();
+}).AllowAnonymous().DisableRateLimiting();
 
 app.Run();
 return 0;

@@ -1,0 +1,99 @@
+name: Deploy
+
+# Runs from the site's Deploy tab (or Actions → Deploy → Run workflow). Builds and restarts everything on the server
+# with docker compose: the database, the API and the site.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ vars.SERVER_SSH_PORT || 22 }}
+          command_timeout: 30m
+          script: |
+            set -e
+            echo "Deploying Deficit Snatcher ${{ github.sha }}..."
+
+            # The first deploy clones the repository; later ones move it to this commit.
+            DIR=/opt/DeficitSnatcher
+            if [ ! -d "$DIR/.git" ]; then
+              git clone "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$DIR"
+            fi
+            cd "$DIR"
+            git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+            git fetch origin
+            git reset --hard ${{ github.sha }}
+            git remote set-url origin "https://github.com/${{ github.repository }}.git"
+
+            # Every setting - see .env.example. The one login is APP_USERNAME / APP_PASSWORD.
+            echo "Writing .env..."
+            cat > .env <<'ENVEOF'
+            Auth__Username=${{ secrets.APP_USERNAME || vars.APP_USERNAME }}
+            Auth__Password=${{ secrets.APP_PASSWORD }}
+            Auth__TokenDays=${{ vars.TOKEN_DAYS || '14' }}
+            Jwt__SigningKey=${{ secrets.JWT_SIGNING_KEY }}
+            Secrets__Key=${{ secrets.SECRETS_KEY }}
+
+            POSTGRES_USER=${{ vars.POSTGRES_USER || 'deficitsnatcher' }}
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            POSTGRES_DB=${{ vars.POSTGRES_DB || 'deficitsnatcher' }}
+
+            App__PublicUrl=${{ vars.PUBLIC_URL }}
+            WEB_PORT=${{ vars.WEB_PORT || '8090' }}
+            DB_PORT=${{ vars.DB_PORT || '55433' }}
+
+            Deploy__GitHubToken=${{ secrets.DEPLOY_GITHUB_TOKEN }}
+            Deploy__Repository=${{ github.repository }}
+            Deploy__Workflow=Deploy.yml
+            Deploy__Branch=main
+
+            Logging__LogLevel__Default=Information
+            Logging__LogLevel__Microsoft.AspNetCore=Warning
+            Logging__LogLevel__Microsoft.EntityFrameworkCore=Warning
+            RateLimiting__AuthPerMinute=5
+
+            GIT_SHA=${{ github.sha }}
+            ENVEOF
+            echo "BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> .env
+            chmod 600 .env
+
+            # Compose reads $ in a .env value as a variable: values with one are single-quoted so they arrive as they
+            # are. Not POSTGRES_: the database was made with whatever the password came out as.
+            sed -i -E '/^POSTGRES_/!{/^[A-Za-z_][A-Za-z0-9_.]*=.*[$]/{s/'\''/\\'\''/g;s/^([^=]+)=(.*)$/\1='\''\2'\''/}}' .env
+
+            for name in Auth__Username Auth__Password Jwt__SigningKey POSTGRES_PASSWORD; do
+              if ! grep -qE "^$name=.+" .env; then echo "::error::$name is empty: set its GitHub secret."; exit 1; fi
+            done
+
+            echo "Building..."
+            docker compose build --pull
+            echo "Restarting..."
+            docker compose up -d --remove-orphans
+
+            echo "Waiting for the site and the API..."
+            PORT=$(grep '^WEB_PORT=' .env | cut -d= -f2)
+            for i in $(seq 1 60); do
+              if curl -fsS "http://127.0.0.1:$PORT/api/health" > /dev/null; then echo "Up."; break; fi
+              if [ "$i" = 60 ]; then
+                echo "::error::Not healthy after 2 minutes. Recent logs:"
+                docker compose ps
+                docker compose logs --tail 150 api web
+                exit 1
+              fi
+              sleep 2
+            done
+
+            docker image prune -f || echo "Couldn't remove old images; skipped."
+            echo "Deployed ${{ github.sha }}."

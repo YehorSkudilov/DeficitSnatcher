@@ -28,8 +28,14 @@ public sealed record BotSettings
     public int RequestTimeoutSeconds { get; init; } = 20;
     public string UserAgent { get; init; } =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
-    /// <summary>Price history older than this is removed; 0 keeps it all.</summary>
+    /// <summary>Price history and the activity log older than this are removed; 0 keeps it all.</summary>
     public int HistoryDays { get; init; } = 90;
+    /// <summary>Scans (every check) older than this are removed; 0 keeps them all.</summary>
+    public int ScanHistoryDays { get; init; } = 30;
+    /// <summary>Checkouts older than this are removed with their screenshots; 0 keeps them all.</summary>
+    public int CheckoutHistoryDays { get; init; } = 0;
+    /// <summary>A screenshot after every checkout step (about a tenth of a second each), not only where it ended.</summary>
+    public bool StepScreenshots { get; init; } = true;
 
     // Notifications
     public string DiscordWebhookUrl { get; init; } = "";
@@ -56,6 +62,8 @@ public sealed record BotSettings
         RequestTimeoutSeconds = Math.Clamp(RequestTimeoutSeconds, 3, 120),
         UserAgent = string.IsNullOrWhiteSpace(UserAgent) ? new BotSettings().UserAgent : UserAgent.Trim(),
         HistoryDays = Math.Clamp(HistoryDays, 0, 3650),
+        ScanHistoryDays = Math.Clamp(ScanHistoryDays, 0, 3650),
+        CheckoutHistoryDays = Math.Clamp(CheckoutHistoryDays, 0, 3650),
         ErrorThreshold = Math.Clamp(ErrorThreshold, 1, 1000),
         DiscordWebhookUrl = DiscordWebhookUrl?.Trim() ?? "",
         TelegramBotToken = TelegramBotToken?.Trim() ?? "",

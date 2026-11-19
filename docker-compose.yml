@@ -1,0 +1,69 @@
+# Everything: the database, the API (with headless Chromium) and the site (nginx: the pages, and /api passed to the API).
+# Settings come from .env next to this file (copy .env.example); on the server the Deploy workflow writes it.
+#
+#   docker compose up -d --build        everything, on http://localhost:${WEB_PORT}
+#   docker compose up -d db             only the database (then run the API with dotnet run, the site with npm run dev)
+name: deficitsnatcher
+
+services:
+  web:
+    build:
+      context: DeficitSnatcher.Web
+    restart: unless-stopped
+    # Plain HTTP; the server's reverse proxy terminates TLS in front of it.
+    ports:
+      - "${WEB_PORT:-8090}:80"
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: DeficitSnatcher.Api
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+        BUILT_AT: ${BUILT_AT:-}
+    restart: unless-stopped
+    # Not published: only the site's nginx reaches it.
+    expose:
+      - "8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__Default=Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      - Database__MigrateOnStartup=true
+      # nginx and the server's reverse proxy reach it over Docker's networks: trust their X-Forwarded-*.
+      - ReverseProxy__KnownNetworks=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
+    # Chromium wants more shared memory than Docker's default 64 MB.
+    shm_size: "1gb"
+    healthcheck:
+      # No curl in the image: bash's /dev/tcp.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /api/health HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q 200"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is not set}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is not set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Loopback only, for a locally run API; the API container uses the internal "db" host.
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

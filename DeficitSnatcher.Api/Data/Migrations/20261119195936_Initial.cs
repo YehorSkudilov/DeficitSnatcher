@@ -140,8 +140,15 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     Quantity = table.Column<int>(type: "integer", nullable: false),
                     Status = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
                     Message = table.Column<string>(type: "text", nullable: false),
+                    DryRun = table.Column<bool>(type: "boolean", nullable: false),
+                    Manual = table.Column<bool>(type: "boolean", nullable: false),
+                    Context = table.Column<string>(type: "text", nullable: false),
+                    Steps = table.Column<string>(type: "text", nullable: false),
                     Log = table.Column<string>(type: "text", nullable: false),
-                    Screenshot = table.Column<byte[]>(type: "bytea", nullable: true)
+                    Error = table.Column<string>(type: "text", nullable: true),
+                    BrowserLog = table.Column<string>(type: "text", nullable: false),
+                    PageHtml = table.Column<string>(type: "text", nullable: true),
+                    FinalUrl = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -150,6 +157,63 @@ namespace DeficitSnatcher.Api.Data.Migrations
                         name: "FK_Purchases_Sites_SiteId",
                         column: x => x.SiteId,
                         principalTable: "Sites",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "Scans",
+                columns: table => new
+                {
+                    Id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    SiteId = table.Column<int>(type: "integer", nullable: false),
+                    ProductId = table.Column<int>(type: "integer", nullable: false),
+                    At = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    DurationMs = table.Column<int>(type: "integer", nullable: false),
+                    Outcome = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    Price = table.Column<decimal>(type: "numeric(12,2)", precision: 12, scale: 2, nullable: true),
+                    TotalPrice = table.Column<decimal>(type: "numeric(12,2)", precision: 12, scale: 2, nullable: true),
+                    Title = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: true),
+                    Match = table.Column<bool>(type: "boolean", nullable: false),
+                    Verdict = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
+                    Error = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: true),
+                    Notes = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: true),
+                    Action = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: true),
+                    PurchaseId = table.Column<int>(type: "integer", nullable: true),
+                    Manual = table.Column<bool>(type: "boolean", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Scans", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_Scans_Sites_SiteId",
+                        column: x => x.SiteId,
+                        principalTable: "Sites",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "PurchaseShots",
+                columns: table => new
+                {
+                    Id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    PurchaseId = table.Column<int>(type: "integer", nullable: false),
+                    StepIndex = table.Column<int>(type: "integer", nullable: true),
+                    Label = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
+                    ContentType = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
+                    Data = table.Column<byte[]>(type: "bytea", nullable: false),
+                    At = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PurchaseShots", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_PurchaseShots_Purchases_PurchaseId",
+                        column: x => x.PurchaseId,
+                        principalTable: "Purchases",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
@@ -175,6 +239,21 @@ namespace DeficitSnatcher.Api.Data.Migrations
                 column: "StartedAt");
 
             migrationBuilder.CreateIndex(
+                name: "IX_PurchaseShots_PurchaseId_Id",
+                table: "PurchaseShots",
+                columns: new[] { "PurchaseId", "Id" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Scans_At",
+                table: "Scans",
+                column: "At");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Scans_SiteId_At",
+                table: "Scans",
+                columns: new[] { "SiteId", "At" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Sites_ProductId",
                 table: "Sites",
                 column: "ProductId");
@@ -190,10 +269,16 @@ namespace DeficitSnatcher.Api.Data.Migrations
                 name: "PricePoints");
 
             migrationBuilder.DropTable(
-                name: "Purchases");
+                name: "PurchaseShots");
+
+            migrationBuilder.DropTable(
+                name: "Scans");
 
             migrationBuilder.DropTable(
                 name: "StoredValues");
+
+            migrationBuilder.DropTable(
+                name: "Purchases");
 
             migrationBuilder.DropTable(
                 name: "Sites");

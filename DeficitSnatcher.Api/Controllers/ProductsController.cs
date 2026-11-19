@@ -75,7 +75,7 @@ public sealed class ProductsController(AppDbContext db) : ControllerBase
     }
 
     private Task<Dictionary<int, int>> Bought(CancellationToken ct) => db.Purchases
-        .Where(p => p.Status == PurchaseStatus.Succeeded)
+        .Where(p => p.Status == PurchaseStatus.Succeeded && !p.DryRun)
         .GroupBy(p => p.ProductId)
         .Select(g => new { g.Key, Units = g.Sum(p => p.Quantity) })
         .ToDictionaryAsync(g => g.Key, g => g.Units, ct);

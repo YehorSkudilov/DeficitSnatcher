@@ -2,72 +2,90 @@
 
 Watches stores for a PS5 Pro (or anything else) and buys it automatically when it's in stock within your price range.
 
-- **DeficitSnatcher.Api**: ASP.NET Core (.NET 11) + Postgres. Does the checking, decides, buys (headless Chromium via
-  Playwright) and sends notifications.
-- **DeficitSnatcher.Web**: Next.js, exported as a static site and served by nginx. Talks only to the API.
+- **DeficitSnatcher.Api**: ASP.NET Core (.NET 11) + Postgres. Checks the sites, decides, buys (headless Chromium via
+  Playwright), sends notifications, and runs deploys.
+- **DeficitSnatcher.Web**: Next.js exported as a static site, served by nginx. nginx also passes `/api` to the API, so
+  the browser only ever talks to one address.
+- **docker-compose.yml**: all three (database, API, site) in one `docker compose up`.
 
-Same layout as Gym Book: one `docker-compose.yml` per project, a reverse proxy in front doing TLS, and GitHub Actions
-that deploy over SSH.
+One account, no sign-ups: the username and password come from the environment (GitHub secrets on the server).
 
-## How it works
+## What's on the site
 
-1. **Price ranges** (products): a minimum and maximum price, how many units to buy in all and per order, and keywords
-   the listing title must or must not contain. A new database starts with a "PS5 Pro" product at $600–$1,000.
-2. **Sites**: the store pages to watch for a product. Each site is checked on its own interval (with jitter, at most
-   one check per store every few seconds, and longer waits while a site keeps failing). The price, stock and title come
-   from:
-   - **Shopify** stores: the product's `.js` JSON (exact price and stock per variant);
-   - other pages: structured data (JSON-LD `Product`/`Offer`, `og:`/`product:` meta tags, microdata);
-   - or your own CSS selectors (price, title, an "in stock" element, "sold out" text);
-   - **Browser** kind: the page is rendered in headless Chromium first, for sites that build it in script.
-3. A site is a **match** when it's in stock, the title fits the keywords, and price + the site's shipping is within
-   the range. A match is reported once (Discord, Telegram, or any webhook such as ntfy.sh), and if the site has
-   **auto-buy** on and auto-buy is **armed**, it's bought.
-4. **Buying** runs the site's **checkout steps** (goto, click, fill, select, type, wait, expectText…) in headless
-   Chromium, filling in your checkout profile (`{{email}}`, `{{card.number}}`, …). The step that places the order is
-   marked **final**:
-   - **Dry run** (on by default) runs everything up to the final step, then stops. Use it to test a checkout.
-   - Every checkout keeps a step-by-step log and a screenshot (Purchases page).
-   - Limits are checked under one lock before each purchase: armed, units left for the product, total budget, and a
-     retry wait per site.
-   - Templates for a Shopify checkout and a generic signed-in store are built in. Store cookies (a signed-in session
-     exported from your browser) can be added per site, so the checkout can use your saved address and card.
+| Tab | |
+|---|---|
+| **Dashboard** | The auto-buy switch, each product's sites with price, stock and verdict, recent activity and checkouts. |
+| **Price ranges** | Per product: min and max price (shipping included), units to buy in all and per order, title keywords. |
+| **Sites** | Store pages to watch: Test, Check now, selectors, checkout steps, cookies, price history, dry-run / buy now. |
+| **Scans** | Every check of every site, found or not: price, stock, verdict, error, and what was done (checkout started, or why not). Filter by product, site, result (in stock / out / in range / checkout ran / errors), time, price, search. |
+| **Checkouts** | Every checkout, real or dry run. Each one has: why it ran (the scan, price, limits at that moment), a step-by-step timeline with timing and a screenshot after each step, the full error (Playwright's call log), the browser's console and network errors, a full-page screenshot of where it ended, the page's HTML, and the raw log. |
+| **Activity** | Everything that happened (alerts, price drops, checkouts, failing sites, settings changes), filterable. |
+| **Settings** | Auto-buy (armed, dry run, budget, retry wait), checking (interval, jitter, per-store spacing, timeouts), notifications (Discord, Telegram, any webhook such as ntfy.sh), history retention, checkout profile (address, card). |
+| **Deploy** | What's running (commit, build time), commits on `main` not deployed yet, Deploy button, live progress of each step, cancel, links to the full GitHub logs. |
 
-Card details, notification tokens and cookies are stored encrypted (AES-GCM, `Secrets__Key`). The card number and CVV are
-never sent back to the web.
+## How buying works
+
+A site is a **match** when it's in stock, the title fits the keywords, and price + shipping is within the range. A match
+is reported once, and if the site has **auto-buy** on and auto-buy is **armed**, its **checkout steps** run in headless
+Chromium (goto, click, fill, select, type, wait, expectText…), filling in the checkout profile (`{{email}}`,
+`{{card.number}}`, …). The step that places the order is marked **final**.
+
+- **Dry run** (on by default) runs every step up to the final one, then stops. Test each store with it first.
+- Before every purchase, under one lock: armed, units left for the product, total budget, retry wait per site.
+- A real checkout cut off by a restart is **Interrupted** and keeps counting against the limits until you mark it
+  as not bought, so a restart can never cause a second order.
+- Card number and CVV are masked in every log, error and saved page; screenshots, page HTML, the card, cookies and
+  notification tokens are stored encrypted (AES-GCM, `Secrets__Key`).
 
 **Limits.** Big retailers (Best Buy, Walmart, Amazon) use bot protection, captchas and 3-D Secure. Checks can get
-blocked (try Browser mode, a longer interval, or your cookies) and checkouts can stop on a captcha or a bank prompt.
-Shopify stores and smaller shops are where this works best. Always do a dry run before arming it for real.
+blocked (try Browser mode, a longer interval, or your cookies) and a checkout can stop at a captcha or bank prompt;
+the checkout's screenshots and error show exactly where. Shopify and smaller stores work best.
 
-## Run locally
+## Run it with Docker
 
 ```bash
-cd DeficitSnatcher.Api
-cp .env.example .env            # set Auth__Password and Jwt__SigningKey
+cp .env.example .env        # set Auth__Username, Auth__Password, Jwt__SigningKey, POSTGRES_PASSWORD
+docker compose up -d --build
+```
+
+The site is on `http://localhost:8090` (`WEB_PORT`).
+
+## Develop
+
+```bash
+cp .env.example .env
 docker compose up -d db
-dotnet run -- install-browser   # once: downloads headless Chromium
-dotnet run
+cd DeficitSnatcher.Api
+dotnet run -- install-browser   # once: headless Chromium
+dotnet run                      # http://localhost:5210, reads ../.env
 ```
 
 ```bash
 cd DeficitSnatcher.Web
-cp .env.example .env            # NEXT_PUBLIC_API_URL=http://localhost:5210 (or wherever the API runs)
 npm install
-npm run dev
+NEXT_PUBLIC_API_URL=http://localhost:5210 npm run dev
 ```
 
 Migrations: `dotnet ef migrations add <Name> -o Data/Migrations` in `DeficitSnatcher.Api`.
 
 ## Deploy
 
-On the server: `git clone` this repository to `/opt/DeficitSnatcher`, with Docker installed and a reverse proxy sending
-the API's and web's domains to `API_PORT` and `WEB_PORT`. Pushing to `main` runs **Publish API** / **Publish Web**
-(or run them by hand from Actions).
+The **Deploy** workflow (`.github/workflows/Deploy.yml`) SSHes to the server, puts the repository at
+`/opt/DeficitSnatcher` (cloning it the first time), writes `.env` from the secrets, and runs `docker compose up -d --build`.
+The server needs Docker, and a reverse proxy (TLS) forwarding your domain to `WEB_PORT`.
 
-GitHub **secrets**: `SERVER_HOST`, `SERVER_USER`, `SERVER_SSH_KEY`, `POSTGRES_PASSWORD`, `AUTH_PASSWORD`,
-`JWT_SIGNING_KEY` (`openssl rand -base64 48`), `SECRETS_KEY` (`openssl rand -base64 32`; never change it once set).
+Run it the first time from GitHub (Actions → Deploy → Run workflow); after that, from the site's Deploy tab.
 
-GitHub **variables**: `API_PORT`, `WEB_PORT`, `API_BASE_URL` (e.g. `https://api.snatcher.example.com`), `WEB_URL`
-(e.g. `https://snatcher.example.com`), and optionally `AUTH_USERNAME` (default `owner`), `POSTGRES_USER`,
-`POSTGRES_DB`, `DB_PORT`.
+**Secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | |
+|---|---|
+| `APP_USERNAME`, `APP_PASSWORD` | The one login. Change them and redeploy to change it. |
+| `JWT_SIGNING_KEY` | `openssl rand -base64 48` |
+| `SECRETS_KEY` | `openssl rand -base64 32`. Never change it once set: the card and screenshots are encrypted with it. |
+| `POSTGRES_PASSWORD` | Any strong password. |
+| `SERVER_HOST`, `SERVER_USER`, `SERVER_SSH_KEY` | SSH to the server. |
+| `DEPLOY_GITHUB_TOKEN` | Optional, turns on the Deploy tab: a fine-grained token for this repository with Actions (read and write) and Contents (read). |
+
+**Variables** (all optional): `WEB_PORT` (default 8090), `PUBLIC_URL` (the site's address, for links in
+notifications), `SERVER_SSH_PORT`, `DB_PORT`, `POSTGRES_USER`, `POSTGRES_DB`, `TOKEN_DAYS`.

@@ -17,8 +17,14 @@ public enum NotifyKind
 /// Writes the activity log and sends what matters to the owner's phone: Discord (webhook), Telegram (bot) and any
 /// plain-text webhook (ntfy.sh, for one), each used when it's set in Settings.
 /// </summary>
-public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settingsStore, IHttpClientFactory httpFactory, ILogger<Notifier> log)
+public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settingsStore, IHttpClientFactory httpFactory, IConfiguration config,
+    ILogger<Notifier> log)
 {
+    private readonly string _publicUrl = (config["App:PublicUrl"] ?? "").Trim().TrimEnd('/');
+
+    /// <summary>A link to a screen of the site (e.g. "purchase/12"), when App__PublicUrl says where the site is.</summary>
+    public string? Link(string route) => _publicUrl.Length == 0 ? null : $"{_publicUrl}/#{route}";
+
     public async Task LogAsync(EventLevel level, string message, int? siteId = null)
     {
         try

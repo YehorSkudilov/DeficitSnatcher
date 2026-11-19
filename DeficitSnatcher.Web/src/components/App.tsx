@@ -6,7 +6,9 @@ import { Dashboard } from "./Dashboard";
 import { Products } from "./Products";
 import { Sites } from "./Sites";
 import { SiteEditor } from "./SiteEditor";
-import { Purchases } from "./Purchases";
+import { PurchaseDetail, Purchases } from "./Purchases";
+import { Scans } from "./Scans";
+import { Deploy } from "./Deploy";
 import { Activity } from "./Activity";
 import { SettingsPage } from "./Settings";
 import { Login } from "./Login";
@@ -27,9 +29,11 @@ const nav = [
   ["dashboard", "Dashboard"],
   ["products", "Price ranges"],
   ["sites", "Sites"],
-  ["purchases", "Purchases"],
+  ["scans", "Scans"],
+  ["purchases", "Checkouts"],
   ["activity", "Activity"],
   ["settings", "Settings"],
+  ["deploy", "Deploy"],
 ] as const;
 
 export function App() {
@@ -50,8 +54,9 @@ export function App() {
 function Shell({ route, onSignOut }: { route: string; onSignOut: () => void }) {
   // The nav's light: red when auto-buy is armed, green while tracking.
   const { data: status } = useData(() => api.get<DashboardData>("/api/dashboard"), [], 10000);
-  const [screen, arg] = route.split("/");
-  const section = screen === "site" ? "sites" : screen;
+  const [path, search] = route.split("?");
+  const [screen, arg] = path.split("/");
+  const section = screen === "site" ? "sites" : screen === "purchase" ? "purchases" : screen;
 
   return (
     <div className="shell">
@@ -77,14 +82,17 @@ function Shell({ route, onSignOut }: { route: string; onSignOut: () => void }) {
         {screen === "site" && (
           <SiteEditor
             key={arg}
-            id={arg?.startsWith("new") ? null : Number(arg)}
-            productId={Number(new URLSearchParams(arg?.split("?")[1] ?? "").get("product")) || undefined}
+            id={arg === "new" ? null : Number(arg)}
+            productId={Number(new URLSearchParams(search ?? "").get("product")) || undefined}
           />
         )}
+        {screen === "scans" && <Scans key={search} initial={search} />}
         {screen === "purchases" && <Purchases />}
+        {screen === "purchase" && <PurchaseDetail key={arg} id={Number(arg)} />}
+        {screen === "deploy" && <Deploy />}
         {screen === "activity" && <Activity />}
         {screen === "settings" && <SettingsPage />}
-        {!nav.some(([k]) => k === screen) && screen !== "site" && <p className="muted">Nothing here. <a href="#dashboard">Dashboard</a></p>}
+        {!nav.some(([k]) => k === screen) && screen !== "site" && screen !== "purchase" && <p className="muted">Nothing here. <a href="#dashboard">Dashboard</a></p>}
       </main>
     </div>
   );

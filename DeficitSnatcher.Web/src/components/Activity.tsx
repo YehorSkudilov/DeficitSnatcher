@@ -1,24 +1,35 @@
 "use client";
 
 import { useState } from "react";
-import { api, type BotEvent, type EventLevel } from "@/lib/api";
+import { api, query, type BotEvent, type Site } from "@/lib/api";
 import { dateTime } from "@/lib/format";
-import { ErrorNote, LevelDot, useAction, useData } from "./ui";
+import { ErrorNote, Field, LevelDot, useAction, useData } from "./ui";
 
+const iso = (local: string) => (local ? new Date(local).toISOString() : "");
+
+/** Everything the bot did and saw, newest first: #activity. */
 export function Activity() {
-  const latest = useData(() => api.get<BotEvent[]>("/api/events?limit=100"), [], 5000);
+  const [level, setLevel] = useState("");
+  const [siteId, setSiteId] = useState("");
+  const [search, setSearch] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [older, setOlder] = useState<BotEvent[]>([]);
   const [done, setDone] = useState(false);
-  const [level, setLevel] = useState<EventLevel | "">("");
+  const sites = useData(() => api.get<Site[]>("/api/sites"), []);
   const action = useAction();
 
+  const params = { level, siteId, search: search.trim(), from: iso(from), to: iso(to) };
+  const key = JSON.stringify(params);
+  const latest = useData(() => api.get<BotEvent[]>(`/api/events${query({ ...params, limit: 100 })}`), [key], 5000);
+  const reset = () => (setOlder([]), setDone(false));
+
   const all = [...(latest.data ?? []), ...older.filter((o) => !(latest.data ?? []).some((l) => l.id === o.id))];
-  const shown = level ? all.filter((e) => e.level === level) : all;
 
   const more = async () => {
     const last = all[all.length - 1];
     if (!last) return;
-    const page = await action.run(() => api.get<BotEvent[]>(`/api/events?limit=200&before=${last.id}`));
+    const page = await action.run(() => api.get<BotEvent[]>(`/api/events${query({ ...params, limit: 200, before: last.id })}`));
     if (page) {
       setOlder([...older, ...page]);
       if (page.length < 200) setDone(true);
@@ -29,7 +40,7 @@ export function Activity() {
     if (!confirm("Clear the whole activity log?")) return;
     const ok = await action.run(async () => (await api.del("/api/events"), true));
     if (ok) {
-      setOlder([]);
+      reset();
       void latest.reload();
     }
   };
@@ -38,28 +49,53 @@ export function Activity() {
     <div className="stack" style={{ gap: 16 }}>
       <div className="page-head">
         <h1>Activity</h1>
-        <div className="row">
-          <select value={level} onChange={(e) => setLevel(e.target.value as EventLevel | "")} style={{ width: "auto" }}>
+        <button className="btn danger small" disabled={action.busy} onClick={clear}>
+          Clear
+        </button>
+      </div>
+      <p className="muted" style={{ marginTop: -8 }}>
+        What happened: in stock alerts, price drops, checkouts, failing sites, settings changes. Each check is on <a href="#scans">Scans</a>, each
+        checkout with its steps and screenshots on <a href="#purchases">Checkouts</a>.
+      </p>
+      <ErrorNote error={latest.error || action.error} />
+      <div className="card filters">
+        <Field label="Kind">
+          <select value={level} onChange={(e) => (setLevel(e.target.value), reset())}>
             <option value="">Everything</option>
             <option value="Good">Good news</option>
             <option value="Info">Info</option>
             <option value="Warning">Warnings</option>
             <option value="Error">Errors</option>
           </select>
-          <button className="btn danger" disabled={action.busy} onClick={clear}>
-            Clear
-          </button>
-        </div>
+        </Field>
+        <Field label="Site">
+          <select value={siteId} onChange={(e) => (setSiteId(e.target.value), reset())}>
+            <option value="">All</option>
+            {sites.data?.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="From">
+          <input type="datetime-local" value={from} onChange={(e) => (setFrom(e.target.value), reset())} />
+        </Field>
+        <Field label="To">
+          <input type="datetime-local" value={to} onChange={(e) => (setTo(e.target.value), reset())} />
+        </Field>
+        <Field label="Search">
+          <input type="text" value={search} onChange={(e) => (setSearch(e.target.value), reset())} />
+        </Field>
       </div>
-      <ErrorNote error={latest.error || action.error} />
       <div className="card">
-        {shown.length === 0 && <p className="muted">Nothing here.</p>}
+        {latest.data && all.length === 0 && <p className="muted">Nothing here.</p>}
         <div className="events">
-          {shown.map((e) => (
+          {all.map((e) => (
             <div className="event" key={e.id}>
               <LevelDot level={e.level} />
               <span>
-                {e.message}
+                <Linked text={e.message} />
                 {e.siteId && (
                   <>
                     {" "}
@@ -69,7 +105,9 @@ export function Activity() {
                   </>
                 )}
               </span>
-              <span className="faint small">{dateTime(e.at)}</span>
+              <span className="faint small" style={{ whiteSpace: "nowrap" }}>
+                {dateTime(e.at)}
+              </span>
             </div>
           ))}
         </div>
@@ -80,5 +118,24 @@ export function Activity() {
         )}
       </div>
     </div>
+  );
+}
+
+/** "checkout #12" in a message links to it. */
+function Linked({ text }: { text: string }) {
+  const parts = text.split(/(checkout #\d+|Checkout #\d+|Dry run #\d+)/);
+  return (
+    <>
+      {parts.map((p, i) => {
+        const m = /#(\d+)$/.exec(p);
+        return m && i % 2 === 1 ? (
+          <a key={i} href={`#purchase/${m[1]}`}>
+            {p}
+          </a>
+        ) : (
+          <span key={i}>{p}</span>
+        );
+      })}
+    </>
   );
 }

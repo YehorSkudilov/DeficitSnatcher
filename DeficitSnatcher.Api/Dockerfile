@@ -16,5 +16,9 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN dotnet DeficitSnatcher.Api.dll install-browser --with-deps \
     && chmod -R a+rX /ms-playwright \
     && rm -rf /var/lib/apt/lists/*
+# What's deployed, for the site's Deploy tab (docker-compose.yml passes them).
+ARG GIT_SHA=dev
+ARG BUILT_AT=
+ENV GIT_SHA=$GIT_SHA BUILT_AT=$BUILT_AT
 USER $APP_UID
 ENTRYPOINT ["dotnet", "DeficitSnatcher.Api.dll"]

@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace DeficitSnatcher.Api.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261119194001_Initial")]
+    [Migration("20261119195936_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -140,6 +140,23 @@ namespace DeficitSnatcher.Api.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("BrowserLog")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Context")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("DryRun")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text");
+
+                    b.Property<string>("FinalUrl")
+                        .HasColumnType("text");
+
                     b.Property<DateTimeOffset?>("FinishedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -147,8 +164,14 @@ namespace DeficitSnatcher.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool>("Manual")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Message")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PageHtml")
                         .HasColumnType("text");
 
                     b.Property<decimal>("Price")
@@ -161,9 +184,6 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.Property<int>("Quantity")
                         .HasColumnType("integer");
 
-                    b.Property<byte[]>("Screenshot")
-                        .HasColumnType("bytea");
-
                     b.Property<int>("SiteId")
                         .HasColumnType("integer");
 
@@ -175,6 +195,10 @@ namespace DeficitSnatcher.Api.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<string>("Steps")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("SiteId");
@@ -182,6 +206,116 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.HasIndex("StartedAt");
 
                     b.ToTable("Purchases");
+                });
+
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.PurchaseShot", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("PurchaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("StepIndex")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PurchaseId", "Id");
+
+                    b.ToTable("PurchaseShots");
+                });
+
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.Scan", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Action")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DurationMs")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<bool>("Manual")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Match")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<decimal?>("Price")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PurchaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SiteId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<decimal?>("TotalPrice")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<string>("Verdict")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("At");
+
+                    b.HasIndex("SiteId", "At");
+
+                    b.ToTable("Scans");
                 });
 
             modelBuilder.Entity("DeficitSnatcher.Api.Data.Site", b =>
@@ -308,6 +442,24 @@ namespace DeficitSnatcher.Api.Data.Migrations
                 });
 
             modelBuilder.Entity("DeficitSnatcher.Api.Data.Purchase", b =>
+                {
+                    b.HasOne("DeficitSnatcher.Api.Data.Site", null)
+                        .WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.PurchaseShot", b =>
+                {
+                    b.HasOne("DeficitSnatcher.Api.Data.Purchase", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.Scan", b =>
                 {
                     b.HasOne("DeficitSnatcher.Api.Data.Site", null)
                         .WithMany()

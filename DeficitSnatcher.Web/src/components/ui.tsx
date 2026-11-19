@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, type EventLevel, type PurchaseStatus, type Site } from "@/lib/api";
+import { api, ApiError, type EventLevel, type PurchaseStatus, type ScanOutcome, type Site } from "@/lib/api";
 
 /** Loads with `load`, again every `refreshMs` (if set) and whenever `reload` is called. */
 export function useData<T>(load: () => Promise<T>, deps: unknown[], refreshMs?: number) {
@@ -84,8 +84,8 @@ export function StockBadge({ site }: { site: Pick<Site, "lastInStock" | "lastChe
 }
 
 export function PurchaseBadge({ status }: { status: PurchaseStatus }) {
-  const cls = { Running: "info", DryRun: "warn", Succeeded: "good", Failed: "bad" }[status];
-  const text = { Running: "Running", DryRun: "Dry run", Succeeded: "Bought", Failed: "Failed" }[status];
+  const cls = { Running: "info", DryRun: "warn", Succeeded: "good", Failed: "bad", Interrupted: "bad" }[status];
+  const text = { Running: "Running…", DryRun: "Dry run", Succeeded: "Bought", Failed: "Failed", Interrupted: "Interrupted" }[status];
   return <span className={`badge ${cls}`}>{text}</span>;
 }
 
@@ -136,4 +136,58 @@ export function NumberInput({
       onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
     />
   );
+}
+
+export function OutcomeBadge({ outcome }: { outcome: ScanOutcome }) {
+  const cls = { InStock: "good", OutOfStock: "", Unknown: "warn", Error: "bad" }[outcome];
+  const text = { InStock: "In stock", OutOfStock: "Out of stock", Unknown: "Unknown", Error: "Error" }[outcome];
+  return <span className={`badge ${cls}`}>{text}</span>;
+}
+
+/** An image from the API (it needs the token, so it's fetched rather than linked). Click: full size. */
+export function AuthImage({ path, alt, className }: { path: string; alt: string; className?: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let url: string | null = null;
+    let alive = true;
+    api
+      .get<Blob>(path)
+      .then((b) => {
+        url = URL.createObjectURL(b);
+        if (alive) setSrc(url);
+      })
+      .catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [path]);
+  if (failed) return <span className="faint small">(screenshot unavailable)</span>;
+  if (!src) return <span className={`shot-loading ${className ?? ""}`} />;
+  return (
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element -- a blob from the API */}
+      <img src={src} alt={alt} className={className} onClick={() => setOpen(true)} style={{ cursor: "zoom-in" }} />
+      {open && (
+        <div className="lightbox" onClick={() => setOpen(false)}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- a blob from the API */}
+          <img src={src} alt={alt} />
+          <div className="lightbox-caption">{alt}</div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Downloads a file from the API (with the token). */
+export async function download(path: string, name: string) {
+  const blob = await api.get<Blob>(path);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

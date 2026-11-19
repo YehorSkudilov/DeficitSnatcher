@@ -1,5 +1,5 @@
-// The API's calls (DeficitSnatcher.Api). Its address is baked in at build time (NEXT_PUBLIC_API_URL), and the API must
-// allow this site's origin (Cors__AllowedOrigins).
+// The API's calls (DeficitSnatcher.Api). In Docker it's this same site under /api (nginx.conf passes it through);
+// NEXT_PUBLIC_API_URL (at build time) points elsewhere, e.g. http://localhost:5210 for npm run dev.
 
 export const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
 
@@ -173,7 +173,8 @@ export type ProbeResponse = { result: PageResult | null; verdict: Verdict | null
 export type BuyOutcome = { started: boolean; message: string; purchaseId: number | null; status: PurchaseStatus | null };
 export type HistoryPoint = { at: string; price: number | null; inStock: boolean };
 
-export type PurchaseStatus = "Running" | "DryRun" | "Succeeded" | "Failed";
+export type PurchaseStatus = "Running" | "DryRun" | "Succeeded" | "Failed" | "Interrupted";
+export const PurchaseStatuses: PurchaseStatus[] = ["Succeeded", "Failed", "DryRun", "Running", "Interrupted"];
 
 export type Purchase = {
   id: number;
@@ -187,10 +188,108 @@ export type Purchase = {
   quantity: number;
   status: PurchaseStatus;
   message: string;
-  hasScreenshot: boolean;
+  dryRun: boolean;
+  manual: boolean;
+  shots: number;
 };
 
-export type PurchaseDetail = { purchase: Purchase; log: string };
+export type StepRecord = {
+  index: number;
+  action: string;
+  description: string;
+  /** ok, failed, skipped (optional and failed), notRun. */
+  status: "ok" | "failed" | "skipped" | "notRun";
+  startedAt: string | null;
+  ms: number | null;
+  url: string | null;
+  error: string | null;
+  shotId: number | null;
+  final: boolean;
+  optional: boolean;
+};
+
+export type Shot = { id: number; stepIndex: number | null; label: string; at: string };
+
+export type PurchaseDetail = {
+  purchase: Purchase;
+  siteUrl: string;
+  context: string;
+  steps: StepRecord[];
+  log: string;
+  error: string | null;
+  browserLog: string;
+  finalUrl: string | null;
+  hasHtml: boolean;
+  shots: Shot[];
+  scan: { id: number; at: string } | null;
+};
+
+export type ScanOutcome = "InStock" | "OutOfStock" | "Unknown" | "Error";
+
+export type Scan = {
+  id: number;
+  siteId: number;
+  siteName: string;
+  productId: number;
+  productName: string;
+  at: string;
+  durationMs: number;
+  outcome: ScanOutcome;
+  price: number | null;
+  totalPrice: number | null;
+  title: string | null;
+  match: boolean;
+  verdict: string;
+  error: string | null;
+  notes: string | null;
+  action: string | null;
+  purchaseId: number | null;
+  manual: boolean;
+};
+
+export type ScanCounts = { all: number; inStock: number; outOfStock: number; unknown: number; error: number; match: number; bought: number };
+export type ScansPage = { scans: Scan[]; counts: ScanCounts };
+
+export type DeployRun = {
+  id: number;
+  runNumber: number;
+  status: string;
+  conclusion: string | null;
+  title: string;
+  event: string;
+  actor: string | null;
+  headSha: string;
+  createdAt: string;
+  runStartedAt: string | null;
+  updatedAt: string;
+  url: string;
+};
+
+export type DeployCommit = { sha: string; message: string; author: string | null; date: string | null; url: string; deployed: boolean; pending: boolean };
+
+export type DeployStatus = {
+  configured: boolean;
+  repository: string;
+  workflow: string;
+  branch: string;
+  serverSha: string | null;
+  builtAt: string | null;
+  startedAt: string;
+  runs: DeployRun[];
+  commits: DeployCommit[];
+  error: string | null;
+};
+
+export type DeployStep = { number: number; name: string; status: string; conclusion: string | null; startedAt: string | null; completedAt: string | null };
+export type DeployJob = { id: number; name: string; status: string; conclusion: string | null; startedAt: string | null; completedAt: string | null; url: string; steps: DeployStep[] };
+
+/** A query string from the set values. */
+export function query(params: Record<string, string | number | boolean | null | undefined>): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined && v !== "") q.set(k, String(v));
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
 
 export type EventLevel = "Info" | "Good" | "Warning" | "Error";
 export type BotEvent = { id: number; at: string; level: EventLevel; siteId: number | null; siteName: string | null; message: string };
@@ -225,6 +324,9 @@ export type Settings = {
   requestTimeoutSeconds: number;
   userAgent: string;
   historyDays: number;
+  scanHistoryDays: number;
+  checkoutHistoryDays: number;
+  stepScreenshots: boolean;
   discordWebhookUrl: string;
   telegramBotToken: string;
   telegramChatId: string;

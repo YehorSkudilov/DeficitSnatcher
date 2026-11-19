@@ -117,7 +117,7 @@ export function Dashboard() {
           {d?.recentPurchases.length === 0 && <p className="muted">No checkouts yet.</p>}
           <div className="events">
             {d?.recentPurchases.map((p) => (
-              <div className="event" key={p.id} style={{ gridTemplateColumns: "auto 1fr auto" }}>
+              <div className="event clickable" key={p.id} style={{ gridTemplateColumns: "auto 1fr auto", cursor: "pointer" }} onClick={() => go(`purchase/${p.id}`)}>
                 <PurchaseBadge status={p.status} />
                 <span className="ellipsis">
                   {p.productName} at {p.siteName}, {money(p.price, d.currency)}

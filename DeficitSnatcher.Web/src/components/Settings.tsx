@@ -53,6 +53,11 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <Check label={<b>Armed</b>} checked={s.autoBuyArmed} onChange={(autoBuyArmed) => set({ autoBuyArmed })} />
           <Check label="Dry run (stop before placing the order)" checked={s.dryRun} onChange={(dryRun) => set({ dryRun })} />
         </div>
+        <Check
+          label="Screenshot after every checkout step (about 0.1 s each; failures and where it ended are always kept)"
+          checked={s.stepScreenshots}
+          onChange={(stepScreenshots) => set({ stepScreenshots })}
+        />
         {s.autoBuyArmed && !s.dryRun && <div className="notice bad small">Armed for real: sites with auto-buy on will be ordered and paid for as soon as they match.</div>}
         <div className="fields">
           <Field label="Total budget" hint="Most to spend over all purchases. 0: no limit beyond each product's units.">
@@ -86,8 +91,14 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <Field label="Timeout (seconds)">
             <NumberInput value={s.requestTimeoutSeconds} min={3} onChange={(v) => set({ requestTimeoutSeconds: v ?? 20 })} />
           </Field>
-          <Field label="Keep history (days)" hint="0 keeps it all.">
+          <Field label="Keep price history and activity (days)" hint="0 keeps it all.">
             <NumberInput value={s.historyDays} min={0} onChange={(v) => set({ historyDays: v ?? 0 })} />
+          </Field>
+          <Field label="Keep scans (days)" hint="Every check is a scan. 0 keeps them all.">
+            <NumberInput value={s.scanHistoryDays} min={0} onChange={(v) => set({ scanHistoryDays: v ?? 0 })} />
+          </Field>
+          <Field label="Keep failed and dry-run checkouts (days)" hint="With their screenshots. Bought ones are always kept. 0: forever.">
+            <NumberInput value={s.checkoutHistoryDays} min={0} onChange={(v) => set({ checkoutHistoryDays: v ?? 0 })} />
           </Field>
         </div>
         <Field label="User agent" hint="The browser the checks say they are.">

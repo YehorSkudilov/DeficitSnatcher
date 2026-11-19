@@ -29,26 +29,29 @@ public sealed class SecretBox
         }
     }
 
-    public string Encrypt(string plain)
+    public string Encrypt(string plain) => Convert.ToBase64String(EncryptBytes(Encoding.UTF8.GetBytes(plain)));
+
+    public string Decrypt(string sealedText) => Encoding.UTF8.GetString(DecryptBytes(Convert.FromBase64String(sealedText)));
+
+    /// <summary>nonce (12) | tag (16) | ciphertext.</summary>
+    public byte[] EncryptBytes(byte[] data)
     {
-        var data = Encoding.UTF8.GetBytes(plain);
         var nonce = RandomNumberGenerator.GetBytes(12);
         var tag = new byte[16];
         var cipher = new byte[data.Length];
         using var aes = new AesGcm(_key, 16);
         aes.Encrypt(nonce, data, cipher, tag);
-        return Convert.ToBase64String([.. nonce, .. tag, .. cipher]);
+        return [.. nonce, .. tag, .. cipher];
     }
 
-    public string Decrypt(string sealedText)
+    public byte[] DecryptBytes(byte[] all)
     {
-        var all = Convert.FromBase64String(sealedText);
         var nonce = all.AsSpan(0, 12);
         var tag = all.AsSpan(12, 16);
         var cipher = all.AsSpan(28);
         var plain = new byte[cipher.Length];
         using var aes = new AesGcm(_key, 16);
         aes.Decrypt(nonce, cipher, tag, plain);
-        return Encoding.UTF8.GetString(plain);
+        return plain;
     }
 }

@@ -393,6 +393,7 @@ input[type="number"],
 input[type="password"],
 input[type="url"],
 input[type="email"],
+input[type="datetime-local"],
 select,
 textarea {
   background: var(--bg);
@@ -614,4 +615,221 @@ pre.log {
   max-width: 100%;
   border-radius: 10px;
   border: 1px solid var(--stroke);
+}
+
+/* ---- Filters ---- */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.filters .field {
+  width: 170px;
+}
+.filters .field.wide {
+  width: 240px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  appearance: none;
+  border: 1px solid var(--stroke);
+  background: var(--surface-2);
+  color: var(--text-2);
+  border-radius: 99px;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chip b {
+  color: var(--text);
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.chip.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* ---- Checkout timeline ---- */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tl-step {
+  display: grid;
+  grid-template-columns: 34px 1fr 200px;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid transparent;
+}
+.tl-step.failed {
+  border-color: #7a2632;
+  background: linear-gradient(135deg, #2a1015, var(--surface-2));
+}
+.tl-step.notRun {
+  opacity: 0.55;
+}
+.tl-num {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 13px;
+  background: var(--surface-3);
+}
+.tl-step.ok .tl-num {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.tl-step.failed .tl-num {
+  background: var(--danger);
+  color: #fff;
+}
+.tl-step.skipped .tl-num {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.tl-step pre.log {
+  margin-top: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+.tl-shot {
+  width: 200px;
+  max-height: 130px;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 8px;
+  border: 1px solid var(--stroke);
+  display: block;
+}
+.shot-loading {
+  display: block;
+  width: 200px;
+  height: 120px;
+  border-radius: 8px;
+  background: var(--surface-3);
+}
+@media (max-width: 720px) {
+  .tl-step {
+    grid-template-columns: 30px 1fr;
+  }
+  .tl-step > :last-child {
+    grid-column: 2;
+  }
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  cursor: zoom-out;
+  overflow: auto;
+}
+.lightbox img {
+  max-width: 100%;
+  max-height: calc(100vh - 80px);
+  object-fit: contain;
+  border-radius: 8px;
+}
+.lightbox-caption {
+  color: var(--text-2);
+  margin-top: 10px;
+  font-size: 13px;
+  text-align: center;
+}
+.shots-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.shots-grid figure {
+  margin: 0;
+}
+.shots-grid img {
+  width: 100%;
+  height: 150px;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 8px;
+  border: 1px solid var(--stroke);
+}
+.shots-grid figcaption {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 4px;
+}
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  font-size: 14px;
+}
+.kv dt {
+  color: var(--text-3);
+}
+.kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+details > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--stroke);
+  margin-bottom: 14px;
+  overflow-x: auto;
+}
+.tabs button {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font: inherit;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.spin {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: -1px;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
