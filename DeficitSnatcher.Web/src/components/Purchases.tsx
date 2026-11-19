@@ -6,11 +6,12 @@ import { dateTime, money } from "@/lib/format";
 import { AuthImage, ErrorNote, Field, PurchaseBadge, download, useAction, useData } from "./ui";
 import { go } from "./App";
 
-/** Every checkout, real or dry run, with filters: #purchases. */
-export function Purchases() {
-  const [status, setStatus] = useState("");
-  const [siteId, setSiteId] = useState("");
-  const [productId, setProductId] = useState("");
+/** Every checkout, real or dry run, with filters: #logs/checkouts?site=3. */
+export function Purchases({ initial }: { initial?: string }) {
+  const start = new URLSearchParams(initial ?? "");
+  const [status, setStatus] = useState(start.get("status") ?? "");
+  const [siteId, setSiteId] = useState(start.get("site") ?? "");
+  const [productId, setProductId] = useState(start.get("product") ?? "");
   const [kind, setKind] = useState("");
   const sites = useData(() => api.get<Site[]>("/api/sites"), []);
   const products = useData(() => api.get<Product[]>("/api/products"), []);
@@ -21,10 +22,7 @@ export function Purchases() {
 
   return (
     <div className="stack" style={{ gap: 16 }}>
-      <div className="page-head">
-        <h1>Checkouts</h1>
-      </div>
-      <p className="muted" style={{ marginTop: -8 }}>
+      <p className="muted">
         Every checkout, real or dry run. Open one for what started it, every step with its screenshot and timing, the full error, the
         browser&apos;s console and network errors, and the page&apos;s HTML where it ended.
       </p>
@@ -145,14 +143,14 @@ export function PurchaseDetail({ id }: { id: number }) {
   const remove = async () => {
     if (!confirm(`Delete checkout #${id} with its screenshots and logs?`)) return;
     const ok = await action.run(async () => (await api.del(`/api/purchases/${id}`), true));
-    if (ok) go("purchases");
+    if (ok) go("logs/checkouts");
   };
 
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="page-head">
         <div className="row">
-          <a href="#purchases" className="btn ghost small">
+          <a href="#logs/checkouts" className="btn ghost small">
             ← Checkouts
           </a>
           <h1>
@@ -220,7 +218,7 @@ export function PurchaseDetail({ id }: { id: number }) {
               <>
                 <dt>Triggered by</dt>
                 <dd>
-                  <a href={`#scans?site=${p.siteId}`}>Scan #{data.scan.id}</a> at {dateTime(data.scan.at)}
+                  <a href={`#logs/scans?site=${p.siteId}`}>Scan #{data.scan.id}</a> at {dateTime(data.scan.at)}
                 </dd>
               </>
             )}

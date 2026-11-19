@@ -163,28 +163,28 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
   };
 
   const remove = async () => {
-    if (!confirm(`Delete ${site?.name}, its price history and purchases?`)) return;
+    if (!confirm(`Delete ${site?.name}, its price history, scans and checkouts?`)) return;
     const ok = await action.run(async () => (await api.del(`/api/sites/${id}`), true));
-    if (ok) go("sites");
+    if (ok) go(`product/${site?.productId ?? ""}`);
   };
 
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="page-head">
         <div className="row">
-          <a href="#sites" className="btn ghost small">
-            ← Sites
+          <a href={`#product/${form.productId}`} className="btn ghost small">
+            ← {products.data?.find((p) => p.id === form.productId)?.name ?? "Product"}
           </a>
-          <h1>{id ? site?.name : "New site"}</h1>
+          <h1>{id ? site?.name : "New page"}</h1>
           {site && <StockBadge site={site} />}
           {site?.match && <span className="badge good">BUY ZONE</span>}
           {id && (
-            <a className="small" href={`#scans?site=${id}`}>
+            <a className="small" href={`#logs/scans?site=${id}`}>
               Scan history
             </a>
           )}
           {id && (
-            <a className="small" href="#purchases">
+            <a className="small" href={`#logs/checkouts?site=${id}`}>
               Checkouts
             </a>
           )}
@@ -196,7 +196,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
             </button>
           )}
           <button className="btn primary" disabled={save.busy || (!dirty && !!id)} onClick={submit}>
-            {save.busy ? "Saving…" : id ? "Save" : "Add site"}
+            {save.busy ? "Saving…" : id ? "Save" : "Add page"}
           </button>
         </div>
       </div>
@@ -336,7 +336,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
       {id && (
         <div className="row">
           <button className="btn danger" disabled={action.busy} onClick={remove}>
-            Delete site
+            Delete page
           </button>
         </div>
       )}

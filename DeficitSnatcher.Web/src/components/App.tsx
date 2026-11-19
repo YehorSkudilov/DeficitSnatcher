@@ -3,23 +3,27 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { api, getToken, setSignedOutHandler, setToken, type Dashboard as DashboardData } from "@/lib/api";
 import { Dashboard } from "./Dashboard";
-import { Products } from "./Products";
-import { Sites } from "./Sites";
+import { ProductPage, Products } from "./Products";
 import { SiteEditor } from "./SiteEditor";
-import { PurchaseDetail, Purchases } from "./Purchases";
-import { Scans } from "./Scans";
+import { PurchaseDetail } from "./Purchases";
+import { Logs } from "./Logs";
 import { Deploy } from "./Deploy";
-import { Activity } from "./Activity";
 import { SettingsPage } from "./Settings";
 import { Login } from "./Login";
 import { useData } from "./ui";
 
-/** The screen from the address's #part: #sites, #site/12, #site/new… */
+/** The screen from the address's #part: #products, #product/3, #site/12, #logs/scans?site=3, #purchase/7… */
 function subscribeHash(f: () => void) {
   window.addEventListener("hashchange", f);
   return () => window.removeEventListener("hashchange", f);
 }
-const readHash = () => window.location.hash.replace(/^#\/?/, "") || "dashboard";
+// Addresses from before the menu was merged (bookmarks, notification links) still land in the right place.
+const moved: Record<string, string> = { sites: "products", scans: "logs/scans", purchases: "logs/checkouts", activity: "logs/activity" };
+const readHash = () => {
+  const route = window.location.hash.replace(/^#\/?/, "") || "dashboard";
+  const [path, search] = route.split("?");
+  return moved[path] ? moved[path] + (search ? `?${search}` : "") : route;
+};
 
 export function go(route: string) {
   window.location.hash = route;
@@ -27,11 +31,8 @@ export function go(route: string) {
 
 const nav = [
   ["dashboard", "Dashboard"],
-  ["products", "Price ranges"],
-  ["sites", "Sites"],
-  ["scans", "Scans"],
-  ["purchases", "Checkouts"],
-  ["activity", "Activity"],
+  ["products", "Products"],
+  ["logs", "Logs"],
   ["settings", "Settings"],
   ["deploy", "Deploy"],
 ] as const;
@@ -56,7 +57,7 @@ function Shell({ route, onSignOut }: { route: string; onSignOut: () => void }) {
   const { data: status } = useData(() => api.get<DashboardData>("/api/dashboard"), [], 10000);
   const [path, search] = route.split("?");
   const [screen, arg] = path.split("/");
-  const section = screen === "site" ? "sites" : screen === "purchase" ? "purchases" : screen;
+  const section = screen === "site" || screen === "product" ? "products" : screen === "purchase" ? "logs" : screen;
 
   return (
     <div className="shell">
@@ -78,7 +79,7 @@ function Shell({ route, onSignOut }: { route: string; onSignOut: () => void }) {
       <main className="main">
         {screen === "dashboard" && <Dashboard />}
         {screen === "products" && <Products />}
-        {screen === "sites" && <Sites />}
+        {screen === "product" && <ProductPage key={arg} id={arg === "new" ? null : Number(arg)} />}
         {screen === "site" && (
           <SiteEditor
             key={arg}
@@ -86,13 +87,11 @@ function Shell({ route, onSignOut }: { route: string; onSignOut: () => void }) {
             productId={Number(new URLSearchParams(search ?? "").get("product")) || undefined}
           />
         )}
-        {screen === "scans" && <Scans key={search} initial={search} />}
-        {screen === "purchases" && <Purchases />}
+        {screen === "logs" && <Logs tab={arg} search={search} />}
         {screen === "purchase" && <PurchaseDetail key={arg} id={Number(arg)} />}
         {screen === "deploy" && <Deploy />}
-        {screen === "activity" && <Activity />}
         {screen === "settings" && <SettingsPage />}
-        {!nav.some(([k]) => k === screen) && screen !== "site" && screen !== "purchase" && <p className="muted">Nothing here. <a href="#dashboard">Dashboard</a></p>}
+        {!nav.some(([k]) => k === screen) && !["site", "product", "purchase"].includes(screen) && <p className="muted">Nothing here. <a href="#dashboard">Dashboard</a></p>}
       </main>
     </div>
   );

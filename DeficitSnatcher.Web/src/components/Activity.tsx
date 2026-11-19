@@ -7,10 +7,11 @@ import { ErrorNote, Field, LevelDot, useAction, useData } from "./ui";
 
 const iso = (local: string) => (local ? new Date(local).toISOString() : "");
 
-/** Everything the bot did and saw, newest first: #activity. */
-export function Activity() {
-  const [level, setLevel] = useState("");
-  const [siteId, setSiteId] = useState("");
+/** Everything the bot did and saw, newest first: #logs/activity?site=3. */
+export function Activity({ initial }: { initial?: string }) {
+  const start = new URLSearchParams(initial ?? "");
+  const [level, setLevel] = useState(start.get("level") ?? "");
+  const [siteId, setSiteId] = useState(start.get("site") ?? "");
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -47,16 +48,15 @@ export function Activity() {
 
   return (
     <div className="stack" style={{ gap: 16 }}>
-      <div className="page-head">
-        <h1>Activity</h1>
+      <div className="page-head" style={{ marginBottom: 0 }}>
+        <p className="muted">
+          What happened: in stock alerts, price drops, checkouts, failing pages, settings changes. Each check is under{" "}
+          <a href="#logs/scans">Scans</a>, each checkout with its steps and screenshots under <a href="#logs/checkouts">Checkouts</a>.
+        </p>
         <button className="btn danger small" disabled={action.busy} onClick={clear}>
           Clear
         </button>
       </div>
-      <p className="muted" style={{ marginTop: -8 }}>
-        What happened: in stock alerts, price drops, checkouts, failing sites, settings changes. Each check is on <a href="#scans">Scans</a>, each
-        checkout with its steps and screenshots on <a href="#purchases">Checkouts</a>.
-      </p>
       <ErrorNote error={latest.error || action.error} />
       <div className="card filters">
         <Field label="Kind">

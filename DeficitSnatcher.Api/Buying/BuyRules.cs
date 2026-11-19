@@ -24,19 +24,23 @@ public static class BuyRules
         return new(true, total, $"In stock at {total:0.00}, in range {product.MinPrice:0.00}–{product.MaxPrice:0.00}");
     }
 
+    /// <summary>
+    /// The title against the keywords, compared without case, spaces, hyphens or ®/™ marks, so "PS5 Pro" matches "PS5™ Pro"
+    /// and "PlayStation 5 Pro" matches "PlayStation®5 Pro". Each comma-separated required group must be there ("a|b": either);
+    /// no excluded word may be.
+    /// </summary>
     public static bool TitleMatches(Product product, string? title, out string why)
     {
-        var t = title ?? "";
-        // Each comma-separated group must be there; "a|b" is either.
+        var t = Normalize(title ?? "");
         foreach (var group in Words(product.RequiredKeywords))
             if (!group.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Any(word => t.Contains(word, StringComparison.OrdinalIgnoreCase)))
+                    .Any(word => Normalize(word) is { Length: > 0 } w && t.Contains(w, StringComparison.Ordinal)))
             {
                 why = $"Title doesn't contain \"{group.Replace("|", "\" or \"")}\"";
                 return false;
             }
         foreach (var word in Words(product.ExcludedKeywords))
-            if (t.Contains(word, StringComparison.OrdinalIgnoreCase))
+            if (Normalize(word) is { Length: > 0 } w && t.Contains(w, StringComparison.Ordinal))
             {
                 why = $"Title contains excluded \"{word}\"";
                 return false;
@@ -44,6 +48,9 @@ public static class BuyRules
         why = "";
         return true;
     }
+
+    public static string Normalize(string s) => new(s.ToLowerInvariant()
+        .Where(c => !char.IsWhiteSpace(c) && c is not ('-' or '_' or '®' or '™' or '©' or '\u00a0')).ToArray());
 
     private static IEnumerable<string> Words(string list) =>
         list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

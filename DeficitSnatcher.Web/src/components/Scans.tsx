@@ -22,10 +22,15 @@ const empty: Filters = { productId: "", siteId: "", outcome: "", from: "", to: "
 /** datetime-local → ISO (local time to UTC). */
 const iso = (local: string) => (local ? new Date(local).toISOString() : "");
 
-/** Every check of every site, found or not: #scans, or #scans?site=3&outcome=InStock. */
+/** Every check of every page, found or not: #logs/scans, or #logs/scans?site=3&outcome=InStock. */
 export function Scans({ initial }: { initial?: string }) {
   const start = new URLSearchParams(initial ?? "");
-  const [f, setF] = useState<Filters>({ ...empty, siteId: start.get("site") ?? "", outcome: start.get("outcome") ?? "" });
+  const [f, setF] = useState<Filters>({
+    ...empty,
+    productId: start.get("product") ?? "",
+    siteId: start.get("site") ?? "",
+    outcome: start.get("outcome") ?? "",
+  });
   const [older, setOlder] = useState<Scan[]>([]);
   const [done, setDone] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
@@ -91,8 +96,11 @@ export function Scans({ initial }: { initial?: string }) {
 
   return (
     <div className="stack" style={{ gap: 16 }}>
-      <div className="page-head">
-        <h1>Scans</h1>
+      <div className="page-head" style={{ marginBottom: 0 }}>
+        <p className="muted">
+          Every check of every page, whether it found the console or not: price, stock, the verdict against your range, and what was done
+          about it. Kept {settings.data?.scanHistoryDays ? `${settings.data.scanHistoryDays} days` : "forever"} (Settings).
+        </p>
         <div className="row">
           <button className="btn small" onClick={() => set(empty)}>
             Reset filters
@@ -102,10 +110,6 @@ export function Scans({ initial }: { initial?: string }) {
           </button>
         </div>
       </div>
-      <p className="muted" style={{ marginTop: -8 }}>
-        Every check of every site, whether it found the console or not: price, stock, the verdict against your range, and what was done
-        about it. Kept {settings.data?.scanHistoryDays ? `${settings.data.scanHistoryDays} days` : "forever"} (Settings).
-      </p>
       <ErrorNote error={page.error || more.error || clear.error} />
 
       <div className="card stack">

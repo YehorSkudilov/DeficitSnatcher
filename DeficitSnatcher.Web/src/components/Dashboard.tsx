@@ -74,11 +74,11 @@ export function Dashboard() {
               </span>
             </div>
             <div className="row">
-              <a className="btn small" href="#products">
+              <a className="btn small" href={`#product/${p.id}`}>
                 Edit range
               </a>
               <a className="btn small primary" href={`#site/new?product=${p.id}`}>
-                Add site
+                Add page
               </a>
             </div>
           </div>
@@ -90,7 +90,7 @@ export function Dashboard() {
         <div className="card">
           <div className="card-head">
             <h2>Recent activity</h2>
-            <a href="#activity" className="small">
+            <a href="#logs/activity" className="small">
               All
             </a>
           </div>
@@ -110,7 +110,7 @@ export function Dashboard() {
         <div className="card">
           <div className="card-head">
             <h2>Purchases</h2>
-            <a href="#purchases" className="small">
+            <a href="#logs/checkouts" className="small">
               All
             </a>
           </div>
