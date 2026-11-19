@@ -267,6 +267,16 @@ function AiSettings({ s, set }: { s: Settings; set: (patch: Partial<Settings>) =
         details are typed. Every call is in each page&apos;s Logs → AI.
       </p>
       <Check label={<b>AI on</b>} checked={s.aiEnabled} onChange={(aiEnabled) => set({ aiEnabled })} />
+      {status.data && (
+        <div className="small">
+          Used today: <b>{status.data.tokensToday.toLocaleString()}</b>
+          {status.data.dailyTokenLimit > 0 && <> of {status.data.dailyTokenLimit.toLocaleString()}</>} tokens.{" "}
+          <span className="muted">
+            The AI is only asked when needed: setting a page up, a checkout step breaking, a page that stops reading (at most every{" "}
+            {s.aiCooldownHours || 6} h), and checking a real order before it&apos;s placed.
+          </span>
+        </div>
+      )}
       <div className="fields">
         <Field label="Model" hint="E.g. gpt-5-mini (fast, cheap) or gpt-5 (smarter).">
           <input type="text" value={s.aiModel} onChange={(e) => set({ aiModel: e.target.value })} />
@@ -282,6 +292,12 @@ function AiSettings({ s, set }: { s: Settings; set: (patch: Partial<Settings>) =
         </Field>
         <Field label="Most AI actions per checkout">
           <NumberInput value={s.aiMaxActions} min={5} onChange={(v) => set({ aiMaxActions: v ?? 30 })} />
+        </Field>
+        <Field label="Most AI tokens per day" hint="The AI rests once they're used (until midnight UTC); everything else carries on. 0: no limit.">
+          <NumberInput value={s.aiDailyTokenLimit} min={0} step={10000} onChange={(v) => set({ aiDailyTokenLimit: v ?? 0 })} />
+        </Field>
+        <Field label="Rest after a failure (hours)" hint="When the AI fails on a page, automatic runs don't ask it again for this long. Buttons always do.">
+          <NumberInput value={s.aiCooldownHours} min={0} onChange={(v) => set({ aiCooldownHours: v ?? 6 })} />
         </Field>
         <Field label="Tax and fees allowed (%)" hint="Before the AI places a real order it reads the total: at most the maximum price plus this.">
           <NumberInput value={s.maxTaxPercent} min={0} onChange={(v) => set({ maxTaxPercent: v ?? 15 })} />

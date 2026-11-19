@@ -185,7 +185,7 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
 
         var parts = new List<object> { OpenAiClient.Text(q.ToString()) };
         if (state.Screenshot != null)
-            parts.Add(OpenAiClient.Image(state.Screenshot));
+            parts.Add(OpenAiClient.Image(state.Screenshot, detail: "low"));
         var answer = await ai.AskJsonAsync(purpose, siteId, null, System, parts, ct);
 
         string? S(string name) => answer.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && v.GetString() is { Length: > 0 } s ? s.Trim() : null;

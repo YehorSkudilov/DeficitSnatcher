@@ -66,6 +66,12 @@ public sealed record BotSettings
     /// <summary>Before a saved checkout's final step places a real order, the AI reads the order: only the product, at most
     /// the units per order, total within the limit. Off: saved steps place the order without that check.</summary>
     public bool AiCheckOrder { get; init; } = true;
+    /// <summary>Most tokens the AI may use in a day (UTC); once used up the AI rests until the next day and everything else
+    /// carries on without it. 0: no limit.</summary>
+    public int AiDailyTokenLimit { get; init; } = 300_000;
+    /// <summary>After the AI fails on a page (its checkout, or re-learning how to read it), it isn't asked again
+    /// automatically for this long. What's started by hand always asks it.</summary>
+    public int AiCooldownHours { get; init; } = 6;
 
     // Notifications
     public string DiscordWebhookUrl { get; init; } = "";
@@ -100,6 +106,8 @@ public sealed record BotSettings
         AiReasoningEffort = (AiReasoningEffort ?? "").Trim().ToLowerInvariant(),
         AiMaxActions = Math.Clamp(AiMaxActions, 5, 100),
         MaxTaxPercent = Math.Clamp(MaxTaxPercent, 0, 50),
+        AiDailyTokenLimit = Math.Max(0, AiDailyTokenLimit),
+        AiCooldownHours = Math.Clamp(AiCooldownHours, 0, 24 * 7),
         DiscordWebhookUrl = DiscordWebhookUrl?.Trim() ?? "",
         TelegramBotToken = TelegramBotToken?.Trim() ?? "",
         TelegramChatId = TelegramChatId?.Trim() ?? "",

@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DeficitSnatcher.Api.Controllers;
 
-public sealed record AiStatus(bool HasKey, bool Enabled, string Model);
+public sealed record AiStatus(bool HasKey, bool Enabled, string Model, int TokensToday, int DailyTokenLimit);
 public sealed record AiSetupRequest(string Url, int ProductId, int? SiteId, string? Cookies, bool RunOnPc = false);
 public sealed record AiCallDto(long Id, DateTimeOffset At, string Purpose, int? SiteId, string? SiteName, int? PurchaseId, string Model,
     int InputTokens, int OutputTokens, int DurationMs, bool Ok, string Summary);
@@ -23,7 +23,7 @@ public sealed class AiController(AppDbContext db, OpenAiClient ai, PageSetup set
     public async Task<AiStatus> Status(CancellationToken ct)
     {
         var s = await settingsStore.GetAsync(ct);
-        return new AiStatus(ai.HasKey, s.AiEnabled, s.AiModel);
+        return new AiStatus(ai.HasKey, s.AiEnabled, s.AiModel, await ai.TokensTodayAsync(ct), s.AiDailyTokenLimit);
     }
 
     /// <summary>Reads the page and suggests its settings (checked before they're returned). Nothing is saved.</summary>

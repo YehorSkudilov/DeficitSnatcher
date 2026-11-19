@@ -34,6 +34,10 @@ Turned on by the `OPENAI_API_KEY` secret; model and options in Settings. Every c
 - **Fixes broken checkouts**: when a saved step fails (the store changed its page), the AI takes over from that screen,
   finishes, and saves the corrected steps. Pages without steps are bought by the AI directly.
 - **Fixes reading**: when a page keeps failing or showing no price or stock, the AI re-learns it (at most every 6 hours).
+- **Token use is capped.** The AI is only asked when needed (setting a page up, a step breaking, a page that stops
+  reading, checking a real order). After it fails on a page, automatic runs leave it out for 6 hours (buttons still ask
+  it), and it stops for the day after 300,000 tokens; checks and saved steps carry on without it. Both in Settings → AI,
+  with today's usage.
 - The AI never sees the card or address: it writes `{{card.number}}`-style placeholders that are filled in locally, and
   gets no screenshots once card details are typed. Before a real order it must read the order total, which must be within
   the maximum price plus the allowed tax (15% by default), or the order isn't placed.

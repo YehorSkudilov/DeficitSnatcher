@@ -113,7 +113,7 @@ public sealed class ScanFollowUp(IServiceScopeFactory scopes, BrowserPool browse
                 using var scope = scopes.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var site = await db.Sites.Include(s => s.Product).FirstOrDefaultAsync(s => s.Id == siteId);
-                if (site?.Product == null || site.LastAiFixAt is { } last && DateTimeOffset.UtcNow - last < TimeSpan.FromHours(6))
+                if (site?.Product == null || site.LastAiFixAt is { } last && DateTimeOffset.UtcNow - last < TimeSpan.FromHours(Math.Max(1, settings.AiCooldownHours)))
                     return;
                 site.LastAiFixAt = DateTimeOffset.UtcNow;
                 await db.SaveChangesAsync();

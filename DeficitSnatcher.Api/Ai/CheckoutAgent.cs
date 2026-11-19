@@ -245,7 +245,7 @@ public sealed partial class CheckoutAgent(OpenAiClient ai)
             OpenAiClient.Text($"Wanted: {goal.Quantity} × {goal.ProductName}. Allowed total: at most {goal.MaxTotal:0.00} {goal.Currency}.\n\n{state.Describe(6000)}"),
         };
         if (state.Screenshot != null)
-            parts.Add(OpenAiClient.Image(state.Screenshot));
+            parts.Add(OpenAiClient.Image(state.Screenshot, detail: "low"));
         JsonElement a;
         try
         {

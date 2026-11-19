@@ -408,6 +408,9 @@ namespace DeficitSnatcher.Api.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTimeOffset?>("AiCheckoutFailedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<bool>("AutoBuy")
                         .HasColumnType("boolean");
 

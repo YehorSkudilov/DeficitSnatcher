@@ -39,6 +39,9 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
         var settings = await settingsStore.GetAsync(ct);
         if (!settings.AiEnabled)
             throw new AiException("The AI is turned off in Settings.");
+        if (settings.AiDailyTokenLimit > 0 && await TokensTodayAsync(ct) >= settings.AiDailyTokenLimit)
+            throw new AiException($"Today's AI limit of {settings.AiDailyTokenLimit:N0} tokens is used up; it starts again at midnight UTC "
+                + "(Settings → AI). Checks and saved steps carry on without it.");
 
         var body = new Dictionary<string, object>
         {
@@ -120,6 +123,16 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
                 Summary = Short(error ?? answer, 8000),
             });
         }
+    }
+
+    /// <summary>Tokens used since midnight UTC.</summary>
+    public async Task<int> TokensTodayAsync(CancellationToken ct = default)
+    {
+        var since = new DateTimeOffset(DateTimeOffset.UtcNow.Date, TimeSpan.Zero);
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SumAsync(
+            db.AiCalls.Where(c => c.At >= since), c => c.InputTokens + c.OutputTokens, ct);
     }
 
     private async Task RecordAsync(AiCall call)

@@ -269,7 +269,7 @@ export type Scan = {
 
 export type ScanSnapshot = { reason: string; hasScreenshot: boolean; hasSource: boolean; sourceType: string | null; error: string | null };
 
-export type AiStatus = { hasKey: boolean; enabled: boolean; model: string };
+export type AiStatus = { hasKey: boolean; enabled: boolean; model: string; tokensToday: number; dailyTokenLimit: number };
 
 export type SetupSuggestion = {
   name: string | null;
@@ -394,6 +394,8 @@ export type Settings = {
   aiSendScreenshots: boolean;
   maxTaxPercent: number;
   aiCheckOrder: boolean;
+  aiDailyTokenLimit: number;
+  aiCooldownHours: number;
   discordWebhookUrl: string;
   telegramBotToken: string;
   telegramChatId: string;
