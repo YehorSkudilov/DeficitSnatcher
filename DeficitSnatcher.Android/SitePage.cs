@@ -18,8 +18,6 @@ public sealed class SitePage : ContentPage
     {
         Title = "Site";
         BackgroundColor = Theme.Background;
-        // Below the status bar (clock, battery) and clear of a camera cutout: Android 15 draws apps edge to edge.
-        SafeAreaEdges = new SafeAreaEdges(SafeAreaRegions.Container);
         _web.Navigating += OnNavigating;
         _web.Navigated += async (_, e) =>
         {
