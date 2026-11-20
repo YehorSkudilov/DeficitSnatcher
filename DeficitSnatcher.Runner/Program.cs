@@ -36,6 +36,8 @@ static partial class Helper
         public string? Key { get; set; }
         public bool Headless { get; set; }
         public bool Autostart { get; set; } = true;
+        /// <summary>Installs new versions by itself (checked every few hours).</summary>
+        public bool AutoUpdate { get; set; } = true;
     }
 
     sealed record State(bool Running, bool Connected, string? Site, string? Browser, DateTimeOffset? Since, string? LastError, int Pid);
@@ -57,6 +59,9 @@ static partial class Helper
         // The background helper itself (what autostart runs): no window.
         if (command == "run")
             return await RunAsync();
+        // A new version, started by the old one (Windows): it takes over once that one has stopped.
+        if (command == "finish-update")
+            return FinishUpdate(args.Length > 1 && int.TryParse(args[1], out var oldPid) ? oldPid : 0);
 
         // Started without a terminal (double-clicked on Windows): a window to talk in.
         Terminal.Open();
@@ -86,9 +91,11 @@ static partial class Helper
                 "window" => Window(args.Length > 1 ? args[1] : ""),
                 "autostart" => Autostart(args.Length > 1 ? args[1] : ""),
                 "headless" => Headless(args.Length > 1 ? args[1] : ""),
+                "update" => SendCommand("update", "Checking for a new version: deficitsnatcher logs to see how it went."),
+                "autoupdate" => AutoUpdate(args.Length > 1 ? args[1] : ""),
                 "logs" => Logs(args.Length > 1 && int.TryParse(args[1], out var n) ? n : 40),
                 "uninstall" => Uninstall(),
-                "version" => Print($"Deficit Snatcher PC helper {typeof(Helper).Assembly.GetName().Version}"),
+                "version" => Print($"Deficit Snatcher PC helper {MyVersion}"),
                 _ => Help(),
             };
         }
@@ -184,6 +191,7 @@ static partial class Helper
         }
         Console.WriteLine($"Autostart:  {(c.Autostart ? "on" : "off")}");
         Console.WriteLine($"Window:     {(c.Headless ? "none (headless)" : "minimised Chrome")}");
+        Console.WriteLine($"Version:    {MyVersion} (updates by itself: {(c.AutoUpdate ? "on" : "off")})");
         Console.WriteLine($"Files:      {Home}");
         return 0;
     }
@@ -222,6 +230,25 @@ static partial class Helper
             return Fail("It isn't running: deficitsnatcher start");
         File.WriteAllText(CommandFile, what);
         return Print(what == "show" ? "Showing the helper's Chrome." : "Minimised the helper's Chrome.");
+    }
+
+    static int AutoUpdate(string what)
+    {
+        if (what is not ("on" or "off"))
+            return Fail("deficitsnatcher autoupdate on | off");
+        var c = LoadConfig();
+        c.AutoUpdate = what == "on";
+        SaveConfig(c);
+        return Print(c.AutoUpdate ? "It installs new versions by itself." : "It no longer updates by itself (deficitsnatcher update, or Update on the site).");
+    }
+
+    /// <summary>Passes a command to the running helper.</summary>
+    static int SendCommand(string cmd, string done)
+    {
+        if (!IsRunning())
+            return Fail("It isn't running: deficitsnatcher start");
+        File.WriteAllText(CommandFile, cmd);
+        return Print(done);
     }
 
     static int Autostart(string what)
@@ -288,6 +315,9 @@ static partial class Helper
               deficitsnatcher window show     show its Chrome (to sign in to stores); window hide to minimise it
               deficitsnatcher autostart on    start at every login (off: only when you start it)
               deficitsnatcher headless on     no Chrome window at all (off: minimised window, the default)
+              deficitsnatcher update          install a new version now, if there is one
+              deficitsnatcher autoupdate off  don't update by itself (on: it does, the default)
+              deficitsnatcher version         which version this is
               deficitsnatcher logs [lines]    what it's been doing
               deficitsnatcher uninstall       stop it and don't start it again
             """);
@@ -419,24 +449,60 @@ static partial class Helper
         var state = new State(true, false, c.Site, null, null, null, Environment.ProcessId);
         WriteState(state);
 
+        // Updates: a new version, when there is one, replaces this one and it stops (see Updater).
+        var exitCode = 0;
+        var updating = new SemaphoreSlim(1, 1);
+        Func<Task> tryUpdate = async () =>
+        {
+            if (!await updating.WaitAsync(0))
+                return;
+            try
+            {
+                if (await Updater.InstallIfNewerAsync() is { } code)
+                {
+                    exitCode = code;
+                    stop.Cancel();
+                }
+            }
+            finally
+            {
+                updating.Release();
+            }
+        };
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromMinutes(2));
+            while (!stop.IsCancellationRequested)
+            {
+                if (LoadConfig().AutoUpdate)
+                    await tryUpdate();
+                await Task.Delay(TimeSpan.FromHours(6));
+            }
+        });
+
         // Commands from the terminal (stop, window show/hide), through a file.
         IBrowserContext? browser = null;
         // Headless, but the site needs you (sign in, prove you're human): Chrome runs with a window until this time, then
         // goes back to headless. The page to open once it's up.
         var visibleUntil = DateTime.MinValue;
-        string? pendingUrl = null;
+        var lastShow = DateTime.MinValue;
+        var pendingUrls = new System.Collections.Concurrent.ConcurrentQueue<string>();
         var runningHeadless = false;
         CancellationTokenSource? restartChrome = null;
         var restartNow = false;
         Func<string, Task> show = async url =>
         {
             visibleUntil = DateTime.UtcNow.AddMinutes(20);
+            lastShow = DateTime.UtcNow;
             if (runningHeadless || browser == null)
             {
-                Log("The site needs you: starting Chrome with a window.");
-                pendingUrl = url;
-                restartNow = true;
-                restartChrome?.Cancel();
+                pendingUrls.Enqueue(url);
+                if (!restartNow)
+                {
+                    Log("The site needs you: starting Chrome with a window.");
+                    restartNow = true;
+                    restartChrome?.Cancel();
+                }
                 return;
             }
             await Chrome.OpenWindowAsync(browser, url);
@@ -461,6 +527,8 @@ static partial class Helper
                 Log($"Command: {cmd}");
                 if (cmd == "stop")
                     stop.Cancel();
+                else if (cmd == "update")
+                    await tryUpdate();
                 else if (browser != null && cmd is "show" or "hide")
                     await Chrome.SetWindowAsync(browser, cmd == "show" ? "normal" : "minimized");
             }
@@ -470,10 +538,13 @@ static partial class Helper
         {
             while (!stop.IsCancellationRequested)
             {
-                await Task.Delay(30000);
-                if (c.Headless && !runningHeadless && browser != null && DateTime.UtcNow > visibleUntil)
+                await Task.Delay(15000);
+                // Back to headless when the sign-in windows are closed (a minute's grace), or after 20 minutes anyway.
+                var done = DateTime.UtcNow > visibleUntil || Chrome.OpenSignIns == 0 && DateTime.UtcNow - lastShow > TimeSpan.FromMinutes(1);
+                if (c.Headless && !runningHeadless && browser != null && !restartNow && done)
                 {
                     Log("Back to running Chrome without a window.");
+                    visibleUntil = DateTime.MinValue;
                     restartNow = true;
                     restartChrome?.Cancel();
                 }
@@ -487,7 +558,9 @@ static partial class Helper
             {
                 c = LoadConfig();
                 restartNow = false;
-                var headless = c.Headless && DateTime.UtcNow > visibleUntil;
+                var headless = c.Headless && pendingUrls.IsEmpty && DateTime.UtcNow > visibleUntil;
+                if (headless)
+                    visibleUntil = DateTime.MinValue;
                 var (context, cdpUrl, name) = await Chrome.StartAsync(headless, Log);
                 browser = context;
                 runningHeadless = headless;
@@ -496,12 +569,9 @@ static partial class Helper
                 using var chromeClosed = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
                 restartChrome = chromeClosed;
                 context.Close += (_, _) => chromeClosed.Cancel();
-                if (pendingUrl is { } url)
-                {
-                    pendingUrl = null;
+                while (pendingUrls.TryDequeue(out var url))
                     await Chrome.OpenWindowAsync(context, url);
-                }
-                await ConnectLoopAsync(c, cdpUrl, name, change => WriteState(state = change(state)), show, chromeClosed.Token);
+                await ConnectLoopAsync(c, cdpUrl, name, change => WriteState(state = change(state)), show, tryUpdate, chromeClosed.Token);
                 if (!stop.IsCancellationRequested && !restartNow)
                     Log("Chrome was closed: starting it again in 5 s (deficitsnatcher stop to stop the helper).");
                 try
@@ -528,14 +598,15 @@ static partial class Helper
             {
             }
         }
-        Log("Stopped.");
+        Log(exitCode == 0 ? "Stopped." : "Stopped, to start the new version.");
         WriteState(state with { Running = false, Connected = false });
-        return 0;
+        lockStream.Dispose();
+        return exitCode;
     }
 
     /// <summary>Stays connected to the site (reconnecting when it drops), lending Chrome when the site asks.</summary>
     static async Task ConnectLoopAsync(Config c, string cdpUrl, string browserName, Action<Func<State, State>> update, Func<string, Task> show,
-        CancellationToken ct)
+        Func<Task> tryUpdate, CancellationToken ct)
     {
         var wsBase = new Uri(c.Site!.Replace("https://", "wss://").Replace("http://", "ws://").TrimEnd('/'));
         var delay = TimeSpan.FromSeconds(2);
@@ -544,7 +615,7 @@ static partial class Helper
             try
             {
                 using var control = Socket(c.Key!);
-                var query = $"?machine={Uri.EscapeDataString(Environment.MachineName)}&browser={Uri.EscapeDataString(browserName)}&can=show";
+                var query = $"?machine={Uri.EscapeDataString(Environment.MachineName)}&browser={Uri.EscapeDataString(browserName)}&can=show,update&version={MyVersion}";
                 await control.ConnectAsync(new Uri(wsBase, "/api/runner/connect" + query), ct);
                 Log("Connected to the site.");
                 update(s => s with { Connected = true, Since = DateTimeOffset.Now, LastError = null });
@@ -568,6 +639,12 @@ static partial class Helper
                     {
                         Log($"The site needs you on {su.Host}: bringing Chrome up.");
                         _ = Task.Run(() => show(showUrl));
+                    }
+                    // Update now (the site's button).
+                    else if (msg.RootElement.TryGetProperty("update", out _))
+                    {
+                        Log("The site asked to update.");
+                        _ = Task.Run(tryUpdate);
                     }
                 }
             }
@@ -848,17 +925,28 @@ static partial class Helper
             }
 
             var start = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
+            // Tabs Chrome brought back from last time: the site opens what it needs.
+            foreach (var restored in context.Pages.Skip(1).ToList())
+                try
+                {
+                    await restored.CloseAsync();
+                }
+                catch (PlaywrightException)
+                {
+                }
             await start.SetContentAsync("""
                 <html><head><title>Deficit Snatcher PC helper</title></head>
                 <body style="font-family:system-ui;background:#0a0c10;color:#eee;padding:40px;max-width:640px">
                 <h1 style="color:#ff4d5e">Deficit Snatcher PC helper</h1>
-                <p>This Chrome belongs to the helper; it stays minimised. The site checks and buys the pages set to <b>Run on my PC</b>
-                here, in new tabs.</p>
-                <p>Sign in to the stores (Walmart, Amazon, Costco…) in a new tab once: this Chrome keeps its own profile.</p>
-                <p>When a store asks you to prove you're human (<i>Press &amp; Hold</i>), this window comes up and you get an alert.</p>
+                <p>This Chrome belongs to the helper; this window stays minimised and the bot's tabs open here.</p>
+                <p>To sign in to a store, press <b>Log in</b> next to it on the site's Helpers tab: it opens in a window of its own.</p>
+                <p>When a store asks you to prove you're human (<i>Press &amp; Hold</i>), that page opens in a window of its own too, and you
+                get an alert.</p>
                 <p style="color:#999">In a terminal: <code>deficitsnatcher window hide</code> to minimise it, <code>deficitsnatcher help</code>.</p>
                 </body></html>
                 """);
+            // How the site finds this window, to open the bot's tabs in it (not in a sign-in window).
+            await start.EvaluateAsync("() => { window.name = 'ds-home'; }");
 
             using var http = new HttpClient();
             var version = JsonDocument.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/json/version")).RootElement;
@@ -874,18 +962,54 @@ static partial class Helper
             return (context, cdpUrl, full);
         }
 
-        /// <summary>The page in a window of its own, in front (the bot's tabs open in the background elsewhere).</summary>
+        /// <summary>The windows opened for the owner (sign in, prove you're human), one per store.</summary>
+        static readonly List<(IPage Page, string Store)> SignIns = [];
+
+        public static int OpenSignIns
+        {
+            get
+            {
+                lock (SignIns)
+                {
+                    SignIns.RemoveAll(p => p.Page.IsClosed);
+                    return SignIns.Count;
+                }
+            }
+        }
+
+        static string Store(string url) =>
+            Uri.TryCreate(url, UriKind.Absolute, out var u) ? (u.Host.StartsWith("www.") ? u.Host[4..] : u.Host) : "";
+
+        /// <summary>
+        /// The page in a window of its own, in front: one per store (asked again, that window comes back to the front). The
+        /// bot's tabs stay in the helper's own minimised window.
+        /// </summary>
         public static async Task OpenWindowAsync(IBrowserContext context, string url)
         {
             try
             {
-                var first = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
-                var cdp = await context.NewCDPSessionAsync(first);
-                await cdp.SendAsync("Target.createTarget", new Dictionary<string, object> { ["url"] = url, ["newWindow"] = true });
-                await cdp.DetachAsync();
-                await Task.Delay(1500);
-                var page = context.Pages.LastOrDefault(p => p.Url.StartsWith(url[..Math.Min(url.Length, 30)], StringComparison.OrdinalIgnoreCase))
-                           ?? context.Pages.Last();
+                IPage? page;
+                lock (SignIns)
+                    page = SignIns.FirstOrDefault(p => !p.Page.IsClosed && p.Store == Store(url)).Page;
+                if (page == null)
+                {
+                    var before = context.Pages.ToHashSet();
+                    var first = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+                    var cdp = await context.NewCDPSessionAsync(first);
+                    await cdp.SendAsync("Target.createTarget", new Dictionary<string, object> { ["url"] = url, ["newWindow"] = true });
+                    await cdp.DetachAsync();
+                    for (var i = 0; i < 50 && page == null; i++)
+                    {
+                        await Task.Delay(100);
+                        page = context.Pages.FirstOrDefault(p => !before.Contains(p) && p.Url.StartsWith(url[..Math.Min(url.Length, 20)], StringComparison.OrdinalIgnoreCase))
+                               ?? (i > 20 ? context.Pages.FirstOrDefault(p => !before.Contains(p)) : null);
+                    }
+                    if (page == null)
+                        throw new InvalidOperationException("Chrome didn't open the window.");
+                    lock (SignIns)
+                        SignIns.Add((page, Store(url)));
+                    Log($"Opened {Store(url)} in a window for you.");
+                }
                 var c2 = await context.NewCDPSessionAsync(page);
                 var window = await c2.SendAsync("Browser.getWindowForTarget");
                 await c2.SendAsync("Browser.setWindowBounds", new Dictionary<string, object>
@@ -1001,6 +1125,160 @@ static partial class Helper
             Console.WriteLine();
             Console.WriteLine("Press Enter to close this window.");
             Console.ReadLine();
+        }
+    }
+}
+
+static partial class Helper
+{
+    /// <summary>Where new versions are (DEFICITSNATCHER_RELEASES overrides it, for testing).</summary>
+    static string ReleaseBase => Environment.GetEnvironmentVariable("DEFICITSNATCHER_RELEASES")
+        ?? "https://github.com/YehorSkudilov/DeficitSnatcher/releases/download/pc-helper";
+
+    /// <summary>This build's version (CI sets it: 1.0.{build number}).</summary>
+    static string MyVersion => (typeof(Helper).Assembly.GetName().Version ?? new Version(1, 0, 0)).ToString(3);
+
+    static string Rid => OperatingSystem.IsWindows() ? "win-x64"
+        : OperatingSystem.IsMacOS() ? (RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "osx-arm64" : "osx-x64")
+        : "linux-x64";
+
+    /// <summary>
+    /// Finds and installs a newer helper from the site's download (the pc-helper release). Windows can't replace a running
+    /// program, so the new copy is started to take over once this one has stopped; elsewhere the files are swapped in place
+    /// and this one stops with an error code, which makes the service manager start the new version (or it's started
+    /// directly when there's no service).
+    /// </summary>
+    static class Updater
+    {
+        /// <summary>The exit code to stop with, when a new version is in place; null: nothing to do.</summary>
+        public static async Task<int?> InstallIfNewerAsync()
+        {
+            try
+            {
+                using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("DeficitSnatcher-PC-helper");
+                var latestText = (await http.GetStringAsync($"{ReleaseBase}/version.txt")).Trim();
+                if (!Version.TryParse(latestText, out var latest) || !Version.TryParse(MyVersion, out var mine))
+                {
+                    Log($"Update: couldn't read the latest version ({latestText}).");
+                    return null;
+                }
+                if (latest <= mine)
+                {
+                    Log($"Update: {MyVersion} is the latest.");
+                    return null;
+                }
+                Log($"Update: downloading {latest.ToString(3)} (this is {MyVersion}).");
+                var root = Path.Combine(Home, "update");
+                if (Directory.Exists(root))
+                    Directory.Delete(root, recursive: true);
+                var dir = Path.Combine(root, latest.ToString(3));
+                Directory.CreateDirectory(dir);
+                var zip = Path.Combine(root, "helper.zip");
+                await using (var file = File.Create(zip))
+                await using (var body = await http.GetStreamAsync($"{ReleaseBase}/DeficitSnatcher-PC-helper-{Rid}.zip"))
+                    await body.CopyToAsync(file);
+                System.IO.Compression.ZipFile.ExtractToDirectory(zip, dir, overwriteFiles: true);
+                File.Delete(zip);
+                var newExe = Path.Combine(dir, ExeName);
+                if (!File.Exists(newExe))
+                {
+                    Log("Update: the download doesn't have the helper in it.");
+                    return null;
+                }
+
+                if (OperatingSystem.IsWindows())
+                {
+                    Process.Start(new ProcessStartInfo(newExe, $"finish-update {Environment.ProcessId}")
+                        { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Home });
+                    Log($"Update: {latest.ToString(3)} takes over once this stops.");
+                    return 0;
+                }
+
+                // Unix: a running program's files can be replaced (removed, then written anew).
+                MakeExecutable(dir);
+                foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+                {
+                    var target = Path.Combine(AppDir, Path.GetRelativePath(dir, f));
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    if (File.Exists(target))
+                        File.Delete(target);
+                    File.Copy(f, target);
+                    File.SetUnixFileMode(target, File.GetUnixFileMode(f));
+                }
+                Directory.Delete(root, recursive: true);
+                Log($"Update: {latest.ToString(3)} is installed; restarting.");
+                if (Service.StartsItself && Service.IsEnabled())
+                    return 75; // The service manager starts it again (it restarts on an error exit).
+                Process.Start(new ProcessStartInfo("/bin/sh", ["-c", $"sleep 3; exec \"{InstalledExe}\" run"])
+                    { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Home });
+                return 0;
+            }
+            catch (Exception e)
+            {
+                Log("Update failed: " + e.Message.Split('\n')[0]);
+                return null;
+            }
+        }
+
+        static void MakeExecutable(string dir)
+        {
+            foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+            {
+                var name = Path.GetFileName(f);
+                if (name == ExeName || name == "node" || name.EndsWith(".sh", StringComparison.Ordinal))
+                    File.SetUnixFileMode(f, File.GetUnixFileMode(f) | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+            }
+        }
+    }
+
+    /// <summary>Windows: the new version, once the old one has stopped, copies itself into place and starts.</summary>
+    static int FinishUpdate(int oldPid)
+    {
+        try
+        {
+            if (oldPid > 0)
+                try
+                {
+                    using var old = Process.GetProcessById(oldPid);
+                    if (!old.WaitForExit(TimeSpan.FromMinutes(2)))
+                        old.Kill(entireProcessTree: true);
+                }
+                catch (ArgumentException)
+                {
+                    // Already gone.
+                }
+            var here = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            // Its browser driver may still be closing: try for a minute.
+            for (var attempt = 1; ; attempt++)
+                try
+                {
+                    CopyDirectory(here, AppDir);
+                    break;
+                }
+                catch (IOException) when (attempt < 30)
+                {
+                    Thread.Sleep(2000);
+                }
+            Log($"Update: {MyVersion} is installed.");
+            var c = LoadConfig();
+            if (c.Autostart)
+                Service.Enable();
+            StartBackground();
+            return 0;
+        }
+        catch (Exception e)
+        {
+            Log("Update couldn't finish: " + e.Message);
+            // Don't leave it stopped: start what's installed.
+            try
+            {
+                StartBackground();
+            }
+            catch (Exception)
+            {
+            }
+            return 1;
         }
     }
 }

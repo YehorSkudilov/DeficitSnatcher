@@ -328,7 +328,12 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         var stores = await StoresAsync();
         var url = AccountUrl(domain, stores.TryGetValue(domain, out var s) ? s.Url : null);
         var context = await browsers.GetPcContextAsync(runnerId, ct);
-        if (await BrowserPool.IsHeadlessAsync(context))
+        if (hub.CanShow(runnerId))
+        {
+            // The helper opens it in a window of its own (one per store), starting Chrome with a window if it runs headless.
+            await hub.ShowAsync(runnerId, url);
+        }
+        else if (await BrowserPool.IsHeadlessAsync(context))
         {
             // No window to sign in on: the helper starts Chrome with one for a while, on this page.
             if (!await hub.ShowAsync(runnerId, url))

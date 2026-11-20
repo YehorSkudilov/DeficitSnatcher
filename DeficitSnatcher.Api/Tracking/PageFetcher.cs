@@ -81,6 +81,34 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
     private async Task<(string Html, string Worker)> RenderAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site? site,
         string worker)
     {
+        // On a helper: the page's own tab, kept open and refreshed each time, like a person leaving it open.
+        if (Pc.WorkerPool.PcId(worker) is { } runnerId && site != null && browsers.PcAvailable)
+        {
+            var gate = browsers.TabGate(runnerId, site.Id);
+            await gate.WaitAsync(ct);
+            try
+            {
+                var tab = await browsers.KeptTabAsync(runnerId, site.Id, url.ToString(), settings.RequestTimeoutSeconds * 1000, ct);
+                try
+                {
+                    await tab.WaitForLoadStateAsync(Microsoft.Playwright.LoadState.NetworkIdle, new() { Timeout = 8000 });
+                }
+                catch (TimeoutException)
+                {
+                }
+                await humanCheck.WaitIfBlockedAsync(tab, site.Id, site.Name, ct);
+                return (await tab.ContentAsync(), worker);
+            }
+            catch (PcHelperException)
+            {
+                // Its Chrome can't be reached: the usual way below (the server, when the helper isn't there).
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
         await using var lease = await browsers.OpenAsync(settings, cookies, worker, ct);
         var onPc = lease.OnPc;
         var page = await lease.NewPageAsync();

@@ -27,7 +27,12 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
         if (!_watching)
         {
             _watching = true;
-            runner.Changed += id => _pcBrowsers.TryRemove(id, out _);
+            runner.Changed += id =>
+            {
+                _pcBrowsers.TryRemove(id, out _);
+                foreach (var k in _tabs.Keys.Where(k => k.Runner == id).ToList())
+                    _tabs.TryRemove(k, out _);
+            };
         }
         if (_pcBrowsers.TryGetValue(runnerId, out var b) && b.IsConnected && b.Contexts.Count > 0)
             return b.Contexts[0];
@@ -63,6 +68,10 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
     {
         if (context.Browser is not { } browser)
             return await context.NewPageAsync();
+        // A bot tab: opened from the helper's own (minimised) window, so it lands there and never in a window the owner is
+        // using to sign in. Older helpers have no such window: a background tab.
+        if (!newWindow && await OpenFromHomeAsync(context) is { } fromHome)
+            return fromHome;
         string? targetId = null;
         try
         {
@@ -99,6 +108,74 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
             if (b.Contexts.Contains(context))
                 return id;
         return null;
+    }
+
+    // ---- Kept tabs: on a helper, each store page has its own tab, refreshed for every check (not opened and closed) ----
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(int Runner, int Site), (IPage Page, string Url)> _tabs = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(int Runner, int Site), SemaphoreSlim> _tabGates = new();
+
+    /// <summary>One check at a time per tab.</summary>
+    public SemaphoreSlim TabGate(int runnerId, int siteId) => _tabGates.GetOrAdd((runnerId, siteId), _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>
+    /// The page's tab on the helper, showing it fresh: reloaded if it's open on this address already, otherwise opened (in
+    /// the helper's own window) and taken there. Kept open afterwards. Call inside <see cref="TabGate"/>.
+    /// </summary>
+    public async Task<IPage> KeptTabAsync(int runnerId, int siteId, string url, int timeoutMs, CancellationToken ct)
+    {
+        var key = (runnerId, siteId);
+        if (_tabs.TryGetValue(key, out var tab) && !tab.Page.IsClosed && tab.Url == url)
+        {
+            await tab.Page.ReloadAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = timeoutMs });
+            return tab.Page;
+        }
+        var page = tab.Page is { IsClosed: false } open ? open : await OpenPcPageAsync(await GetPcContextAsync(runnerId, ct), newWindow: false);
+        _tabs[key] = (page, url);
+        await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = timeoutMs });
+        return page;
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IBrowserContext, IPage> Homes = new();
+
+    /// <summary>The helper's own page (window.name "ds-home"), and a new tab opened from it, in its window.</summary>
+    private static async Task<IPage?> OpenFromHomeAsync(IBrowserContext context)
+    {
+        try
+        {
+            if (!Homes.TryGetValue(context, out var home) || home.IsClosed)
+            {
+                home = null;
+                foreach (var p in context.Pages.ToList())
+                    if (p.Url == "about:blank" && await p.EvaluateAsync<string>("() => window.name") == "ds-home")
+                    {
+                        home = p;
+                        break;
+                    }
+                if (home == null)
+                    return null;
+                Homes.AddOrUpdate(context, home);
+            }
+            var mark = "about:blank#ds-" + Guid.NewGuid().ToString("N");
+            var cdp = await context.NewCDPSessionAsync(home);
+            await cdp.SendAsync("Runtime.evaluate", new Dictionary<string, object>
+            {
+                ["expression"] = $"window.open('{mark}', '_blank'); 0",
+                ["userGesture"] = true,
+            });
+            await cdp.DetachAsync();
+            for (var i = 0; i < 50; i++)
+            {
+                if (context.Pages.FirstOrDefault(p => p.Url == mark) is { } page)
+                    return page;
+                await Task.Delay(100);
+            }
+            return null;
+        }
+        catch (PlaywrightException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Does this helper's Chrome run without a window (deficitsnatcher headless on)?</summary>

@@ -32,6 +32,7 @@ function setupCode(site: string, key: string) {
 /** Every PC helper and the server: who's connected, what each has checked, and which stores each Chrome is signed in to. */
 export function Helpers() {
   const list = useData(() => api.get<WorkerInfo[]>("/api/runners"), [], 5000);
+  const versions = useData(() => api.get<{ latest: string | null; error: string | null }>("/api/runners/latest-version"), [], 600000);
   const helpers = list.data?.filter((w) => w.id != null) ?? [];
   const server = list.data?.find((w) => w.id == null);
   const connected = helpers.filter((h) => h.connected).length;
@@ -52,7 +53,7 @@ export function Helpers() {
         </div>
       )}
       {helpers.map((h) => (
-        <HelperCard key={h.id} h={h} reload={list.reload} />
+        <HelperCard key={h.id} h={h} reload={list.reload} latest={versions.data?.latest ?? null} />
       ))}
       {server && <ServerCard s={server} />}
       <AddHelper first={helpers.length === 0} reload={list.reload} />
@@ -98,8 +99,55 @@ const loginBadge: Record<string, [string, string]> = {
   unknown: ["", "Not checked yet"],
 };
 
-function HelperCard({ h, reload }: { h: WorkerInfo; reload: () => Promise<void> }) {
+/** -1, 0, 1 for "1.0.12" style versions. */
+function compareVersions(a: string, b: string) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return Math.sign(d);
+  }
+  return 0;
+}
+
+/** The helper's version, whether there's a newer one, and Update now. */
+function VersionRow({ h, latest, onUpdate, busy, asked }: { h: WorkerInfo; latest: string | null; onUpdate: () => void; busy: boolean; asked: boolean }) {
+  const behind = h.version != null && latest != null && compareVersions(h.version, latest) < 0;
+  return (
+    <div className="kv small">
+      <span className="faint">Version</span>
+      <span className="row" style={{ gap: 8 }}>
+        {h.connected ? (h.version ?? "an older helper (from before updates)") : "—"}
+        {h.connected && h.version && latest && (behind ? <span className="badge warn">{latest} available</span> : <span className="badge good">Up to date</span>)}
+        {h.connected && (h.canUpdate ? (
+          <button className={`btn small ${behind ? "primary" : "ghost"}`} disabled={busy || asked} onClick={onUpdate}>
+            {asked ? "Updating…" : behind ? "Update now" : "Check for update"}
+          </button>
+        ) : (
+          <span className="faint">To update this one, download it again below and open it once (setup is kept); after that it updates by itself.</span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+function HelperCard({ h, reload, latest }: { h: WorkerInfo; reload: () => Promise<void>; latest: string | null }) {
   const act = useAction();
+  const [updateAsked, setUpdateAsked] = useState<string | null>(null);
+  const update = async () => {
+    let ok = false;
+    await act.run(async () => {
+      await api.post(`/api/runners/${id}/update`);
+      ok = true;
+    });
+    if (ok) {
+      setUpdateAsked(h.version ?? "");
+      // Up to date already (or it didn't work): the button comes back after a few minutes.
+      setTimeout(() => setUpdateAsked(null), 180000);
+    }
+  };
+  // Back with another version: done.
+  const asked = updateAsked !== null && updateAsked === (h.version ?? "");
   const [opened, setOpened] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const id = h.id!;
@@ -167,6 +215,13 @@ function HelperCard({ h, reload }: { h: WorkerInfo; reload: () => Promise<void> 
         {!h.connected && h.lastSeen && <> · last seen {dateTime(h.lastSeen)}</>}
       </div>
       <Stats w={h} />
+      <VersionRow h={h} latest={latest} onUpdate={update} busy={act.busy} asked={asked} />
+      {asked && (
+        <div className="small faint">
+          Asked it to update: if there&apos;s a newer version it downloads it and restarts (a minute or two, it shows as disconnected
+          meanwhile). <code>deficitsnatcher logs</code> on that computer says how it went.
+        </div>
+      )}
 
       <div className="stack" style={{ gap: 8 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>

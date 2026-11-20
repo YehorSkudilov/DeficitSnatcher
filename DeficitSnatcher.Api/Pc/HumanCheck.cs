@@ -30,9 +30,9 @@ public sealed class HumanCheck(Notifier notifier, RunnerHub hub, BrowserPool bro
         if (vendor == null)
             return;
 
-        // A helper running Chrome without a window: it starts one, on this page, for the owner to do the check in. This job
-        // can't wait for that (the Chrome it's using goes away), so it stops; the next check carries on once it's done.
-        if (browsers.RunnerOf(page.Context) is { } runnerId && await BrowserPool.IsHeadlessAsync(page.Context))
+        // The helper opens this page in a window of its own for the owner (starting Chrome with a window if it runs headless),
+        // and the bot's tabs stay out of sight. This job doesn't wait: the next check carries on once it's done.
+        if (browsers.RunnerOf(page.Context) is { } runnerId && (hub.CanShow(runnerId) || await BrowserPool.IsHeadlessAsync(page.Context)))
         {
             var shown = await hub.ShowAsync(runnerId, page.Url);
             if (Throttle(siteId))

@@ -73,6 +73,7 @@ builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.RunnerHub>();
 builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.WorkerPool>();
 builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.HumanCheck>();
 builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.LoginWatcher>();
+builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.HelperVersions>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DeficitSnatcher.Api.Pc.LoginWatcher>());
 builder.Services.AddSingleton<BrowserPool>();
 // Timeouts are per request, from settings (PageFetcher).
