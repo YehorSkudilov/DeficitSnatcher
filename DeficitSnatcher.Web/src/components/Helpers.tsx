@@ -207,7 +207,8 @@ function HelperCard({ h, reload }: { h: WorkerInfo; reload: () => Promise<void> 
           </div>
         )}
         <div className="small faint">
-          Checked when the helper connects and every 6 hours. Signed out or a captcha sends you an alert (email too, if set up).
+          The helper stays connected all the time; only this sign-in check runs now and then: when it connects, then every 6 hours (or
+          Check now). Signed out or a captcha sends you an alert (email too, if set up).
         </div>
       </div>
 
