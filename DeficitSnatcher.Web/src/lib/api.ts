@@ -87,6 +87,7 @@ export type Product = {
   excludedKeywords: string;
   bought: number;
   sites: number;
+  autoBuyEnabled: boolean;
   checkingPaused: boolean;
   checkingResumeAt: string | null;
   createdAt: string;
