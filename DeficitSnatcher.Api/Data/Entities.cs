@@ -95,6 +95,8 @@ public class Site
     public DateTimeOffset? LastChangedAt { get; set; }
     public decimal? LastPrice { get; set; }
     public bool? LastInStock { get; set; }
+    /// <summary>Where the last stock came from, when the store says more (Best Buy: online and pickup).</summary>
+    public string? LastStockDetail { get; set; }
     public string? LastTitle { get; set; }
     /// <summary>Shopify: the variant the last check looked at ({{variantId}} in the checkout steps).</summary>
     public string? LastVariantId { get; set; }

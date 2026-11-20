@@ -278,7 +278,7 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
     {
         var verdict = s.Product == null
             ? new BuyRules.Verdict(false, null, "")
-            : BuyRules.Evaluate(s.Product, s, new PageResult { Price = s.LastPrice, InStock = s.LastInStock, Title = s.LastTitle });
+            : BuyRules.Evaluate(s.Product, s, new PageResult { Price = s.LastPrice, InStock = s.LastInStock, Title = s.LastTitle, StockDetail = s.LastStockDetail });
         if (s.LastCheckedAt == null)
             verdict = verdict with { Reason = "Not checked yet" };
         return new SiteDto(s.Id, s.ProductId, s.Product?.Name ?? "", s.Name, s.Url, s.Kind, s.Enabled, s.IntervalSeconds, s.ShippingCost,

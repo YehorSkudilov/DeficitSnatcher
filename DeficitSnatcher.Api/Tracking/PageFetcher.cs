@@ -205,7 +205,11 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
     /// <summary>A store's own stock lookup, when there was one (Best Buy), over what the page itself said.</summary>
     private static PageResult WithExtra(PageResult result, Uri url, string? extra) =>
         extra != null && BestBuyAvailability.Applies(url) ? BestBuyAvailability.Apply(result, extra)
-        : BestBuyAvailability.Applies(url) ? result with { Notes = [.. result.Notes, "best buy lookup: not answered; stock from the page"] }
+        : BestBuyAvailability.Applies(url) ? result with
+        {
+            StockDetail = "pickup not checked: Best Buy's stock lookup didn't answer",
+            Notes = [.. result.Notes, "best buy lookup: not answered; stock from the page"],
+        }
         : result;
 
     private static TimeSpan? RetryAfter(System.Net.Http.Headers.RetryConditionHeaderValue? header) =>

@@ -613,6 +613,9 @@ namespace DeficitSnatcher.Api.Data.Migrations
                         .HasPrecision(12, 2)
                         .HasColumnType("numeric(12,2)");
 
+                    b.Property<string>("LastStockDetail")
+                        .HasColumnType("text");
+
                     b.Property<string>("LastTitle")
                         .HasColumnType("text");
 

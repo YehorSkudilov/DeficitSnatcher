@@ -15,6 +15,9 @@ public sealed record PageResult
     public string? Title { get; init; }
     public string? Currency { get; init; }
     public string? VariantId { get; init; }
+    /// <summary>Where the stock came from, in a few words, when a store says more than in/out (Best Buy: "online: no ·
+    /// pickup: yes at Burnaby"); shown with the verdict.</summary>
+    public string? StockDetail { get; init; }
     /// <summary>Where each value came from (e.g. "json-ld", "selector"), for the site's Test button.</summary>
     public List<string> Notes { get; init; } = [];
     /// <summary>What was fetched (HTML or JSON), for the scan's snapshot; not sent to the web.</summary>

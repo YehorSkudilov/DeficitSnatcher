@@ -127,6 +127,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         site.LastCheckedAt = now;
         site.LastPrice = result.Price;
         site.LastInStock = result.InStock;
+        site.LastStockDetail = result.StockDetail;
         site.LastTitle = result.Title;
         site.LastVariantId = result.VariantId;
         site.LastError = null;

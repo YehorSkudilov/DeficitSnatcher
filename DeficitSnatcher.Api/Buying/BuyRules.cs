@@ -8,7 +8,14 @@ public static class BuyRules
 {
     public sealed record Verdict(bool Match, decimal? TotalPrice, string Reason);
 
+    /// <summary>The verdict, with where the stock came from when the store said more (Best Buy: online and pickup).</summary>
     public static Verdict Evaluate(Product product, Site site, PageResult result)
+    {
+        var verdict = EvaluateCore(product, site, result);
+        return string.IsNullOrEmpty(result.StockDetail) ? verdict : verdict with { Reason = $"{verdict.Reason} ({result.StockDetail})" };
+    }
+
+    private static Verdict EvaluateCore(Product product, Site site, PageResult result)
     {
         if (result.InStock != true)
             return new(false, null, result.InStock == false ? "Out of stock" : "Stock unknown");

@@ -86,8 +86,12 @@ public static class BestBuyAvailability
         var inStock = online == true || pickup == true;
         var note = $"stock: best buy lookup: online {Word(online, onlineStatus)}, pickup {Word(pickup, pickupStatus)}"
             + (stores.Count > 0 ? $" at {string.Join(", ", stores.Take(5))}" : "");
-        return result with { InStock = inStock, Notes = [.. result.Notes.Where(n => !n.StartsWith("stock:")), note] };
+        var detail = $"online: {Short(online)} · pickup: {Short(pickup)}" + (stores.Count > 0 ? $" at {string.Join(", ", stores.Take(3))}" : "");
+        return result with { InStock = inStock, StockDetail = detail, Notes = [.. result.Notes.Where(n => !n.StartsWith("stock:")), note] };
     }
+
+    private static string Short(bool? buyable) => buyable switch { true => "yes", false => "no", null => "?" };
+
 
     /// <summary>Whether a channel (shipping or pickup) can be bought, and its status word.</summary>
     private static (bool? Buyable, string? Status) Channel(JsonElement item, string name)
