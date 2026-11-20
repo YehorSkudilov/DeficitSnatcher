@@ -4,6 +4,23 @@ name: Deploy
 # with docker compose: the database, the API, Camoufox (the app's browser) and the site.
 on:
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the web app and API
+        required: false
+        type: boolean
+        default: true
+      build_android:
+        description: Build and publish the Android app
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: ["DeficitSnatcher.Android/**"]
+
+permissions:
+  contents: write
 
 concurrency:
   group: deploy
@@ -11,6 +28,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
@@ -106,3 +124,35 @@ jobs:
 
             docker image prune -f || echo "Couldn't remove old images; skipped."
             echo "Deployed $SHA."
+
+  android:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Build the APK
+        run: |
+          set -e
+          dotnet workload install maui-android
+          cd DeficitSnatcher.Android
+          dotnet build -t:InstallAndroidDependencies -f net11.0-android -p:AndroidSdkDirectory="$ANDROID_HOME" -p:AcceptAndroidSDKLicenses=True
+          dotnet publish -f net11.0-android -c Release -p:AndroidSdkDirectory="$ANDROID_HOME" -p:ApplicationVersion=${{ github.run_number }}
+          mkdir -p ../dist
+          cp bin/Release/net11.0-android/publish/ca.deficitsnatcher.app-Signed.apk ../dist/DeficitSnatcher.apk
+          echo "${{ github.run_number }}" > ../dist/version.txt
+          ls -la ../dist
+      - name: Publish to the android release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view android >/dev/null 2>&1 || gh release create android --title "Android app" --latest=false \
+            --notes "The Android app: download DeficitSnatcher.apk on the phone and open it (allow installing from your browser). It updates itself after that."
+          gh release upload android dist/DeficitSnatcher.apk --clobber
+          gh release upload android dist/version.txt --clobber
