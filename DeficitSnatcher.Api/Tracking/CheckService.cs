@@ -61,7 +61,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             log.LogInformation("Check of {Site} failed: {Error}", site.Name, message);
             if (settings.ScanSnapshots != "Off")
                 followUp.Snapshot(failed.Id, site.Url, site.CookiesEncrypted, "The check failed", null, null, worker,
-                    new Site { Id = site.Id, Kind = site.Kind, Url = site.Url });
+                    new Site { Id = site.Id, Url = site.Url });
             // Keeps failing in a way a different reader might get past (blocked, timed out, changed page), not a dead link.
             // (Not when the store's bot protection blocks it: re-reading the page can't get past that.)
             if (site.ConsecutiveErrors >= 3 && !message.Contains("404") && e is not (BlockedException or PcHelperException or BrowserEngineException))
@@ -128,7 +128,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             : null;
         if (reason != null && settings.ScanSnapshots != "Off")
             followUp.Snapshot(scan.Id, site.Url, site.CookiesEncrypted, reason, result.Source, result.SourceType, result.Worker,
-                new Site { Id = site.Id, Kind = site.Kind, Url = site.Url });
+                new Site { Id = site.Id, Url = site.Url });
         if (site.UnreadableCount >= 3)
             await followUp.MaybeRelearnAsync(site.Id, $"{site.UnreadableCount} checks in a row found {(result.Price == null ? "no price" : "no stock")}");
 

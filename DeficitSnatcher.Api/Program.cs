@@ -77,9 +77,6 @@ builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.HelperVersions>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DeficitSnatcher.Api.Pc.LoginWatcher>());
 builder.Services.AddSingleton<BrowserPool>();
 builder.Services.AddSingleton<BrowserSessions>();
-// Bright Data's Web Unlocker (Unlocker-kind pages); timeouts per request, from settings.
-builder.Services.AddHttpClient(WebUnlocker.ClientName, c => c.Timeout = Timeout.InfiniteTimeSpan);
-builder.Services.AddSingleton<WebUnlocker>();
 // Timeouts are per request, from settings (PageFetcher).
 builder.Services.AddHttpClient<PageFetcher>(c => c.Timeout = Timeout.InfiniteTimeSpan)
     .ConfigurePrimaryHttpMessageHandler(PageFetcher.CreateHandler)

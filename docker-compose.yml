@@ -49,8 +49,8 @@ services:
       retries: 6
       start_period: 30s
 
-  # Camoufox (a Firefox that hides automation) as the app's browser: Settings → Checking → App browser, or a page's
-  # Camoufox kind. The API connects to ws://camoufox:4444/camoufox. Only runs with COMPOSE_PROFILES=camoufox in .env.
+  # Camoufox (a Firefox that hides automation) as the app's browser (Settings → Checking → App browser). The API connects
+  # to ws://camoufox:4444/camoufox. Only runs with COMPOSE_PROFILES=camoufox in .env.
   camoufox:
     build:
       context: DeficitSnatcher.Camoufox

@@ -165,10 +165,6 @@ function SettingsForm({ initial }: { initial: Settings }) {
         >
           <input type="text" autoComplete="off" value={s.proxyUrl} placeholder="http://user:password@proxy.example.com:8000" onChange={(e) => set({ proxyUrl: e.target.value })} />
         </Field>
-        <div className="small muted">
-          <b>Other ways in</b>, for stores that block the server even through the proxy: the app&apos;s browser below, or per page as its{" "}
-          <b>Kind</b> (Unlocker, BrightData, Camoufox).
-        </div>
         <Field
           label="App browser"
           hint="The server's browser for Browser-kind pages, checkouts, screenshots and the AI. Pages on the PC helper use its Chrome. Each page keeps its own session (cookies and storage) in it."
@@ -179,20 +175,9 @@ function SettingsForm({ initial }: { initial: Settings }) {
             <option value="Camoufox">Camoufox (a Firefox that hides automation; the camoufox service)</option>
           </select>
         </Field>
-        <div className="grid two">
-          <Field label="Bright Data API token" hint="For the Unlocker kind (Web Unlocker). Bright Data → Account settings → API tokens.">
-            <input type="password" autoComplete="off" value={s.brightDataApiToken} onChange={(e) => set({ brightDataApiToken: e.target.value })} />
-          </Field>
-          <Field label="Web Unlocker zone" hint="The zone's name in Bright Data, e.g. web_unlocker1.">
-            <input type="text" autoComplete="off" value={s.brightDataUnlockerZone} placeholder="web_unlocker1" onChange={(e) => set({ brightDataUnlockerZone: e.target.value })} />
-          </Field>
-          <Field label="Web Unlocker country" hint="Two letters (e.g. ca): stores are reached from there. Empty: Bright Data chooses.">
-            <input type="text" autoComplete="off" value={s.brightDataCountry} placeholder="ca" maxLength={2} onChange={(e) => set({ brightDataCountry: e.target.value })} />
-          </Field>
-          <Field label="Keep browser sessions (minutes)" hint="Each page keeps its cookies and storage across checks and into its checkout this long, then starts fresh (and at once when the store blocks it, or you press Reset on the page). 0: never kept.">
+        <Field label="Keep browser sessions (minutes)" hint="Each page keeps its cookies and storage across checks and into its checkout this long, then starts fresh (and at once when the store blocks it, or you press Reset on the page). 0: never kept.">
             <NumberInput value={s.browserSessionMinutes} min={0} onChange={(v) => set({ browserSessionMinutes: v ?? 0 })} />
-          </Field>
-        </div>
+        </Field>
         <Field
           label="Bright Data browser"
           hint={

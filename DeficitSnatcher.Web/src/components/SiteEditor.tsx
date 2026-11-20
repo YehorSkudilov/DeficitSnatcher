@@ -30,9 +30,6 @@ const kindHelp: Record<SiteKind, string> = {
   Shopify: "A Shopify store's /products/… page: exact price and stock per variant. The most reliable.",
   Html: "Reads the page's HTML: structured data (JSON-LD, meta tags) and your selectors.",
   Browser: "Opens the page in the app's browser first (Settings → App browser). For sites that build the page in script or block plain requests. Slower.",
-  Unlocker: "Fetched by Bright Data's Web Unlocker (it gets past the store's bot check), then read like Html. Set it up in Settings → Checking. Paid per request.",
-  BrightData: "Checked and bought in Bright Data's cloud browser (Browser API), whatever the app browser is. Set it up in Settings → Checking. Paid per traffic.",
-  Camoufox: "Checked and bought in Camoufox (a Firefox that hides automation), whatever the app browser is. Set it up in Settings → Checking.",
 };
 
 const templates: Record<string, CheckoutStep[]> = {

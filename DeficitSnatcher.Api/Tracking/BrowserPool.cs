@@ -9,7 +9,7 @@ namespace DeficitSnatcher.Api.Tracking;
 /// <summary>
 /// The server's browser, started the first time a page needs it (a Browser-kind site's check, or a checkout), with a fresh
 /// context for every use. Which browser it is: Settings → App browser (Chromium here, Bright Data's cloud browser over CDP,
-/// or Camoufox over Playwright's protocol), or the page's own kind (BrightData, Camoufox). Every context starts with the
+/// or Camoufox over Playwright's protocol). Every context starts with the
 /// page's saved session (cookies and local storage, see BrowserSessions) and saves it again when it's done.
 /// Chromium It always runs with a window, like the PC helper's Chrome: headless is the
 /// easiest thing for a store's bot check to spot. On Linux with no screen (Docker) it starts a virtual one (Xvfb) for it;
@@ -196,12 +196,12 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
 
     public const string Chromium = "chromium", BrightData = "brightdata", Camoufox = "camoufox";
 
-    /// <summary>The browser a page gets on the server: its kind's, else Settings → App browser.</summary>
-    public static string EngineFor(Site? site, BotSettings settings) => site?.Kind switch
+    /// <summary>The server's browser: Settings → App browser.</summary>
+    public static string EngineFor(BotSettings settings) => settings.AppBrowser switch
     {
-        SiteKind.BrightData => BrightData,
-        SiteKind.Camoufox => Camoufox,
-        _ => settings.AppBrowser switch { "BrightData" => BrightData, "Camoufox" => Camoufox, _ => Chromium },
+        "BrightData" => BrightData,
+        "Camoufox" => Camoufox,
+        _ => Chromium,
     };
 
     public static string EngineName(string engine) => engine switch
@@ -212,12 +212,12 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
     };
 
     /// <summary>
-    /// A browser to use and dispose, on a worker (see Pc/WorkerPool): on the server, a fresh context in the page's browser
+    /// A browser to use and dispose, on a worker (see Pc/WorkerPool): on the server, a fresh context in the app's browser
     /// (see <see cref="EngineFor"/>) with the page's saved session, through the proxy when one is set; on a PC helper, its
     /// Chrome's own profile (the owner's sign-ins), whose pages are closed when done but whose profile stays. A helper
     /// that's gone (or whose Chrome can't be reached) falls back to the server.
     /// </summary>
-    /// <param name="site">The page it's for: its browser and its session (null: Settings → App browser, no session).</param>
+    /// <param name="site">The page it's for: its saved session is used and kept (null: none).</param>
     public async Task<BrowserLease> OpenAsync(BotSettings settings, IEnumerable<SiteCookie> cookies, string worker, CancellationToken ct, Site? site = null)
     {
         if (Pc.WorkerPool.PcId(worker) is { } id && runner.IsConnected(id))
@@ -240,7 +240,7 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
 
     private async Task<BrowserLease> ServerLeaseAsync(BotSettings settings, List<SiteCookie> cookies, Site? site, CancellationToken ct)
     {
-        var engine = EngineFor(site, settings);
+        var engine = EngineFor(settings);
         var siteId = site?.Id ?? 0;
         var state = await sessions.LoadAsync(siteId, engine, settings, ct);
         IBrowserContext context;

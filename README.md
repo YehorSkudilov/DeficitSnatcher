@@ -52,10 +52,10 @@ One page per store: a store (its domain, e.g. bestbuy.ca) that's already watched
 your country are added (from the checkout profile's country and province, or the currency): amazon.com or a `/en-us/`
 page is left out for someone in Canada, and so is a page priced in another currency.
 
-## The app's browser, and stores that block the server
+## The app's browser
 
 The server's browser (Browser-kind pages, checkouts, scan screenshots, the AI's setup) is **Settings → Checking → App
-browser**; a page can also pick one for itself as its **Kind**. Pages on a PC helper always use its Chrome.
+browser**. Pages on a PC helper always use its Chrome.
 
 | Browser | What it is |
 |---|---|
@@ -63,15 +63,11 @@ browser**; a page can also pick one for itself as its **Kind**. Pages on a PC he
 | **Camoufox** | [Camoufox](https://camoufox.com), a Firefox that hides automation and keeps a consistent fingerprint. `DeficitSnatcher.Camoufox` runs it as a Playwright server; the API connects to `ws://camoufox:4444/camoufox` (Playwright's `Firefox.ConnectAsync`) and drives it like Chromium: checks, checkouts, the AI. Runs with the `COMPOSE_PROFILES` GitHub variable set to `camoufox` (Deploy writes it to .env). Uses the proxy when one is set. **Its Playwright and the API's must be the same version** (1.62.0 in both `DeficitSnatcher.Api.csproj` and `DeficitSnatcher.Camoufox/requirements.txt`): a client only talks to its own version's server. |
 | **BrightData** | [Bright Data Browser API](https://docs.brightdata.com/scraping-automation/scraping-browser/introduction): a Chrome in their cloud, over CDP (`ConnectOverCDP` to the zone's `wss://…@brd.superproxy.io:9222`). Each check or checkout is a new session there (a new address), closed when done; their CAPTCHA solving is waited for on checks. Paid per traffic. |
 
-One more page kind doesn't use a browser at all: **Unlocker**, [Bright Data Web Unlocker](https://docs.brightdata.com/scraping-automation/web-unlocker/introduction)
-(`POST api.brightdata.com/request` with the zone and `format: raw`), which gets past the bot check and sends back the
-HTML. No script runs, so it suits pages whose HTML has the price.
-
 **Sessions.** Every page keeps its own browser session on the server: its cookies and local storage are saved (encrypted,
 in the database, so they survive restarts) when a check, checkout or screenshot is done, and put back into the next
 browser, so the store sees one returning visitor and a checkout carries on where the checks left off. Cookies pasted on
 the page are added where the session doesn't have them. A session starts afresh when it's older than Settings → "Keep
-browser sessions" (3 hours by default), when the store blocks it, when the page moves to another browser (the fingerprint
+browser sessions" (3 hours by default), when the store blocks it, when the app browser is changed (the fingerprint
 wouldn't match), or with **Reset** on the page. Failures say which browser and why (not set up, login refused,
 unreachable, version mismatch, timed out, blocked).
 

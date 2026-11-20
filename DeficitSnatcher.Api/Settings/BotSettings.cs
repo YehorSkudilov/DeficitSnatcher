@@ -38,19 +38,13 @@ public sealed record BotSettings
     /// <summary>Stores are reached through this proxy (checks and checkouts; not ChatGPT): http://user:pass@host:port.
     /// A residential proxy gets past stores that block servers' addresses. Empty: direct.</summary>
     public string ProxyUrl { get; init; } = "";
-    // Other ways to reach stores that block the server (the Unlocker, BrightData and Camoufox kinds of page).
-    /// <summary>Bright Data API token (account settings → API tokens), for Web Unlocker.</summary>
-    public string BrightDataApiToken { get; init; } = "";
-    /// <summary>The Web Unlocker zone's name (e.g. web_unlocker1).</summary>
-    public string BrightDataUnlockerZone { get; init; } = "";
-    /// <summary>Two-letter country Web Unlocker reaches stores from (e.g. ca); empty: theirs to choose.</summary>
-    public string BrightDataCountry { get; init; } = "";
+    // The app's browser (BrowserPool).
     /// <summary>Bright Data Browser API address: wss://brd-customer-…-zone-…:password@brd.superproxy.io:9222.</summary>
     public string BrightDataBrowserUrl { get; init; } = "";
     /// <summary>The Camoufox Playwright server (DeficitSnatcher.Camoufox), e.g. ws://camoufox:4444/camoufox in Docker.</summary>
     public string CamoufoxUrl { get; init; } = "";
-    /// <summary>The server's browser, for Browser-kind pages, checkouts and the AI: Chromium (here), BrightData (their cloud
-    /// browser) or Camoufox. Pages of the BrightData and Camoufox kinds use that browser whatever this says.</summary>
+    /// <summary>The server's browser, for Browser-kind pages, checkouts, screenshots and the AI: Chromium (here), BrightData
+    /// (their cloud browser) or Camoufox.</summary>
     public string AppBrowser { get; init; } = "Chromium";
     /// <summary>A page's browser session (cookies, local storage) is carried from check to check and into checkouts for
     /// this long, then started afresh; 0: every browser starts as a new visitor.</summary>
@@ -177,9 +171,6 @@ public sealed record BotSettings
         SmtpPassword = SmtpPassword ?? "",
         EmailFrom = EmailFrom?.Trim() ?? "",
         ProxyUrl = ProxyUrl?.Trim() ?? "",
-        BrightDataApiToken = BrightDataApiToken?.Trim() ?? "",
-        BrightDataUnlockerZone = BrightDataUnlockerZone?.Trim() ?? "",
-        BrightDataCountry = (BrightDataCountry ?? "").Trim().ToLowerInvariant(),
         BrightDataBrowserUrl = BrightDataBrowserUrl?.Trim() ?? "",
         CamoufoxUrl = CamoufoxUrl?.Trim() ?? "",
         AppBrowser = AppBrowser is "BrightData" or "Camoufox" ? AppBrowser : "Chromium",

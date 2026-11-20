@@ -5,8 +5,7 @@ using DeficitSnatcher.Api.Settings;
 namespace DeficitSnatcher.Api.Tracking;
 
 /// <summary>Fetches a site's product page and reads it (see PageParser), the way the site's kind says.</summary>
-public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanCheck humanCheck, Pc.WorkerPool workers, WebUnlocker unlocker,
-    BrowserSessions sessions)
+public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanCheck humanCheck, Pc.WorkerPool workers, BrowserSessions sessions)
 {
     public static SocketsHttpHandler CreateHandler() => new()
     {
@@ -44,16 +43,14 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
         }
 
         var selectors = new PageParser.Selectors(site.PriceSelector, site.TitleSelector, site.InStockSelector, site.OutOfStockText);
-        if (site.Kind == SiteKind.Unlocker)
-            return await FetchUnlockedAsync(url, settings, selectors, ct);
-        if (site.Kind is SiteKind.Browser or SiteKind.BrightData or SiteKind.Camoufox)
+        if (site.Kind == SiteKind.Browser)
         {
             var (rendered, _) = await RenderAsync(url, cookies, settings, ct, site, Pc.WorkerPool.Server);
             if (BlockDetector.Detect(rendered) is { } vendor)
             {
                 // The store has marked this session: the next check comes as someone new.
                 await sessions.ForgetAsync(site.Id, $"blocked by {vendor}");
-                throw new BlockedException($"In {BrowserPool.EngineName(BrowserPool.EngineFor(site, settings))}: " + BlockDetector.Message(vendor, browser: true));
+                throw new BlockedException($"In {BrowserPool.EngineName(BrowserPool.EngineFor(settings))}: " + BlockDetector.Message(vendor, browser: true));
             }
             return PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" };
         }
@@ -64,17 +61,6 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
                 + " Or try the Browser kind.");
         if (code != HttpStatusCode.OK)
             throw new HttpRequestException($"The site answered {(int)code} {code}.");
-        return PageParser.ParseHtml(html, selectors) with { Source = html, SourceType = "text/html" };
-    }
-
-    /// <summary>Unlocker kind: through Bright Data's Web Unlocker API (see WebUnlocker).</summary>
-    private async Task<PageResult> FetchUnlockedAsync(Uri url, BotSettings settings, PageParser.Selectors selectors, CancellationToken ct)
-    {
-        var (code, html) = await unlocker.FetchAsync(url, settings, ct);
-        if (BlockDetector.Detect(html, (int)code) is { } vendor)
-            throw new BlockedException("Through Web Unlocker: " + BlockDetector.Message(vendor, browser: false));
-        if ((int)code >= 400)
-            throw new HttpRequestException($"Through Web Unlocker, the site answered {(int)code}.");
         return PageParser.ParseHtml(html, selectors) with { Source = html, SourceType = "text/html" };
     }
 
