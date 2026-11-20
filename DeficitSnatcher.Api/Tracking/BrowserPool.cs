@@ -64,7 +64,18 @@ public sealed class BrowserPool(BrowserSessions sessions, ILogger<BrowserPool> l
         if (engine == Camoufox)
             try
             {
-                await CamoufoxBrowserAsync(settings.CamoufoxUrl, ct);
+                // Camoufox restarts itself every few hours and is back within seconds: wait for it a little rather than
+                // send the page to Chromium, which the stores' bot checks are much quicker to turn away.
+                for (var attempt = 1; ; attempt++)
+                    try
+                    {
+                        await CamoufoxBrowserAsync(settings.CamoufoxUrl, ct);
+                        break;
+                    }
+                    catch (BrowserEngineException) when (attempt < 4 && !string.IsNullOrWhiteSpace(settings.CamoufoxUrl))
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                    }
             }
             catch (BrowserEngineException e)
             {

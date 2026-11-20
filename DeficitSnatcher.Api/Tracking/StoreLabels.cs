@@ -17,8 +17,10 @@ public static class StoreLabels
     [
         new("amazon.ca",
             [new("#desktop_buybox", ["add to cart", "buy now"]), new("#add-to-cart-button", [""])],
-            [new(".a-color-price", ["currently unavailable"]), new("#availability", ["currently unavailable", "out of stock"])],
-            ["#corePrice_feature_div .a-offscreen", ".a-price .a-offscreen", ".a-color-price"]),
+            [new("#outOfStock", [""]), new("#availability", ["currently unavailable", "out of stock"])],
+            // The buy box's own price only: the page's other prices (accessories, "customers also bought") aren't this product's.
+            ["#corePrice_feature_div .a-offscreen", "#corePriceDisplay_desktop_feature_div .a-offscreen", "#price_inside_buybox",
+             "#newBuyBoxPrice", "#apex_desktop .a-price .a-offscreen"]),
         new("bestbuy.ca",
             [new(".addToCartButton:not(:disabled)", ["add to cart"]), new("button.add-to-cart:not(:disabled)", ["add to cart"])],
             [new(".addToCartButton:disabled", ["add to cart", "sold out", "coming soon"])],
