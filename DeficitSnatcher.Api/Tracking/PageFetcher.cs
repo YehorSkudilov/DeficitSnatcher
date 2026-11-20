@@ -42,10 +42,12 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
             var (rendered, engine, status, retryAfter, extra) = await RenderAsync(url, cookies, settings, ct, site);
             if (BlockDetector.Detect(rendered, status ?? 200) is { } vendor)
                 throw new BlockedException($"In {BrowserPool.EngineName(engine)}: " + BlockDetector.Message(vendor, browser: true), retryAfter);
-            return WithExtra(PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" }, url, extra);
+            return WithExtra(StoreLabels.Apply(PageParser.ParseHtml(rendered, selectors), rendered, url) with { Source = rendered, SourceType = "text/html" }, url, extra);
         }
 
-        var (code, html, httpRetryAfter) = await GetAsync(url, cookies, settings, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", ct);
+        // A throwaway parameter, as StreetMerchant does, so a cache in front of the store can't answer with an old copy.
+        var fresh = new UriBuilder(url) { Query = (url.Query.Length > 1 ? url.Query[1..] + "&" : "") + "_=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }.Uri;
+        var (code, html, httpRetryAfter) = await GetAsync(fresh, cookies, settings, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", ct);
         if (BlockDetector.Detect(html, (int)code) is { } blockedBy && site.Kind == SiteKind.Auto)
         {
             // Bot protection turns plain requests away: the same check, at once, in the browser (which runs its scripts and
@@ -55,14 +57,14 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
             var (rendered, engine, status, retryAfter, extra) = await RenderAsync(url, cookies, settings, ct, site);
             if (BlockDetector.Detect(rendered, status ?? 200) is { } vendor)
                 throw new BlockedException($"In {BrowserPool.EngineName(engine)}: " + BlockDetector.Message(vendor, browser: true), retryAfter);
-            return WithExtra(PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" }, url, extra);
+            return WithExtra(StoreLabels.Apply(PageParser.ParseHtml(rendered, selectors), rendered, url) with { Source = rendered, SourceType = "text/html" }, url, extra);
         }
         if (BlockDetector.Detect(html, (int)code) is { } blockedBy2)
             throw new BlockedException($"The site answered {(int)code}: " + BlockDetector.Message(blockedBy2, browser: false)
                 + " Or try the Browser kind.", httpRetryAfter);
         if (code != HttpStatusCode.OK)
             throw new HttpRequestException($"The site answered {(int)code} {code}.");
-        return PageParser.ParseHtml(html, selectors) with { Source = html, SourceType = "text/html" };
+        return StoreLabels.Apply(PageParser.ParseHtml(html, selectors), html, url) with { Source = html, SourceType = "text/html" };
     }
 
     private async Task<(HttpStatusCode Status, string Body, TimeSpan? RetryAfter)> GetAsync(Uri url, List<SiteCookie> cookies,
@@ -116,6 +118,21 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
             else
                 await route.ContinueAsync();
         });
+        if (lease.Fresh)
+        {
+            // A new session: the store's home page first, as a person arriving would (StreetMerchant's "captcha
+            // deterrent"), so the bot check's scripts run and set their cookies before the product page is asked for.
+            try
+            {
+                log.LogInformation("Browser check for {Site}: new session, visiting the home page first", site.Name);
+                await page.GotoAsync(url.GetLeftPart(UriPartial.Authority) + "/", new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = 20000 });
+                await Task.Delay(TimeSpan.FromMilliseconds(2000 + Random.Shared.Next(2000)), ct);
+            }
+            catch (Exception e) when (e is Microsoft.Playwright.PlaywrightException or TimeoutException)
+            {
+                log.LogInformation("Browser check for {Site}: home page visit failed ({Error}); going straight to the product", site.Name, e.Message.Split('\n')[0]);
+            }
+        }
         log.LogInformation("Browser check for {Site} navigating to the product page", site.Name);
         var response = await page.GotoAsync(url.ToString(), new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = settings.RequestTimeoutSeconds * 1000 });
         log.LogInformation("Browser check for {Site} navigation finished with HTTP {Status} in {ElapsedMs} ms",

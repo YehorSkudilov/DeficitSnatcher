@@ -91,7 +91,7 @@ public sealed class BrowserPool(BrowserSessions sessions, ILogger<BrowserPool> l
         Func<IBrowserContext, Task>? save = siteId > 0 && settings.BrowserSessionMinutes > 0
             ? async c => await sessions.SaveAsync(siteId, engine, await c.StorageStateAsync())
             : null;
-        return new BrowserLease(context, engine, save, log, siteLock);
+        return new BrowserLease(context, engine, save, log, siteLock) { Fresh = siteId > 0 && state == null };
     }
 
     /// <summary>The cookies pasted on the page. With a saved session, only the ones it doesn't have: the store may have
@@ -336,6 +336,9 @@ public sealed class BrowserLease(IBrowserContext context, string engine = Browse
     public IBrowserContext Context => context;
     /// <summary>Which browser: chromium or camoufox (see BrowserPool).</summary>
     public string Engine => engine;
+
+    /// <summary>The page had no saved session: this context starts as someone new to the store.</summary>
+    public bool Fresh { get; init; }
 
     public Task<IPage> NewPageAsync() => context.NewPageAsync();
 

@@ -14,8 +14,9 @@ namespace DeficitSnatcher.Api.Tracking;
 public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetcher, SettingsStore settingsStore, SecretBox box,
     Notifier notifier, Buyer buyer, ScanFollowUp followUp, Backoff backoff, Alarms.AlarmService alarms, BrowserPool browsers, ILogger<CheckService> log)
 {
-    /// <summary>The most one page fetch may take, whatever happens in the browser.</summary>
-    public static TimeSpan FetchLimit(BotSettings settings) => TimeSpan.FromSeconds(settings.RequestTimeoutSeconds + 60);
+    /// <summary>The most one page fetch may take, whatever happens in the browser (room for a new session's home-page
+    /// visit and a Cloudflare wait on top of the page's own timeout).</summary>
+    public static TimeSpan FetchLimit(BotSettings settings) => TimeSpan.FromSeconds(settings.RequestTimeoutSeconds + 90);
 
     public sealed record CheckOutcome(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage, long? ScanId = null,
         int? PurchaseId = null);

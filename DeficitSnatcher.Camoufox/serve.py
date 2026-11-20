@@ -104,4 +104,16 @@ if os.environ.get("PROXY_SERVER"):
     }.items() if v}
     options["geoip"] = True
 
+# A fresh browser every few hours (StreetMerchant's RESTART_TIME): a long-running browser slowly gets sluggish and stops
+# answering. The process exits; Docker (restart: unless-stopped) starts it again within seconds, and the API reconnects by
+# itself (a check caught mid-way is tried once more on the new browser). 0 turns it off.
+restart_hours = float(os.environ.get("RESTART_HOURS", "3"))
+if restart_hours > 0:
+    def restart():
+        print(f"Restarting the browser after {restart_hours:g} h (RESTART_HOURS)", flush=True)
+        os._exit(0)
+    timer = threading.Timer(restart_hours * 3600, restart)
+    timer.daemon = True
+    timer.start()
+
 launch_server(**options)
