@@ -47,11 +47,14 @@ public sealed record BotSettings
     public string BrightDataCountry { get; init; } = "";
     /// <summary>Bright Data Browser API address: wss://brd-customer-…-zone-…:password@brd.superproxy.io:9222.</summary>
     public string BrightDataBrowserUrl { get; init; } = "";
-    /// <summary>The Camoufox service (DeficitSnatcher.Camoufox), e.g. http://camoufox:8000 in Docker.</summary>
+    /// <summary>The Camoufox Playwright server (DeficitSnatcher.Camoufox), e.g. ws://camoufox:4444/camoufox in Docker.</summary>
     public string CamoufoxUrl { get; init; } = "";
-    /// <summary>A page's browser session (cookies, local storage) is carried from check to check for this long, then
-    /// started afresh; 0: every check is a new visitor.</summary>
-    public int RemoteSessionMinutes { get; init; } = 180;
+    /// <summary>The server's browser, for Browser-kind pages, checkouts and the AI: Chromium (here), BrightData (their cloud
+    /// browser) or Camoufox. Pages of the BrightData and Camoufox kinds use that browser whatever this says.</summary>
+    public string AppBrowser { get; init; } = "Chromium";
+    /// <summary>A page's browser session (cookies, local storage) is carried from check to check and into checkouts for
+    /// this long, then started afresh; 0: every browser starts as a new visitor.</summary>
+    public int BrowserSessionMinutes { get; init; } = 180;
     public string UserAgent { get; init; } =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
     /// <summary>Price history and the activity log older than this are removed; 0 keeps it all.</summary>
@@ -179,7 +182,8 @@ public sealed record BotSettings
         BrightDataCountry = (BrightDataCountry ?? "").Trim().ToLowerInvariant(),
         BrightDataBrowserUrl = BrightDataBrowserUrl?.Trim() ?? "",
         CamoufoxUrl = CamoufoxUrl?.Trim() ?? "",
-        RemoteSessionMinutes = Math.Clamp(RemoteSessionMinutes, 0, 7 * 24 * 60),
+        AppBrowser = AppBrowser is "BrightData" or "Camoufox" ? AppBrowser : "Chromium",
+        BrowserSessionMinutes = Math.Clamp(BrowserSessionMinutes, 0, 30 * 24 * 60),
     };
 }
 

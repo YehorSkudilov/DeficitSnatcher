@@ -191,8 +191,9 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
             values["price"] = price.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
             var cookies = site.CookiesEncrypted == null ? [] : SiteCookies.Parse(box.Decrypt(site.CookiesEncrypted), site.Url);
-            Log($"Opening a browser ({cookies.Count} cookies, user agent: {settings.UserAgent})");
-            await using var lease = await browsers.OpenAsync(settings, cookies, worker, CancellationToken.None);
+            Log($"Opening a browser ({cookies.Count} cookies; on the server: {BrowserPool.EngineName(BrowserPool.EngineFor(site, settings))}, "
+                + $"with the page's saved session if it has one)");
+            await using var lease = await browsers.OpenAsync(settings, cookies, worker, CancellationToken.None, site);
             ranOn = lease.Worker;
             var page = await lease.NewPageAsync();
             if (lease.OnPc)

@@ -166,8 +166,19 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <input type="text" autoComplete="off" value={s.proxyUrl} placeholder="http://user:password@proxy.example.com:8000" onChange={(e) => set({ proxyUrl: e.target.value })} />
         </Field>
         <div className="small muted">
-          <b>Other ways in</b>, for stores that block the server even through the proxy: pick them as a page&apos;s <b>Kind</b>.
+          <b>Other ways in</b>, for stores that block the server even through the proxy: the app&apos;s browser below, or per page as its{" "}
+          <b>Kind</b> (Unlocker, BrightData, Camoufox).
         </div>
+        <Field
+          label="App browser"
+          hint="The server's browser for Browser-kind pages, checkouts, screenshots and the AI. Pages on the PC helper use its Chrome. Each page keeps its own session (cookies and storage) in it."
+        >
+          <select value={s.appBrowser} onChange={(e) => set({ appBrowser: e.target.value as Settings["appBrowser"] })}>
+            <option value="Chromium">Chromium (here, with a window on a virtual screen)</option>
+            <option value="BrightData">Bright Data&apos;s browser (their cloud, over CDP; paid per traffic)</option>
+            <option value="Camoufox">Camoufox (a Firefox that hides automation; the camoufox service)</option>
+          </select>
+        </Field>
         <div className="grid two">
           <Field label="Bright Data API token" hint="For the Unlocker kind (Web Unlocker). Bright Data → Account settings → API tokens.">
             <input type="password" autoComplete="off" value={s.brightDataApiToken} onChange={(e) => set({ brightDataApiToken: e.target.value })} />
@@ -178,15 +189,15 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <Field label="Web Unlocker country" hint="Two letters (e.g. ca): stores are reached from there. Empty: Bright Data chooses.">
             <input type="text" autoComplete="off" value={s.brightDataCountry} placeholder="ca" maxLength={2} onChange={(e) => set({ brightDataCountry: e.target.value })} />
           </Field>
-          <Field label="Keep browser sessions (minutes)" hint="BrightData and Camoufox pages keep their cookies and storage from check to check this long, then start fresh (and at once when blocked). 0: never kept.">
-            <NumberInput value={s.remoteSessionMinutes} min={0} onChange={(v) => set({ remoteSessionMinutes: v ?? 0 })} />
+          <Field label="Keep browser sessions (minutes)" hint="Each page keeps its cookies and storage across checks and into its checkout this long, then starts fresh (and at once when the store blocks it, or you press Reset on the page). 0: never kept.">
+            <NumberInput value={s.browserSessionMinutes} min={0} onChange={(v) => set({ browserSessionMinutes: v ?? 0 })} />
           </Field>
         </div>
         <Field
           label="Bright Data browser"
           hint={
             <>
-              For the BrightData kind (Browser API, over CDP). The zone&apos;s Playwright address:{" "}
+              Bright Data&apos;s Browser API (over CDP). The zone&apos;s Playwright address:{" "}
               <code>wss://brd-customer-…-zone-…:password@brd.superproxy.io:9222</code>.
             </>
           }
@@ -194,15 +205,15 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <input type="password" autoComplete="off" value={s.brightDataBrowserUrl} placeholder="wss://brd-customer-…@brd.superproxy.io:9222" onChange={(e) => set({ brightDataBrowserUrl: e.target.value })} />
         </Field>
         <Field
-          label="Camoufox service"
+          label="Camoufox"
           hint={
             <>
-              For the Camoufox kind. In Docker: <code>http://camoufox:8000</code>, with <code>COMPOSE_PROFILES=camoufox</code> in the server&apos;s .env so
-              it runs. Uses the proxy above when one is set.
+              Its Playwright server. In Docker: <code>ws://camoufox:4444/camoufox</code>, with the <code>COMPOSE_PROFILES</code> GitHub variable set to{" "}
+              <code>camoufox</code> so it runs. Uses the proxy above when one is set.
             </>
           }
         >
-          <input type="text" autoComplete="off" value={s.camoufoxUrl} placeholder="http://camoufox:8000" onChange={(e) => set({ camoufoxUrl: e.target.value })} />
+          <input type="text" autoComplete="off" value={s.camoufoxUrl} placeholder="ws://camoufox:4444/camoufox" onChange={(e) => set({ camoufoxUrl: e.target.value })} />
         </Field>
         <Field label="User agent" hint="What plain checks (not the browser) say they are.">
           <input type="text" value={s.userAgent} onChange={(e) => set({ userAgent: e.target.value })} />

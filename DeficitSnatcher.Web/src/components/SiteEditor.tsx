@@ -18,6 +18,7 @@ import {
   type Site,
   type SiteInput,
   type SiteKind,
+  type BrowserSession,
 } from "@/lib/api";
 import { ago, dateTime, money } from "@/lib/format";
 import { Check, ErrorNote, Field, NumberInput, StockBadge, useAction, useData, useNow } from "./ui";
@@ -28,10 +29,10 @@ const kindHelp: Record<SiteKind, string> = {
   Auto: "Shopify product JSON if it's a Shopify /products/ page, otherwise the page's structured data, then your selectors.",
   Shopify: "A Shopify store's /products/… page: exact price and stock per variant. The most reliable.",
   Html: "Reads the page's HTML: structured data (JSON-LD, meta tags) and your selectors.",
-  Browser: "Opens the page in Chromium first. For sites that build the page in script or block plain requests. Slower.",
+  Browser: "Opens the page in the app's browser first (Settings → App browser). For sites that build the page in script or block plain requests. Slower.",
   Unlocker: "Fetched by Bright Data's Web Unlocker (it gets past the store's bot check), then read like Html. Set it up in Settings → Checking. Paid per request.",
-  BrightData: "Opens the page in a Bright Data cloud browser (Browser API), keeping its cookies and storage between checks. Set it up in Settings → Checking. Paid per traffic.",
-  Camoufox: "Opens the page in Camoufox, a Firefox that hides automation (the camoufox service), keeping its cookies and storage between checks. Set it up in Settings → Checking.",
+  BrightData: "Checked and bought in Bright Data's cloud browser (Browser API), whatever the app browser is. Set it up in Settings → Checking. Paid per traffic.",
+  Camoufox: "Checked and bought in Camoufox (a Firefox that hides automation), whatever the app browser is. Set it up in Settings → Checking.",
 };
 
 const templates: Record<string, CheckoutStep[]> = {
@@ -322,6 +323,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
             onChange={(runOnPc) => set({ runOnPc })}
           />
         </div>
+        {id && !form.runOnPc && <SessionLine siteId={id} />}
         {form.runOnPc && runner.data && (
           <div className={`notice small ${runner.data.connected ? "good" : "warn"}`}>
             {runner.data.connected ? (
@@ -774,6 +776,37 @@ function RestockCard({ siteId, aiOn }: { siteId: number; aiOn: boolean }) {
         )}
       </dl>
       <div className="faint small">A guess from patterns, never a promise: stores restock when they choose. Times in {f.timeZone}.</div>
+    </div>
+  );
+}
+
+/** The page's saved browser session on the server (cookies and storage carried between checks and checkouts), with a reset. */
+function SessionLine({ siteId }: { siteId: number }) {
+  const { data, reload } = useData(() => api.get<BrowserSession | undefined>(`/api/sites/${siteId}/session`), [siteId], 30000);
+  const reset = useAction();
+  const now = useNow(60000);
+  return (
+    <div className="small muted">
+      Browser session:{" "}
+      {data ? (
+        <>
+          {data.browser}, started {ago(data.startedAt, now)}, last used {ago(data.savedAt, now)}.{" "}
+          <button
+            className="btn small"
+            disabled={reset.busy}
+            onClick={async () => {
+              await reset.run(() => api.del(`/api/sites/${siteId}/session`));
+              await reload();
+            }}
+            title="Forget its cookies and storage: the next check or checkout comes as a new visitor"
+          >
+            Reset
+          </button>
+        </>
+      ) : (
+        "none yet (the next check in a browser starts one)."
+      )}
+      <ErrorNote error={reset.error} />
     </div>
   );
 }

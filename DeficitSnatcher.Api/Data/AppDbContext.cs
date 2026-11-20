@@ -17,6 +17,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RunnerKey> RunnerKeys => Set<RunnerKey>();
     public DbSet<RunnerLogin> RunnerLogins => Set<RunnerLogin>();
     public DbSet<StoredValue> StoredValues => Set<StoredValue>();
+    public DbSet<BrowserSession> BrowserSessions => Set<BrowserSession>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -90,6 +91,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Machine).HasMaxLength(200);
             e.Property(x => x.Browser).HasMaxLength(200);
             e.Property(x => x.DisabledDomains).HasMaxLength(4000);
+        });
+        b.Entity<BrowserSession>(e =>
+        {
+            e.HasKey(x => x.SiteId);
+            e.Property(x => x.Engine).HasMaxLength(20);
+            e.HasOne<Site>().WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<RunnerLogin>(e =>
         {

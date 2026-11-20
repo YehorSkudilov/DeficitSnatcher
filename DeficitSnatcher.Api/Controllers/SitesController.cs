@@ -60,13 +60,28 @@ public sealed record SiteDto(
 
 public sealed record ProbeResponse(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage);
 public sealed record BuyRequest(bool DryRun);
+public sealed record BrowserSessionDto(string Browser, DateTimeOffset StartedAt, DateTimeOffset SavedAt);
 public sealed record CheckAllItem(int SiteId, string Name, decimal? Price, bool? InStock, bool Match, string? Verdict, string? Error, string? BuyMessage);
 public sealed record HistoryPoint(DateTimeOffset At, decimal? Price, bool InStock);
 
 [ApiController]
 [Route("api/sites")]
-public sealed class SitesController(AppDbContext db, SecretBox box, Tracker tracker, CheckService checks, Buyer buyer) : ControllerBase
+public sealed class SitesController(AppDbContext db, SecretBox box, Tracker tracker, CheckService checks, Buyer buyer, BrowserSessions sessions)
+    : ControllerBase
 {
+    /// <summary>The page's saved browser session on the server (see BrowserSessions), or 204 when there's none.</summary>
+    [HttpGet("{id:int}/session")]
+    public async Task<ActionResult<BrowserSessionDto>> Session(int id, CancellationToken ct) =>
+        await sessions.InfoAsync(id, ct) is { } s ? new BrowserSessionDto(BrowserPool.EngineName(s.Engine), s.StartedAt, s.SavedAt) : NoContent();
+
+    /// <summary>Forgets the page's browser session: the next check or checkout comes as a new visitor.</summary>
+    [HttpDelete("{id:int}/session")]
+    public async Task<IActionResult> ResetSession(int id)
+    {
+        await sessions.ForgetAsync(id, "reset by the owner");
+        return NoContent();
+    }
+
     [HttpGet]
     public async Task<List<SiteDto>> List([FromQuery] int? productId, CancellationToken ct)
     {

@@ -1,3 +1,4 @@
-# Camoufox pins the Python Playwright it works with; geoip lets it match the fingerprint to a proxy's location.
+# Camoufox, and the Playwright it runs on. The API connects with Microsoft.Playwright, which only talks to a Playwright
+# server of its own version: keep playwright here equal to the API's (DeficitSnatcher.Api.csproj), both 1.62.0.
 camoufox[geoip]==0.5.9
-aiohttp==3.14.5
+playwright==1.62.0

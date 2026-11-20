@@ -21,7 +21,8 @@ public sealed class ScanFollowUp(IServiceScopeFactory scopes, BrowserPool browse
     private readonly HashSet<int> _fixing = [];
 
     /// <summary>Keeps the scan's snapshot: the source now, the screenshot as soon as a browser slot is free.</summary>
-    public void Snapshot(long scanId, string url, string? cookiesSealed, string reason, string? source, string? sourceType, string worker = "server")
+    public void Snapshot(long scanId, string url, string? cookiesSealed, string reason, string? source, string? sourceType, string worker = "server",
+        Site? site = null)
     {
         _ = Task.Run(async () =>
         {
@@ -32,7 +33,7 @@ public sealed class ScanFollowUp(IServiceScopeFactory scopes, BrowserPool browse
             {
                 var settings = await settingsStore.GetAsync();
                 var cookies = cookiesSealed == null ? [] : SiteCookies.Parse(box.Decrypt(cookiesSealed), url);
-                await using var lease = await browsers.OpenAsync(settings, cookies, worker, CancellationToken.None);
+                await using var lease = await browsers.OpenAsync(settings, cookies, worker, CancellationToken.None, site);
                 var page = await lease.NewPageAsync();
                 await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
                 try

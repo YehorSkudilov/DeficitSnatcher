@@ -148,7 +148,7 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
         // 2. The page in a browser: text, candidate prices, buttons, screenshot.
         PageState state;
         JsonElement extra;
-        await using (var lease = await browsers.OpenAsync(settings, cookies, onPc, ct))
+        await using (var lease = await browsers.OpenAsync(settings, cookies, onPc, ct, siteId is { } sid ? new Site { Id = sid, Url = url } : null))
         {
             var page = await lease.NewPageAsync();
             await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });

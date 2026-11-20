@@ -1,4 +1,4 @@
-# Camoufox (a Firefox that hides automation) behind a small HTTP service (server.py), for "Camoufox"-kind pages.
+# Camoufox (a Firefox that hides automation) as a Playwright server (serve.py) the API uses as its browser.
 # Started by docker compose only with the camoufox profile (COMPOSE_PROFILES=camoufox in .env).
 #   docker build -t deficitsnatcher-camoufox DeficitSnatcher.Camoufox
 FROM python:3.12-slim-bookworm
@@ -12,7 +12,7 @@ USER app
 WORKDIR /home/app
 COPY requirements.txt .
 RUN pip install --user -r requirements.txt && python -m camoufox fetch
-COPY server.py .
-EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"
-CMD ["python", "server.py"]
+COPY serve.py .
+EXPOSE 4444
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD python -c "import socket; socket.create_connection(('127.0.0.1', 4444), 4)"
+CMD ["python", "serve.py"]

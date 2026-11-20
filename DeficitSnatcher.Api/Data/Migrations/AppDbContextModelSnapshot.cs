@@ -75,6 +75,31 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.ToTable("AiCalls");
                 });
 
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.BrowserSession", b =>
+                {
+                    b.Property<int>("SiteId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Engine")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTimeOffset>("SavedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("StateEncrypted")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("SiteId");
+
+                    b.ToTable("BrowserSessions");
+                });
+
             modelBuilder.Entity("DeficitSnatcher.Api.Data.Event", b =>
                 {
                     b.Property<long>("Id")
@@ -680,6 +705,15 @@ namespace DeficitSnatcher.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("SiteId")
                         .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("DeficitSnatcher.Api.Data.BrowserSession", b =>
+                {
+                    b.HasOne("DeficitSnatcher.Api.Data.Site", null)
+                        .WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("DeficitSnatcher.Api.Data.PricePoint", b =>

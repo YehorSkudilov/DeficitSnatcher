@@ -225,6 +225,22 @@ public class RunnerKey
     public string DisabledDomains { get; set; } = "";
 }
 
+/// <summary>
+/// A store page's browser session on the server: the cookies and local storage it had when the last check or checkout
+/// ended (Playwright's storage state), put back into the next browser so the store sees a returning visitor.
+/// </summary>
+public class BrowserSession
+{
+    public int SiteId { get; set; }
+    /// <summary>The browser it came from (chromium, brightdata, camoufox): another one starts afresh, its fingerprint wouldn't match.</summary>
+    public string Engine { get; set; } = "";
+    /// <summary>The storage state JSON, encrypted (see SecretBox): it holds sign-ins.</summary>
+    public string StateEncrypted { get; set; } = "";
+    public DateTimeOffset SavedAt { get; set; }
+    /// <summary>When it started (the first check without a saved one): it's dropped once it's older than the setting.</summary>
+    public DateTimeOffset StartedAt { get; set; }
+}
+
 /// <summary>Whether a PC helper's Chrome is signed in to a store.</summary>
 public class RunnerLogin
 {

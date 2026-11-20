@@ -301,6 +301,8 @@ export type Scan = {
   worker: string | null;
 };
 
+export type BrowserSession = { browser: string; startedAt: string; savedAt: string };
+
 export type ScanSnapshot = { reason: string; hasScreenshot: boolean; hasSource: boolean; sourceType: string | null; error: string | null };
 
 export type AiStatus = { hasKey: boolean; enabled: boolean; model: string; tokensToday: number; dailyTokenLimit: number };
@@ -420,7 +422,8 @@ export type Settings = {
   brightDataCountry: string;
   brightDataBrowserUrl: string;
   camoufoxUrl: string;
-  remoteSessionMinutes: number;
+  appBrowser: "Chromium" | "BrightData" | "Camoufox";
+  browserSessionMinutes: number;
   userAgent: string;
   historyDays: number;
   scanHistoryDays: number;
