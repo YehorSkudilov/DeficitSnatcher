@@ -74,6 +74,7 @@ builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddHttpClient(nameof(Notifier), c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<Notifier>();
 builder.Services.AddSingleton<Backoff>();
+builder.Services.AddSingleton<Captchas>();
 builder.Services.AddSingleton<DeficitSnatcher.Api.Alarms.AlarmService>();
 builder.Services.AddSingleton<BrowserPool>();
 builder.Services.AddSingleton<BrowserSessions>();

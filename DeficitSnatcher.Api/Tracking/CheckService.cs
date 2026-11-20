@@ -16,7 +16,10 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
 {
     /// <summary>The most one page fetch may take, whatever happens in the browser (room for a new session's home-page
     /// visit and a Cloudflare wait on top of the page's own timeout).</summary>
-    public static TimeSpan FetchLimit(BotSettings settings) => TimeSpan.FromSeconds(settings.RequestTimeoutSeconds + 90);
+    public static TimeSpan FetchLimit(BotSettings settings, Site? site = null) =>
+        TimeSpan.FromSeconds(settings.RequestTimeoutSeconds + 90)
+        // A store with a captcha the owner may be asked to solve: their time to answer on top.
+        + (site != null && Uri.TryCreate(site.Url, UriKind.Absolute, out var u) && Captchas.For(u) != null ? Captchas.Wait : TimeSpan.Zero);
 
     public sealed record CheckOutcome(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage, long? ScanId = null,
         int? PurchaseId = null);
@@ -48,7 +51,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         {
             var cookies = site.CookiesEncrypted == null ? [] : SiteCookies.Parse(box.Decrypt(site.CookiesEncrypted), site.Url);
             // A hard limit on top of the page's own timeouts: a browser that stops answering mustn't hold the check forever.
-            result = await fetcher.FetchAsync(site, cookies, settings, ct).WaitAsync(FetchLimit(settings), ct);
+            result = await fetcher.FetchAsync(site, cookies, settings, ct).WaitAsync(FetchLimit(settings, site), ct);
             browsers.CamoufoxAnswered();
         }
         catch (Exception e) when (!ct.IsCancellationRequested)

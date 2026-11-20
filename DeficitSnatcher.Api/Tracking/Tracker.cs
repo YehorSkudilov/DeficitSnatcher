@@ -14,7 +14,8 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
     : BackgroundService
 {
     /// <summary>The most one check may take in all (page, reading it, saving): past it, the check is given up.</summary>
-    private static TimeSpan CheckLimit(Settings.BotSettings settings) => CheckService.FetchLimit(settings) + TimeSpan.FromSeconds(60);
+    // Room for a captcha answer (Captchas.Wait) on any page: this is only the hard stop behind the check's own limits.
+    private static TimeSpan CheckLimit(Settings.BotSettings settings) => CheckService.FetchLimit(settings) + Captchas.Wait + TimeSpan.FromSeconds(60);
 
     private DateTimeOffset _lastForecastLookup;
     private int _forecastRefreshRunning;

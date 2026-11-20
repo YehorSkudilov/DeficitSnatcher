@@ -5,7 +5,7 @@ using DeficitSnatcher.Api.Settings;
 namespace DeficitSnatcher.Api.Tracking;
 
 /// <summary>Fetches a site's product page and reads it (see PageParser), the way the site's kind says.</summary>
-public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsStore settingsStore, ILogger<PageFetcher> log)
+public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsStore settingsStore, Captchas captchas, ILogger<PageFetcher> log)
 {
     public static SocketsHttpHandler CreateHandler() => new()
     {
@@ -150,6 +150,13 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
         var retryAfter = response?.Headers.TryGetValue("retry-after", out var value) == true ? ParseRetryAfter(value) : null;
         var html = await page.ContentAsync();
         int? status = response?.Status;
+        // A captcha a person can read (Amazon's "type the characters"): the owner is asked, and the page read again after.
+        if (Captchas.For(url) is { } recipe && Captchas.Showing(html, recipe)
+            && await captchas.SolveByHandAsync(page, recipe, site.Id, site.Name, url.ToString(), ct))
+        {
+            html = await page.ContentAsync();
+            status = 200;
+        }
         if (BlockDetector.IsChallenge(html))
         {
             // Cloudflare's "Just a moment…" often clears by itself in a real browser after a few seconds, then the store's

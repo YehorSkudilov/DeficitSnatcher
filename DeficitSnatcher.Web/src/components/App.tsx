@@ -12,6 +12,7 @@ import { Logs } from "./Logs";
 import { SettingsPage } from "./Settings";
 import { Login } from "./Login";
 import { PullToRefresh } from "./PullToRefresh";
+import { CaptchaPrompt } from "./CaptchaPrompt";
 
 /** The screen from the address's #part: #products, #product/3, #site/12, #purchase/7… */
 function subscribeHash(f: () => void) {
@@ -93,6 +94,7 @@ function Shell({ route, onSignOut }: { route: string; onSignOut: () => void }) {
         </a>
       </nav>
       <main className="main">
+        <CaptchaPrompt />
         {screen === "dashboard" && <Dashboard />}
         {screen === "products" && <Products />}
         {screen === "product" && <ProductPage key={arg} id={arg === "new" ? null : Number(arg)} />}
