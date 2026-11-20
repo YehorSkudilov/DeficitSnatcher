@@ -55,7 +55,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     let message = `${response.status} ${response.statusText}`;
     try {
       const problem = await response.json();
-      message = problem.detail || problem.title || message;
+      message = problem.error || problem.detail || problem.title || message;
     } catch {
       // Not JSON.
     }
