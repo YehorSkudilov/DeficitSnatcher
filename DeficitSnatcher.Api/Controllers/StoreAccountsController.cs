@@ -37,6 +37,8 @@ public sealed class StoreAccountsController(SettingsStore store, Pc.LoginWatcher
         await store.SaveStoreAccountsAsync(all, ct);
         // A saved sign-in decides whether a signed-out helper sits the store out.
         await logins.RefreshPausedAsync();
+        // And the helpers try it now.
+        logins.SignInSoon(domain);
         return NoContent();
     }
 

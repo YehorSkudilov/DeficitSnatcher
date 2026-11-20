@@ -42,6 +42,25 @@ public sealed class WorkerPool(RunnerHub hub)
         return connected.Count > 0 ? Pc(connected[0]) : Server;
     }
 
+    /// <summary>
+    /// A "Run on my PC" page whose helpers are connected but can't take it just now (you're signing in on it, or it's signed
+    /// out of the store and signing back in): the check waits for them rather than going to the server, which these stores
+    /// block. Why, or null when it doesn't wait.
+    /// </summary>
+    public string? WaitsForHelper(Site site)
+    {
+        if (!site.RunOnPc)
+            return null;
+        var domain = LoginWatcher.Domain(site.Url);
+        var helpers = hub.ConnectedIds.Where(id => hub.Allowed(id, domain)).ToList();
+        if (helpers.Count == 0 || helpers.Any(id => !hub.IsSigningIn(id) && !hub.IsPaused(id, domain)))
+            return null;
+        var id = helpers[0];
+        return hub.IsPaused(id, domain)
+            ? $"Waiting for {hub.NameOf(id)} to sign back in to {domain} (it signs in by itself; or Log in on this product's page)."
+            : $"Waiting for {hub.NameOf(id)}: a sign-in window is open on it (a few minutes at most).";
+    }
+
     /// <summary>Is this worker usable now (a helper that's connected, or the server)?</summary>
     public bool Available(string worker) => worker == Server || PcId(worker) is { } id && hub.IsConnected(id);
 

@@ -27,6 +27,13 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         var product = site.Product;
         var settings = await settingsStore.GetAsync(ct);
         var now = DateTimeOffset.UtcNow;
+        // Its helper is busy for a moment: no check now rather than one on the server that the store blocks (not a failure).
+        if (!manual && workers.WaitsForHelper(site) is { } waiting)
+        {
+            site.LastError = waiting;
+            await db.SaveChangesAsync(CancellationToken.None);
+            return new(null, null, null, null);
+        }
         // Whose turn it is: the PC helpers and the server take turns (see Pc/WorkerPool).
         var worker = workers.Next(site);
         var watch = System.Diagnostics.Stopwatch.StartNew();

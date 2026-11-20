@@ -31,8 +31,20 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
         /// <summary>The helper updates itself when asked (newer helpers).</summary>
         public bool CanUpdate { get; } = canUpdate;
         public string? Version { get; } = version;
-        /// <summary>The owner is signing in (or proving they're human) in a window of this helper's: it gets no work meanwhile.</summary>
-        public volatile bool SigningIn;
+        /// <summary>The owner is signing in (or proving they're human) in a window of this helper's: it gets no work meanwhile
+        /// (for a few minutes at most: a window left open doesn't keep it idle).</summary>
+        public bool SigningIn
+        {
+            get => _signingIn && DateTimeOffset.UtcNow - _signingInSince < SigningInHold;
+            set
+            {
+                if (value && !_signingIn)
+                    _signingInSince = DateTimeOffset.UtcNow;
+                _signingIn = value;
+            }
+        }
+        private volatile bool _signingIn;
+        private DateTimeOffset _signingInSince;
         /// <summary>The helper can open a page in a window of its own, in front (newer helpers).</summary>
         public bool CanShow { get; } = canShow;
         /// <summary>The helper can wipe its Chrome profile and start a clean one (newer helpers).</summary>
@@ -113,6 +125,9 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
     public bool IsConnected(int id) => _live.TryGetValue(id, out var r) && r.Control.State == WebSocketState.Open;
 
     /// <summary>Is the owner using a window of this helper's Chrome (sign in, prove you're human)? It's left alone then.</summary>
+    /// <summary>How long a sign-in window on a helper keeps checks off it.</summary>
+    public static readonly TimeSpan SigningInHold = TimeSpan.FromMinutes(5);
+
     public bool IsSigningIn(int id) => _live.TryGetValue(id, out var r) && r.SigningIn;
     public string NameOf(int id) => _live.TryGetValue(id, out var r) ? r.Name : $"PC helper {id}";
 

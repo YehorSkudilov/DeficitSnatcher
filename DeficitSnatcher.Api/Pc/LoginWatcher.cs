@@ -122,6 +122,28 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
                 await CheckAllAsync(r.RunnerId, stop, r.Domain);
     }
 
+    /// <summary>
+    /// You saved (or changed) your sign-in for a store: every connected helper tries it now, in the background, whatever
+    /// the cooldown says (it's a new sign-in).
+    /// </summary>
+    public void SignInSoon(string domain)
+    {
+        foreach (var key in _autoTried.Keys.Where(k => k.Item2 == domain).ToList())
+            _autoTried.TryRemove(key, out _);
+        foreach (var id in hub.ConnectedIds)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await CheckAllAsync(id, CancellationToken.None, domain);
+                }
+                catch (Exception e)
+                {
+                    log.LogWarning("Couldn't sign helper {Id} in to {Domain}: {Error}", id, domain, e.Message);
+                }
+            });
+    }
+
     /// <summary>Check this helper again soon (the next minute).</summary>
     public void CheckSoon(int runnerId) => _checked.TryRemove(runnerId, out _);
 
@@ -199,9 +221,11 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
                     return;
                 var url = AccountUrl(domain, site.Url);
                 var (status, detail) = await CheckOneAsync(runnerId, url, ct);
-                // Signed out, and you saved your sign-in for this store: it signs in (at most every 6 hours by itself, so a
-                // wrong password can't lock the account).
-                if (status == "signedOut" && await AccountForAsync(domain) != null && await AutoAttemptAllowedAsync(runnerId, domain))
+                // Not signed in (or it can't tell, or the store put up a check), and you saved your sign-in for this store: it
+                // signs in (by itself at most once per cooldown, so a wrong password can't lock the account). Signed in
+                // already, the attempt finds that at once.
+                if (status is "signedOut" or "unknown" or "humanCheck" && await AccountForAsync(domain) != null
+                    && await AutoAttemptAllowedAsync(runnerId, domain))
                 {
                     await SignInAsync(runnerId, domain, ct);
                     continue;
@@ -486,16 +510,22 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         if (ok)
         {
             await SaveAsync(runnerId, domain, "signedIn", detail, site.SiteId, site.Url);
-            await notifier.LogAsync(EventLevel.Good, $"{name} signed in to {domain} with your saved sign-in.", site.SiteId);
+            // Nothing typed: it was signed in already.
+            if (formUrl != null)
+                await notifier.LogAsync(EventLevel.Good, $"{name} signed in to {domain} with your saved sign-in.", site.SiteId);
             return;
         }
-        await SaveAsync(runnerId, domain, detail.Contains("human", StringComparison.OrdinalIgnoreCase) ? "humanCheck" : "signedOut", detail,
-            site.SiteId, site.Url, alert: false);
+        // It found no sign-in form at all: that says nothing about being signed out (the store may just not show it where it
+        // looked), so it isn't marked signed out (which would make the helper sit the store out).
+        var status = detail.Contains("human", StringComparison.OrdinalIgnoreCase) ? "humanCheck"
+            : formUrl == null && detail.StartsWith("couldn't find where to sign in", StringComparison.Ordinal) ? "unknown"
+            : "signedOut";
+        await SaveAsync(runnerId, domain, status, detail, site.SiteId, site.Url, alert: false);
         var shown = await hub.ShowAsync(runnerId, stoppedAt ?? url);
         await notifier.NotifyAsync(NotifyKind.SignedOut, EventLevel.Warning,
             $"{name} couldn't sign in to {domain} by itself: {detail} "
-            + (shown ? "The sign-in page is open in a window on that computer: finish it there." : "On the Helpers tab press Log in next to it to finish."),
-            site.SiteId, url, notifier.Link("helpers"));
+            + (shown ? "The page is open in a window on that computer: finish it there." : $"Press Log in next to {domain} on its product's page."),
+            site.SiteId, url, site.SiteId > 0 ? notifier.Link($"site/{site.SiteId}") : notifier.Link("helpers"));
     }
 
     /// <summary>Signs in; FormUrl is the page the password went in on (remembered for next time).</summary>
