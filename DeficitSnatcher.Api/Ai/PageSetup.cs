@@ -20,7 +20,9 @@ public sealed record SetupSuggestion(
     string Notes,
     PageResult? Result,
     BuyRules.Verdict? Verdict,
-    string? Error)
+    string? Error,
+    /// <summary>How to read online and pickup stock separately, when the page shows both.</summary>
+    ChannelRules? Channels = null)
 {
     /// <summary>The check with these settings found a price and whether it's in stock.</summary>
     public bool Works => Result is { Price: not null, InStock: not null };
@@ -46,6 +48,13 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
           "titleSelector": "CSS selector of the product's name (often h1), or null",
           "inStockSelector": "CSS selector of the enabled add-to-cart / buy button that only exists while it can be bought, or null",
           "outOfStockText": "comma-separated words the page shows when sold out (e.g. Sold out, Coming soon), or null",
+          "online": { "container": "CSS selector of the element showing whether it can be delivered / shipped / bought online",
+                      "inStockText": "comma-separated words it shows when it can (e.g. Available to ship, In stock online)",
+                      "outOfStockText": "comma-separated words it shows when it can't (e.g. Sold out online, Not available)" } or null,
+          "pickup": { "container": "CSS selector of the element showing whether it can be picked up in a store",
+                      "inStockText": "words shown when it can (e.g. Available for pickup, Ready today)",
+                      "outOfStockText": "words shown when it can't (e.g. Not available nearby, Sold out at all locations)",
+                      "click": "CSS selector of a button / tab / option to click first when pickup only shows after choosing it, else null" } or null,
           "notes": "one or two sentences for the owner"
         }
         Rules: use only selectors from the lists given, exactly. The price is the current selling price of this product, not a
@@ -53,6 +62,10 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
         and the plain page lacked the price or stock (the page builds itself in script) or the store blocked the plain request.
         isRightProduct is false when the page is for a different product than the one wanted (e.g. a PS5 Slim or a controller
         when a PS5 Pro is wanted).
+        Many stores show two ways to get it: delivered (online) and picked up at a store. When the page shows them separately,
+        give "online" and "pickup" from the availability elements listed (their selectors exactly, and words that appear on the
+        page or that it would show in the other state), and "click" from the pickup options listed when pickup only shows after
+        choosing it. Leave either null when the page doesn't show it.
         """;
 
     // Leaf elements that look like a price, biggest first (the main price is usually the largest).
@@ -147,6 +160,7 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
         // 2. The page in a browser: text, candidate prices, buttons, screenshot.
         PageState state;
         JsonElement extra;
+        JsonElement availability;
         await using (var lease = await browsers.OpenAsync(settings, cookies, ct, siteId is { } sid ? new Site { Id = sid, Url = url } : null))
         {
             var page = await lease.NewPageAsync();
@@ -164,6 +178,7 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
                 return new SetupSuggestion(new Uri(url).Host.Replace("www.", ""), SiteKind.Browser, null, null, null, null, null,
                     BlockDetector.Message(vendor, browser: true), null, null, BlockDetector.Message(vendor, browser: true));
             extra = await page.EvaluateAsync<JsonElement>(PriceScript);
+            availability = await page.EvaluateAsync<JsonElement>(AvailabilityScript);
         }
 
         var q = new StringBuilder()
@@ -178,6 +193,12 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
             q.AppendLine($"- selector={p.GetProperty("selector").GetString()} text=\"{p.GetProperty("text").GetString()}\" size={p.GetProperty("size").GetDouble():0}{(p.GetProperty("struck").GetBoolean() ? " (crossed out)" : "")}");
         if (extra.GetProperty("h1") is { ValueKind: JsonValueKind.Object } h1)
             q.AppendLine($"Heading: selector={h1.GetProperty("selector").GetString()} text=\"{h1.GetProperty("text").GetString()}\"");
+        q.AppendLine().AppendLine("Availability elements (delivery / pickup / stock wording):");
+        foreach (var a in availability.GetProperty("blocks").EnumerateArray())
+            q.AppendLine($"- selector={a.GetProperty("selector").GetString()} text=\"{a.GetProperty("text").GetString()}\"");
+        q.AppendLine("Pickup options that can be clicked:");
+        foreach (var a in availability.GetProperty("options").EnumerateArray())
+            q.AppendLine($"- selector={a.GetProperty("selector").GetString()} text=\"{a.GetProperty("text").GetString()}\"");
         q.AppendLine().AppendLine(state.Describe(3000));
 
         var parts = new List<object> { OpenAiClient.Text(q.ToString()) };
@@ -202,6 +223,7 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
             TitleSelector = S("titleSelector"),
             InStockSelector = S("inStockSelector"),
             OutOfStockText = S("outOfStockText"),
+            StockChannels = StockChannels.Serialize(new ChannelRules(Rule(answer, "online"), Rule(answer, "pickup"))),
         };
         if (!needsBrowser && httpError == null)
             candidates.Add(Copy(withSelectors, SiteKind.Html));
@@ -224,7 +246,7 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
                 error = e.Message.Split('\n')[0];
             }
             var suggestion = new SetupSuggestion(S("storeName"), c.Kind, c.PriceSelector, c.TitleSelector, c.InStockSelector, c.OutOfStockText,
-                rightProduct, notes, result, result == null ? null : BuyRules.Evaluate(product, c, result), error);
+                rightProduct, notes, result, result == null ? null : BuyRules.Evaluate(product, c, result), error, StockChannels.Parse(c.StockChannels));
             best ??= suggestion;
             if (suggestion.Works)
                 return suggestion;
@@ -240,5 +262,43 @@ public sealed class PageSetup(OpenAiClient ai, PageFetcher fetcher, BrowserPool 
         TitleSelector = s.TitleSelector,
         InStockSelector = s.InStockSelector,
         OutOfStockText = s.OutOfStockText,
+        StockChannels = s.StockChannels,
     };
+
+    /// <summary>The AI's online or pickup rule, or null.</summary>
+    private static ChannelRule? Rule(JsonElement answer, string name)
+    {
+        if (!answer.TryGetProperty(name, out var r) || r.ValueKind != JsonValueKind.Object)
+            return null;
+        string? S(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String && v.GetString() is { Length: > 0 } s ? s.Trim() : null;
+        return S("container") is { } container ? new ChannelRule(container, S("inStockText"), S("outOfStockText"), name == "pickup" ? S("click") : null) : null;
+    }
+
+    // Elements that say how it can be had (shipping, delivery, pickup, stock), smallest first, and pickup options to click.
+    // Shares the selector-making code with PriceScript.
+    private static readonly string AvailabilityScript = "() => {\n"
+        + PriceScript[PriceScript.IndexOf("const unique", StringComparison.Ordinal)..PriceScript.IndexOf("const re =", StringComparison.Ordinal)]
+        + """
+          const words = /(ship|deliver|online|pick ?up|in[- ]store|at (all )?(locations|stores)|sold out|in stock|out of stock|unavailable|available|coming soon|ready)/i;
+          const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          const blocks = [];
+          for (const el of document.querySelectorAll('body *')) {
+            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG'].includes(el.tagName) || !visible(el)) continue;
+            const t = (el.innerText || '').trim().replace(/\s+/g, ' ');
+            if (t.length < 4 || t.length > 160 || !words.test(t) || el.querySelectorAll('*').length > 30) continue;
+            blocks.push({ el, selector: sel(el), text: t });
+          }
+          // Keep the outermost of nested matches with the same text, and drop near-duplicates.
+          const seen = new Set(); const kept = [];
+          for (const b of blocks.sort((a, b) => b.text.length - a.text.length)) {
+            if (seen.has(b.text)) continue; seen.add(b.text); kept.push(b);
+          }
+          const options = [];
+          for (const el of document.querySelectorAll('button, [role=tab], [role=radio], label, input[type=radio], a')) {
+            const t = (el.innerText || el.getAttribute('aria-label') || el.value || '').trim().replace(/\s+/g, ' ');
+            if (t && t.length < 80 && /pick ?up|in[- ]store|store/i.test(t) && !/preferred|locator|find a store|store hours|my store/i.test(t) && visible(el)) options.push({ selector: sel(el), text: t });
+          }
+          return { blocks: kept.slice(0, 30).map(b => ({ selector: b.selector, text: b.text })), options: options.slice(0, 10) };
+        }
+        """;
 }

@@ -19,6 +19,8 @@ import {
   type SiteInput,
   type SiteKind,
   type BrowserSession,
+  type ChannelRule,
+  type ChannelRules,
 } from "@/lib/api";
 import { ago, dateTime, money } from "@/lib/format";
 import { Check, ErrorNote, Field, NumberInput, StockBadge, useAction, useData, useNow } from "./ui";
@@ -80,6 +82,7 @@ function toInput(s: Site): SiteInput {
     autoBuy: s.autoBuy,
     checkoutSteps: s.checkoutSteps,
     cookies: null,
+    channels: s.channels,
   };
 }
 
@@ -125,6 +128,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
         autoBuy: false,
         checkoutSteps: [],
         cookies: null,
+        channels: null,
       });
     }
   }, [id, site, products.data, productId, form]);
@@ -167,6 +171,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
       titleSelector: r.titleSelector,
       inStockSelector: r.inStockSelector,
       outOfStockText: r.outOfStockText,
+      channels: r.channels,
     });
     setDirty(true);
     if (r.result) setProbe({ result: r.result, verdict: r.verdict, error: r.error, buyMessage: null });
@@ -330,6 +335,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
             <input type="text" value={form.variantId ?? ""} onChange={(e) => set({ variantId: e.target.value })} />
           </Field>
         </div>
+        <ChannelsEditor channels={form.channels} onChange={(channels) => set({ channels })} />
         {probe && <ProbeView probe={probe} currency={currency} />}
       </div>
 
@@ -727,6 +733,53 @@ function SessionLine({ siteId }: { siteId: number }) {
         "none yet (the next check in a browser starts one)."
       )}
       <ErrorNote error={reset.error} />
+    </div>
+  );
+}
+
+/** Online and pickup, read separately: in stock when either can be had. Filled in by "Auto-fill with AI"; built in for some stores. */
+function ChannelsEditor({ channels, onChange }: { channels: ChannelRules | null; onChange: (c: ChannelRules | null) => void }) {
+  const empty: ChannelRule = { container: "", inStockText: null, outOfStockText: null, click: null };
+  const rule = (k: "online" | "pickup") => channels?.[k] ?? empty;
+  const setRule = (k: "online" | "pickup", patch: Partial<ChannelRule>) =>
+    onChange({ online: channels?.online ?? null, pickup: channels?.pickup ?? null, [k]: { ...rule(k), ...patch } });
+  const row = (k: "online" | "pickup", label: string) => (
+    <>
+      <Field label={`${label}: where it says`} hint="CSS selector of the element showing it.">
+        <input type="text" value={rule(k).container} placeholder={k === "online" ? "#onlineinfo" : "#storeinfo"} onChange={(e) => setRule(k, { container: e.target.value })} />
+      </Field>
+      <Field label={`${label}: available when it says`} hint="Comma-separated.">
+        <input
+          type="text"
+          value={rule(k).inStockText ?? ""}
+          placeholder={k === "online" ? "Available to ship, In stock" : "Available for pickup, Ready today"}
+          onChange={(e) => setRule(k, { inStockText: e.target.value })}
+        />
+      </Field>
+      <Field label={`${label}: sold out when it says`} hint="Comma-separated. Wins over the words above.">
+        <input
+          type="text"
+          value={rule(k).outOfStockText ?? ""}
+          placeholder={k === "online" ? "Sold out online" : "Sold out at all locations"}
+          onChange={(e) => setRule(k, { outOfStockText: e.target.value })}
+        />
+      </Field>
+    </>
+  );
+  return (
+    <div className="stack">
+      <h3 style={{ margin: "8px 0 0" }}>Online and pickup</h3>
+      <p className="muted small" style={{ margin: 0 }}>
+        Many stores show delivery and store pickup separately. Both are checked, and the page counts as in stock when either can be had (the
+        verdict says which). Auto-fill with AI finds these; some stores (Canada Computers, Best Buy) are built in. Empty: not read separately.
+      </p>
+      <div className="fields">
+        {row("online", "Online")}
+        {row("pickup", "Pickup")}
+        <Field label="Pickup: click first" hint="Only if pickup shows after choosing it (a Pick up tab or option). Browser kind.">
+          <input type="text" value={rule("pickup").click ?? ""} placeholder="button:has-text('Pick up')" onChange={(e) => setRule("pickup", { click: e.target.value })} />
+        </Field>
+      </div>
     </div>
   );
 }

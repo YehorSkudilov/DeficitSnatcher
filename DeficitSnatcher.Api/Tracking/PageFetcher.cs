@@ -39,10 +39,11 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
             || site.Kind == SiteKind.Auto && NeedsBrowser.TryGetValue(site.Id, out var since) && DateTimeOffset.UtcNow - since < TimeSpan.FromDays(1);
         if (useBrowser)
         {
-            var (rendered, engine, status, retryAfter, extra) = await RenderAsync(url, cookies, settings, ct, site);
+            var (rendered, engine, status, retryAfter, extra, pickupHtml) = await RenderAsync(url, cookies, settings, ct, site);
             if (BlockDetector.Detect(rendered, status ?? 200) is { } vendor)
                 throw new BlockedException($"In {BrowserPool.EngineName(engine)}: " + BlockDetector.Message(vendor, browser: true), retryAfter);
-            return WithExtra(StoreLabels.Apply(PageParser.ParseHtml(rendered, selectors), rendered, url) with { Source = rendered, SourceType = "text/html" }, url, extra);
+            return WithExtra(StockChannels.Apply(StoreLabels.Apply(PageParser.ParseHtml(rendered, selectors), rendered, url), rendered, pickupHtml,
+                StockChannels.For(site.StockChannels, url)) with { Source = rendered, SourceType = "text/html" }, url, extra);
         }
 
         // A throwaway parameter, as StreetMerchant does, so a cache in front of the store can't answer with an old copy.
@@ -54,17 +55,19 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
             // challenges), and the page's next checks go there too.
             log.LogInformation("Plain request to {Site} blocked by {Vendor}; checking in the browser instead", site.Name, blockedBy);
             NeedsBrowser[site.Id] = DateTimeOffset.UtcNow;
-            var (rendered, engine, status, retryAfter, extra) = await RenderAsync(url, cookies, settings, ct, site);
+            var (rendered, engine, status, retryAfter, extra, pickupHtml) = await RenderAsync(url, cookies, settings, ct, site);
             if (BlockDetector.Detect(rendered, status ?? 200) is { } vendor)
                 throw new BlockedException($"In {BrowserPool.EngineName(engine)}: " + BlockDetector.Message(vendor, browser: true), retryAfter);
-            return WithExtra(StoreLabels.Apply(PageParser.ParseHtml(rendered, selectors), rendered, url) with { Source = rendered, SourceType = "text/html" }, url, extra);
+            return WithExtra(StockChannels.Apply(StoreLabels.Apply(PageParser.ParseHtml(rendered, selectors), rendered, url), rendered, pickupHtml,
+                StockChannels.For(site.StockChannels, url)) with { Source = rendered, SourceType = "text/html" }, url, extra);
         }
         if (BlockDetector.Detect(html, (int)code) is { } blockedBy2)
             throw new BlockedException($"The site answered {(int)code}: " + BlockDetector.Message(blockedBy2, browser: false)
                 + " Or try the Browser kind.", httpRetryAfter);
         if (code != HttpStatusCode.OK)
             throw new HttpRequestException($"The site answered {(int)code} {code}.");
-        return StoreLabels.Apply(PageParser.ParseHtml(html, selectors), html, url) with { Source = html, SourceType = "text/html" };
+        return StockChannels.Apply(StoreLabels.Apply(PageParser.ParseHtml(html, selectors), html, url), html, null,
+            StockChannels.For(site.StockChannels, url)) with { Source = html, SourceType = "text/html" };
     }
 
     private async Task<(HttpStatusCode Status, string Body, TimeSpan? RetryAfter)> GetAsync(Uri url, List<SiteCookie> cookies,
@@ -86,7 +89,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
         return (response.StatusCode, body, RetryAfter(response.Headers.RetryAfter));
     }
 
-    private async Task<(string Html, string Engine, int? Status, TimeSpan? RetryAfter, string? Extra)> RenderAsync(Uri url,
+    private async Task<(string Html, string Engine, int? Status, TimeSpan? RetryAfter, string? Extra, string? PickupHtml)> RenderAsync(Uri url,
         List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site site)
     {
         try
@@ -100,7 +103,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
         }
     }
 
-    private async Task<(string Html, string Engine, int? Status, TimeSpan? RetryAfter, string? Extra)> RenderOnceAsync(Uri url,
+    private async Task<(string Html, string Engine, int? Status, TimeSpan? RetryAfter, string? Extra, string? PickupHtml)> RenderOnceAsync(Uri url,
         List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site site)
     {
         var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -199,7 +202,30 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
             extra = await BestBuyAvailability.FetchAsync(page, sku, profile.PostalCode, log);
             log.LogInformation("Browser check for {Site}: Best Buy availability lookup {Outcome}", site.Name, extra == null ? "failed" : "answered");
         }
-        return (html, lease.Engine, status, retryAfter, extra);
+        // Pickup that only shows after choosing it (a "Pick up" tab or option): clicked, and that view read separately.
+        string? pickupHtml = null;
+        if (StockChannels.For(site.StockChannels, url)?.Pickup is { Click: { Length: > 0 } click } && BlockDetector.Detect(html, status ?? 200) == null)
+        {
+            try
+            {
+                await page.Locator(click).First.ClickAsync(new() { Timeout = 5000 });
+                await page.WaitForTimeoutAsync(1500 + Random.Shared.Next(1000));
+                try
+                {
+                    await page.WaitForLoadStateAsync(Microsoft.Playwright.LoadState.NetworkIdle, new() { Timeout = 5000 });
+                }
+                catch (TimeoutException)
+                {
+                }
+                pickupHtml = await page.ContentAsync();
+                log.LogInformation("Browser check for {Site}: clicked {Click} to read pickup", site.Name, click);
+            }
+            catch (Exception e) when (e is Microsoft.Playwright.PlaywrightException or TimeoutException)
+            {
+                log.LogInformation("Browser check for {Site}: couldn't click {Click} for pickup ({Error})", site.Name, click, e.Message.Split('\n')[0]);
+            }
+        }
+        return (html, lease.Engine, status, retryAfter, extra, pickupHtml);
     }
 
     /// <summary>A store's own stock lookup, when there was one (Best Buy), over what the page itself said.</summary>

@@ -78,6 +78,8 @@ public class Site
     public string? InStockSelector { get; set; }
     /// <summary>Text on the page that means it can't be bought (e.g. "Sold out"), comma-separated.</summary>
     public string? OutOfStockText { get; set; }
+    /// <summary>How to read online and pickup stock separately (JSON, see Tracking.StockChannels); null: built-in or none.</summary>
+    public string? StockChannels { get; set; }
     /// <summary>Shopify: only this variant (id) is looked at; null: the first available one.</summary>
     public string? VariantId { get; set; }
 

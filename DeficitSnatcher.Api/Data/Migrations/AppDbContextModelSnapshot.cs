@@ -640,6 +640,9 @@ namespace DeficitSnatcher.Api.Data.Migrations
                         .HasPrecision(12, 2)
                         .HasColumnType("numeric(12,2)");
 
+                    b.Property<string>("StockChannels")
+                        .HasColumnType("text");
+
                     b.Property<string>("TitleSelector")
                         .HasColumnType("text");
 

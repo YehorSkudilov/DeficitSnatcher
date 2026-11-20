@@ -147,6 +147,7 @@ public sealed class ScanFollowUp(IServiceScopeFactory scopes, BrowserPool browse
                 site.TitleSelector = s.TitleSelector;
                 site.InStockSelector = s.InStockSelector;
                 site.OutOfStockText = s.OutOfStockText;
+                site.StockChannels = StockChannels.Serialize(s.Channels) ?? site.StockChannels;
                 site.UnreadableCount = 0;
                 await db.SaveChangesAsync();
                 await notifier.LogAsync(EventLevel.Good,

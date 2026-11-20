@@ -157,6 +157,10 @@ export type CheckoutStep = {
   note?: string;
 };
 
+/** How to read one way of getting it: online delivery, or pickup at a store (the server's StockChannels). */
+export type ChannelRule = { container: string; inStockText: string | null; outOfStockText: string | null; click?: string | null };
+export type ChannelRules = { online: ChannelRule | null; pickup: ChannelRule | null };
+
 export type Site = {
   id: number;
   productId: number;
@@ -186,6 +190,7 @@ export type Site = {
   verdict: string;
   nextCheckAt: string | null;
   checking: boolean;
+  channels: ChannelRules | null;
 };
 
 export type CheckAllItem = {
@@ -217,6 +222,7 @@ export type SiteInput = {
   checkoutSteps: CheckoutStep[];
   /** null: keep the saved cookies; "": remove them. */
   cookies: string | null;
+  channels: ChannelRules | null;
 };
 
 export type PageResult = {
@@ -333,6 +339,7 @@ export type SetupSuggestion = {
   verdict: Verdict | null;
   error: string | null;
   works: boolean;
+  channels: ChannelRules | null;
 };
 
 export type AiCall = {

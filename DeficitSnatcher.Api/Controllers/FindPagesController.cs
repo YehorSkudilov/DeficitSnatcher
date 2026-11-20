@@ -223,6 +223,7 @@ public sealed class FindPagesController(AppDbContext db, OpenAiClient ai, PageFe
                     site.TitleSelector = s.TitleSelector;
                     site.InStockSelector = s.InStockSelector;
                     site.OutOfStockText = s.OutOfStockText;
+                    site.StockChannels = StockChannels.Serialize(s.Channels);
                     await sdb.SaveChangesAsync();
                     await notifier.LogAsync(EventLevel.Good, $"AI set up {site.Name}: {s.Result!.Price:0.00}, {(s.Result.InStock == true ? "in stock" : "out of stock")}.", site.Id);
                 }

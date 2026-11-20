@@ -24,7 +24,9 @@ public sealed record SiteInput(
     bool AutoBuy,
     List<CheckoutStep>? CheckoutSteps,
     /// <summary>null: keep the saved cookies; "": remove them.</summary>
-    string? Cookies);
+    string? Cookies,
+    /// <summary>How to read online and pickup separately; null or empty: none (built-in rules still apply).</summary>
+    ChannelRules? Channels = null);
 
 public sealed record SiteDto(
     int Id,
@@ -54,7 +56,8 @@ public sealed record SiteDto(
     bool Match,
     string Verdict,
     DateTimeOffset? NextCheckAt,
-    bool Checking);
+    bool Checking,
+    ChannelRules? Channels);
 
 public sealed record ProbeResponse(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage);
 public sealed record BuyRequest(bool DryRun);
@@ -262,6 +265,7 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
         site.TitleSelector = Blank(i.TitleSelector);
         site.InStockSelector = Blank(i.InStockSelector);
         site.OutOfStockText = Blank(i.OutOfStockText);
+        site.StockChannels = StockChannels.Serialize(i.Channels);
         site.VariantId = Blank(i.VariantId);
         site.AutoBuy = i.AutoBuy;
         site.CheckoutSteps = CheckoutStep.Serialize(steps);
@@ -284,6 +288,7 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
         return new SiteDto(s.Id, s.ProductId, s.Product?.Name ?? "", s.Name, s.Url, s.Kind, s.Enabled, s.IntervalSeconds, s.ShippingCost,
             s.PriceSelector, s.TitleSelector, s.InStockSelector, s.OutOfStockText, s.VariantId, s.AutoBuy, CheckoutStep.Parse(s.CheckoutSteps),
             s.CookiesEncrypted != null, s.LastCheckedAt, s.LastChangedAt, s.LastPrice, s.LastInStock, s.LastTitle, s.LastError,
-            s.ConsecutiveErrors, verdict.Match, verdict.Reason, tracker.NextCheck(s.Id), tracker.IsChecking(s.Id));
+            s.ConsecutiveErrors, verdict.Match, verdict.Reason, tracker.NextCheck(s.Id), tracker.IsChecking(s.Id),
+            StockChannels.Parse(s.StockChannels));
     }
 }
