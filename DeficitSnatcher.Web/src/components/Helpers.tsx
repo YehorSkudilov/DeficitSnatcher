@@ -153,6 +153,14 @@ function HelperCard({ h, reload }: { h: WorkerInfo; reload: () => Promise<void> 
             Check now
           </button>
         </div>
+        {!h.connected && (
+          <div className="notice warn small">
+            Sign-ins are checked in this helper&apos;s Chrome, so only while it&apos;s connected; until then they say &quot;Not checked yet&quot; and
+            its pages are checked from the server. On that computer, run <code>deficitsnatcher status</code> to see why (or{" "}
+            <code>deficitsnatcher start</code>). If it says the key was refused, make a new setup code below and run{" "}
+            <code>deficitsnatcher setup &lt;code&gt;</code>.
+          </div>
+        )}
         {checking && <div className="small faint">Checking in the next minute: it opens each store&apos;s account page in that Chrome.</div>}
         {h.logins.length === 0 ? (
           <div className="small faint">No pages yet.</div>
