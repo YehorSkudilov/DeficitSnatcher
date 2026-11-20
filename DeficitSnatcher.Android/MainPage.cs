@@ -19,6 +19,7 @@ public sealed class MainPage : ContentPage
     {
         Title = "Deficit Snatcher";
         BackgroundColor = Theme.Background;
+        StatusBarSpace.Keep(this);
         Show();
     }
 

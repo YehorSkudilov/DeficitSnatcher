@@ -18,6 +18,7 @@ public sealed class SitePage : ContentPage
     {
         Title = "Site";
         BackgroundColor = Theme.Background;
+        StatusBarSpace.Keep(this);
         _web.Navigating += OnNavigating;
         _web.Navigated += async (_, e) =>
         {
@@ -90,7 +91,7 @@ public sealed class MainTabs : Microsoft.Maui.Controls.TabbedPage
         SelectedTabColor = Theme.Accent;
         UnselectedTabColor = Theme.Muted;
         On<Microsoft.Maui.Controls.PlatformConfiguration.Android>().SetToolbarPlacement(ToolbarPlacement.Bottom);
-        Children.Add(new NavigationPage(new MainPage()) { Title = "Alarm", BarBackgroundColor = Theme.Background, BarTextColor = Theme.Text });
+        Children.Add(new MainPage { Title = "Alarm" });
         Children.Add(new SitePage());
     }
 }
