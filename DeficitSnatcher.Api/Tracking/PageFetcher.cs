@@ -116,10 +116,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
         await using var lease = await browsers.OpenAsync(settings, cookies, worker, ct, site);
         var onPc = lease.OnPc;
         var page = await lease.NewPageAsync();
-        // Bright Data's browser can take a while to get past a store's check: at least a minute there.
-        var timeoutMs = (lease.Engine == BrowserPool.BrightData ? Math.Max(settings.RequestTimeoutSeconds, 60) : settings.RequestTimeoutSeconds) * 1000;
-        await page.GotoAsync(url.ToString(), new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = timeoutMs });
-        await browsers.WaitForCaptchaAsync(lease, page);
+        await page.GotoAsync(url.ToString(), new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = settings.RequestTimeoutSeconds * 1000 });
         try
         {
             await page.WaitForLoadStateAsync(Microsoft.Playwright.LoadState.NetworkIdle, new() { Timeout = 8000 });

@@ -8,8 +8,8 @@ namespace DeficitSnatcher.Api.Tracking;
 
 /// <summary>
 /// The server's browser, started the first time a page needs it (a Browser-kind site's check, or a checkout), with a fresh
-/// context for every use. Which browser it is: Settings → App browser (Chromium here, Bright Data's cloud browser over CDP,
-/// or Camoufox over Playwright's protocol). Every context starts with the
+/// context for every use. Which browser it is: Settings → App browser (Chromium here, or Camoufox over Playwright's
+/// protocol). Every context starts with the
 /// page's saved session (cookies and local storage, see BrowserSessions) and saves it again when it's done.
 /// Chromium It always runs with a window, like the PC helper's Chrome: headless is the
 /// easiest thing for a store's bot check to spot. On Linux with no screen (Docker) it starts a virtual one (Xvfb) for it;
@@ -194,22 +194,12 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         """;
 
-    public const string Chromium = "chromium", BrightData = "brightdata", Camoufox = "camoufox";
+    public const string Chromium = "chromium", Camoufox = "camoufox";
 
     /// <summary>The server's browser: Settings → App browser.</summary>
-    public static string EngineFor(BotSettings settings) => settings.AppBrowser switch
-    {
-        "BrightData" => BrightData,
-        "Camoufox" => Camoufox,
-        _ => Chromium,
-    };
+    public static string EngineFor(BotSettings settings) => settings.AppBrowser == "Camoufox" ? Camoufox : Chromium;
 
-    public static string EngineName(string engine) => engine switch
-    {
-        BrightData => "Bright Data's browser",
-        Camoufox => "Camoufox",
-        _ => "Chromium",
-    };
+    public static string EngineName(string engine) => engine == Camoufox ? "Camoufox" : "Chromium";
 
     /// <summary>
     /// A browser to use and dispose, on a worker (see Pc/WorkerPool): on the server, a fresh context in the app's browser
@@ -243,20 +233,7 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
         var engine = EngineFor(settings);
         var siteId = site?.Id ?? 0;
         var state = await sessions.LoadAsync(siteId, engine, settings, ct);
-        IBrowserContext context;
-        IBrowser? ownBrowser = null;
-        switch (engine)
-        {
-            case Camoufox:
-                context = await CamoufoxContextAsync(settings, state, ct);
-                break;
-            case BrightData:
-                (ownBrowser, context) = await BrightDataContextAsync(settings, state, ct);
-                break;
-            default:
-                context = await NewContextAsync(settings, state, ct);
-                break;
-        }
+        var context = engine == Camoufox ? await CamoufoxContextAsync(settings, state, ct) : await NewContextAsync(settings, state, ct);
         try
         {
             await AddPastedCookiesAsync(context, cookies, state);
@@ -268,7 +245,7 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
         Func<IBrowserContext, Task>? save = siteId > 0 && settings.BrowserSessionMinutes > 0
             ? async c => await sessions.SaveAsync(siteId, engine, await c.StorageStateAsync())
             : null;
-        return new BrowserLease(context, owned: true, Pc.WorkerPool.Server, engine, save, ownBrowser, log);
+        return new BrowserLease(context, owned: true, Pc.WorkerPool.Server, engine, save, log);
     }
 
     /// <summary>The cookies pasted on the page. With a saved session, only the ones it doesn't have: the store may have
@@ -339,98 +316,6 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
         finally
         {
             _lock.Release();
-        }
-    }
-
-    // ---- Bright Data Browser API: a Chrome in their cloud, over CDP. Each connection is a new session there. ----
-
-    private async Task<(IBrowser, IBrowserContext)> BrightDataContextAsync(BotSettings settings, string? state, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(settings.BrightDataBrowserUrl))
-            throw new BrowserEngineException("Bright Data's browser isn't set up: add its address in Settings → Checking.");
-        _playwright ??= await Playwright.CreateAsync();
-        IBrowser browser;
-        try
-        {
-            browser = await _playwright.Chromium.ConnectOverCDPAsync(settings.BrightDataBrowserUrl, new() { Timeout = 60000 });
-        }
-        catch (PlaywrightException e)
-        {
-            var first = e.Message.Split('\n')[0];
-            throw new BrowserEngineException(first.Contains("407") || first.Contains("401") || first.Contains("auth", StringComparison.OrdinalIgnoreCase)
-                ? "Bright Data refused the browser's login: check its address (user and password) in Settings → Checking."
-                : "Couldn't reach Bright Data's browser: " + first);
-        }
-        try
-        {
-            // Their browser takes no context options (it sets its own fingerprint): the session goes in its own context.
-            var context = browser.Contexts.FirstOrDefault() ?? await browser.NewContextAsync();
-            if (state != null)
-                await RestoreStateAsync(context, state);
-            return (browser, context);
-        }
-        catch
-        {
-            await browser.CloseAsync();
-            throw;
-        }
-    }
-
-    /// <summary>A saved storage state put into a context that already exists: cookies, and local storage set on each page of
-    /// its origin before the page's own script runs (without overwriting what the page has set since).</summary>
-    private async Task RestoreStateAsync(IBrowserContext context, string state)
-    {
-        if (System.Text.Json.Nodes.JsonNode.Parse(state) is not System.Text.Json.Nodes.JsonObject saved)
-            return;
-        var cookies = new List<Cookie>();
-        foreach (var c in saved["cookies"]?.AsArray() ?? [])
-            if (c is System.Text.Json.Nodes.JsonObject o && o["name"]?.GetValue<string>() is { } name && o["domain"]?.GetValue<string>() is { } domain)
-                cookies.Add(new Cookie
-                {
-                    Name = name, Value = o["value"]?.GetValue<string>() ?? "", Domain = domain, Path = o["path"]?.GetValue<string>() ?? "/",
-                    Expires = o["expires"]?.GetValue<float>() is > 0 and var exp ? exp : null,
-                    HttpOnly = o["httpOnly"]?.GetValue<bool>(), Secure = o["secure"]?.GetValue<bool>(),
-                });
-        if (cookies.Count > 0)
-            try
-            {
-                await context.AddCookiesAsync(cookies);
-            }
-            catch (PlaywrightException e)
-            {
-                log.LogWarning("Couldn't put the saved cookies back: {Error}", e.Message.Split('\n')[0]);
-            }
-        if (saved["origins"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } origins)
-            await context.AddInitScriptAsync($$"""
-                (() => {
-                  const saved = {{origins.ToJsonString()}};
-                  for (const o of saved) {
-                    if (o.origin !== location.origin) continue;
-                    try {
-                      for (const { name, value } of o.localStorage || [])
-                        if (localStorage.getItem(name) === null) localStorage.setItem(name, value);
-                    } catch (e) {}
-                  }
-                })();
-                """);
-    }
-
-    /// <summary>Bright Data's browser solves bot checks (CAPTCHAs) itself: this waits for it when there is one. A no-op in
-    /// other browsers.</summary>
-    public async Task WaitForCaptchaAsync(BrowserLease lease, IPage page)
-    {
-        if (lease.Engine != BrightData)
-            return;
-        try
-        {
-            var cdp = await page.Context.NewCDPSessionAsync(page);
-            var r = await cdp.SendAsync("Captcha.waitForSolve", new Dictionary<string, object> { ["detectTimeout"] = 10000 });
-            if (r?.TryGetProperty("status", out var status) == true && status.GetString() is { } s && s != "not_detected")
-                log.LogInformation("Bright Data CAPTCHA on {Url}: {Status}", page.Url, s);
-            await cdp.DetachAsync();
-        }
-        catch (PlaywrightException)
-        {
         }
     }
 
@@ -563,15 +448,15 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
 }
 
 /// <summary>A browser borrowed for one job: pages opened through it are closed when it's disposed, and a context made for the
-/// job (on the server) is closed too, after its session is saved (<paramref name="save"/>); a Bright Data browser is closed
-/// (which ends the session there: they bill while it's open). The PC's profile is never closed.</summary>
+/// job (on the server) is closed too, after its session is saved (<paramref name="save"/>). The PC's profile is never
+/// closed.</summary>
 public sealed class BrowserLease(IBrowserContext context, bool owned, string worker, string engine = BrowserPool.Chromium,
-    Func<IBrowserContext, Task>? save = null, IBrowser? ownBrowser = null, ILogger? log = null) : IAsyncDisposable
+    Func<IBrowserContext, Task>? save = null, ILogger? log = null) : IAsyncDisposable
 {
     private readonly List<IPage> _pages = [];
 
     public IBrowserContext Context => context;
-    /// <summary>Which browser: chromium, brightdata or camoufox (see BrowserPool); the PC helper's Chrome is chromium.</summary>
+    /// <summary>Which browser: chromium or camoufox (see BrowserPool); the PC helper's Chrome is chromium.</summary>
     public string Engine => engine;
     public bool OnPc => !owned;
     /// <summary>Where it really runs: "server" or "pc:{id}".</summary>
@@ -601,10 +486,7 @@ public sealed class BrowserLease(IBrowserContext context, bool owned, string wor
                 }
             try
             {
-                if (ownBrowser != null)
-                    await ownBrowser.CloseAsync();
-                else
-                    await context.CloseAsync();
+                await context.CloseAsync();
             }
             catch (PlaywrightException)
             {
@@ -626,7 +508,7 @@ public sealed class BrowserLease(IBrowserContext context, bool owned, string wor
     }
 }
 
-/// <summary>The page's browser on the server can't be had: Bright Data or Camoufox not set up, refused, or unreachable.</summary>
+/// <summary>The page's browser on the server can't be had: Camoufox not set up, or unreachable.</summary>
 public sealed class BrowserEngineException(string message) : Exception(message);
 
 /// <summary>The PC helper isn't there, or its Chrome can't be reached.</summary>

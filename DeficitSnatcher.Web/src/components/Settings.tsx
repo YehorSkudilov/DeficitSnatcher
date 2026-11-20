@@ -171,23 +171,11 @@ function SettingsForm({ initial }: { initial: Settings }) {
         >
           <select value={s.appBrowser} onChange={(e) => set({ appBrowser: e.target.value as Settings["appBrowser"] })}>
             <option value="Chromium">Chromium (here, with a window on a virtual screen)</option>
-            <option value="BrightData">Bright Data&apos;s browser (their cloud, over CDP; paid per traffic)</option>
             <option value="Camoufox">Camoufox (a Firefox that hides automation; the camoufox service)</option>
           </select>
         </Field>
         <Field label="Keep browser sessions (minutes)" hint="Each page keeps its cookies and storage across checks and into its checkout this long, then starts fresh (and at once when the store blocks it, or you press Reset on the page). 0: never kept.">
             <NumberInput value={s.browserSessionMinutes} min={0} onChange={(v) => set({ browserSessionMinutes: v ?? 0 })} />
-        </Field>
-        <Field
-          label="Bright Data browser"
-          hint={
-            <>
-              Bright Data&apos;s Browser API (over CDP). The zone&apos;s Playwright address:{" "}
-              <code>wss://brd-customer-…-zone-…:password@brd.superproxy.io:9222</code>.
-            </>
-          }
-        >
-          <input type="password" autoComplete="off" value={s.brightDataBrowserUrl} placeholder="wss://brd-customer-…@brd.superproxy.io:9222" onChange={(e) => set({ brightDataBrowserUrl: e.target.value })} />
         </Field>
         <Field
           label="Camoufox"

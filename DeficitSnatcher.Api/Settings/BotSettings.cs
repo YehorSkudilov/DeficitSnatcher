@@ -39,12 +39,10 @@ public sealed record BotSettings
     /// A residential proxy gets past stores that block servers' addresses. Empty: direct.</summary>
     public string ProxyUrl { get; init; } = "";
     // The app's browser (BrowserPool).
-    /// <summary>Bright Data Browser API address: wss://brd-customer-…-zone-…:password@brd.superproxy.io:9222.</summary>
-    public string BrightDataBrowserUrl { get; init; } = "";
     /// <summary>The Camoufox Playwright server (DeficitSnatcher.Camoufox), e.g. ws://camoufox:4444/camoufox in Docker.</summary>
     public string CamoufoxUrl { get; init; } = "";
-    /// <summary>The server's browser, for Browser-kind pages, checkouts, screenshots and the AI: Chromium (here), BrightData
-    /// (their cloud browser) or Camoufox.</summary>
+    /// <summary>The server's browser, for Browser-kind pages, checkouts, screenshots and the AI: Chromium (here) or
+    /// Camoufox.</summary>
     public string AppBrowser { get; init; } = "Chromium";
     /// <summary>A page's browser session (cookies, local storage) is carried from check to check and into checkouts for
     /// this long, then started afresh; 0: every browser starts as a new visitor.</summary>
@@ -171,9 +169,8 @@ public sealed record BotSettings
         SmtpPassword = SmtpPassword ?? "",
         EmailFrom = EmailFrom?.Trim() ?? "",
         ProxyUrl = ProxyUrl?.Trim() ?? "",
-        BrightDataBrowserUrl = BrightDataBrowserUrl?.Trim() ?? "",
         CamoufoxUrl = CamoufoxUrl?.Trim() ?? "",
-        AppBrowser = AppBrowser is "BrightData" or "Camoufox" ? AppBrowser : "Chromium",
+        AppBrowser = AppBrowser == "Camoufox" ? AppBrowser : "Chromium",
         BrowserSessionMinutes = Math.Clamp(BrowserSessionMinutes, 0, 30 * 24 * 60),
     };
 }

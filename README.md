@@ -61,14 +61,13 @@ browser**. Pages on a PC helper always use its Chrome.
 |---|---|
 | **Chromium** | Here in the API's container, with a window on a virtual screen (Xvfb). The default. |
 | **Camoufox** | [Camoufox](https://camoufox.com), a Firefox that hides automation and keeps a consistent fingerprint. `DeficitSnatcher.Camoufox` runs it as a Playwright server; the API connects to `ws://camoufox:4444/camoufox` (Playwright's `Firefox.ConnectAsync`) and drives it like Chromium: checks, checkouts, the AI. Runs with the `COMPOSE_PROFILES` GitHub variable set to `camoufox` (Deploy writes it to .env). Uses the proxy when one is set. **Its Playwright and the API's must be the same version** (1.62.0 in both `DeficitSnatcher.Api.csproj` and `DeficitSnatcher.Camoufox/requirements.txt`): a client only talks to its own version's server. |
-| **BrightData** | [Bright Data Browser API](https://docs.brightdata.com/scraping-automation/scraping-browser/introduction): a Chrome in their cloud, over CDP (`ConnectOverCDP` to the zone's `wss://…@brd.superproxy.io:9222`). Each check or checkout is a new session there (a new address), closed when done; their CAPTCHA solving is waited for on checks. Paid per traffic. |
 
 **Sessions.** Every page keeps its own browser session on the server: its cookies and local storage are saved (encrypted,
 in the database, so they survive restarts) when a check, checkout or screenshot is done, and put back into the next
 browser, so the store sees one returning visitor and a checkout carries on where the checks left off. Cookies pasted on
 the page are added where the session doesn't have them. A session starts afresh when it's older than Settings → "Keep
 browser sessions" (3 hours by default), when the store blocks it, when the app browser is changed (the fingerprint
-wouldn't match), or with **Reset** on the page. Failures say which browser and why (not set up, login refused,
+wouldn't match), or with **Reset** on the page. Failures say which browser and why (not set up,
 unreachable, version mismatch, timed out, blocked).
 
 ## Restock forecast
@@ -99,6 +98,9 @@ while the helper isn't connected they're checked from the server as usual (Walma
 2. Same card → **Make a setup code** (the site's address and a key in one), and copy it.
 3. Double-click `DeficitSnatcher.Runner` and paste the code. It installs itself (in your user folder), starts in the
    background and again at every login; its Chrome opens once to sign in to the stores, then stays minimised.
+
+Its Chrome is your installed Google Chrome, started as a normal program with its own profile (no automation switches,
+nothing patched in the page), which the helper then connects to; so to a store it looks like an ordinary Chrome.
 
 Commands, in a new terminal: `deficitsnatcher status | stop | start | restart | window show | window hide |
 autostart on|off | setup <code> | reset | logs | uninstall`.

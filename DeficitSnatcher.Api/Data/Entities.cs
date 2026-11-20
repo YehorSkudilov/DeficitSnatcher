@@ -226,7 +226,7 @@ public class RunnerKey
 public class BrowserSession
 {
     public int SiteId { get; set; }
-    /// <summary>The browser it came from (chromium, brightdata, camoufox): another one starts afresh, its fingerprint wouldn't match.</summary>
+    /// <summary>The browser it came from (chromium, camoufox): another one starts afresh, its fingerprint wouldn't match.</summary>
     public string Engine { get; set; } = "";
     /// <summary>The storage state JSON, encrypted (see SecretBox): it holds sign-ins.</summary>
     public string StateEncrypted { get; set; } = "";

@@ -417,9 +417,8 @@ export type Settings = {
   maxConcurrentChecks: number;
   requestTimeoutSeconds: number;
   proxyUrl: string;
-  brightDataBrowserUrl: string;
   camoufoxUrl: string;
-  appBrowser: "Chromium" | "BrightData" | "Camoufox";
+  appBrowser: "Chromium" | "Camoufox";
   browserSessionMinutes: number;
   userAgent: string;
   historyDays: number;

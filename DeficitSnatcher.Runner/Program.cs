@@ -521,10 +521,10 @@ static partial class Helper
         {
             Log("Resetting Chrome: closing it, wiping its profile (cookies, site data, cache, sign-ins) and starting a clean one.");
             wipeProfile = true;
-            if (browser is { } b)
+            if (browser is { })
                 try
                 {
-                    await b.CloseAsync();
+                    await Chrome.CloseAsync();
                 }
                 catch (Exception)
                 {
@@ -591,19 +591,16 @@ static partial class Helper
                 WriteState(state);
                 using var chromeClosed = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
                 context.Close += (_, _) => chromeClosed.Cancel();
+                // Closed by hand, or crashed: the connection to it ends.
+                if (context.Browser is { } connected)
+                    connected.Disconnected += (_, _) => chromeClosed.Cancel();
                 while (pendingUrls.TryDequeue(out var url))
                     await Chrome.OpenWindowAsync(context, url);
                 await ConnectLoopAsync(c, cdpUrl, name, change => WriteState(state = change(state)), show, tryUpdate, reset, chromeClosed.Token);
                 browser = null;
                 if (!stop.IsCancellationRequested)
                     Log("Chrome was closed: starting it again in 5 s (deficitsnatcher stop to stop the helper).");
-                try
-                {
-                    await context.CloseAsync();
-                }
-                catch (Exception)
-                {
-                }
+                await Chrome.CloseAsync();
             }
             catch (Exception e)
             {
@@ -924,38 +921,76 @@ static partial class Helper
     {
         static IPlaywright? _playwright;
 
-        /// <summary>Chrome (the installed Google Chrome when there is one) with its own profile and a DevTools port on this
-        /// computer only; minimised once the stores have been signed in to.</summary>
+        static IBrowser? _browser;
+        static Process? _process;
+
+        /// <summary>
+        /// Chrome (the installed Google Chrome when there is one) with its own profile and a DevTools port on this computer
+        /// only; minimised once the stores have been signed in to.
+        /// It's started as a plain program, the way a person starts it, and the helper connects to it afterwards. Not through
+        /// Playwright's launch: that adds its automation switches (--enable-automation, --disable-extensions,
+        /// --disable-popup-blocking and a dozen more) and needs navigator.webdriver patched over, and stores' bot checks
+        /// (Akamai: Best Buy's "Access Denied") read exactly those. Started this way, nothing in the browser says a program
+        /// is driving it. A Chrome the helper started before (still open on its profile) is connected to again.
+        /// </summary>
         public static async Task<(IBrowserContext Context, string CdpUrl, string Name)> StartAsync(Action<string> log)
         {
             Directory.CreateDirectory(ProfileDir);
             _playwright ??= await Playwright.CreateAsync();
-            var port = FreePort();
-            var options = new BrowserTypeLaunchPersistentContextOptions
-            {
-                // Always with a window: a headless Chrome is the easiest thing for a store's bot check to spot.
-                Headless = false,
-                Args = [$"--remote-debugging-port={port}", "--remote-debugging-address=127.0.0.1", "--disable-blink-features=AutomationControlled"],
-                ViewportSize = ViewportSize.NoViewport,
-                Locale = "en-CA",
-            };
-            IBrowserContext context;
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+
+            var port = await RunningPortAsync(http);
             string name;
-            try
+            if (port != null)
             {
-                context = await _playwright.Chromium.LaunchPersistentContextAsync(ProfileDir, new(options) { Channel = "chrome" });
-                name = "Google Chrome";
+                log("Chrome is already open on the helper's profile: connecting to it.");
+                name = ChromePath() != null ? "Google Chrome" : "Chromium";
             }
-            catch (PlaywrightException)
+            else
             {
-                log("Google Chrome isn't installed: using Chromium (downloading it the first time).");
-                Microsoft.Playwright.Program.Main(["install", "chromium"]);
-                context = await _playwright.Chromium.LaunchPersistentContextAsync(ProfileDir, new(options) { Channel = "chromium" });
-                name = "Chromium";
+                var exe = ChromePath();
+                name = "Google Chrome";
+                if (exe == null)
+                {
+                    log("Google Chrome isn't installed: using Chromium (downloading it the first time).");
+                    Microsoft.Playwright.Program.Main(["install", "chromium"]);
+                    exe = _playwright.Chromium.ExecutablePath;
+                    name = "Chromium";
+                }
+                port = FreePort();
+                var launch = new ProcessStartInfo(exe) { UseShellExecute = false };
+                foreach (var a in new[]
+                {
+                    $"--user-data-dir={ProfileDir}",
+                    $"--remote-debugging-port={port}",
+                    "--remote-debugging-address=127.0.0.1",
+                    // Only what a first start of a new profile would otherwise ask about.
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                })
+                    launch.ArgumentList.Add(a);
+                _process = Process.Start(launch) ?? throw new InvalidOperationException($"{name} didn't start.");
             }
 
-            // Hides the one property that says "a program is driving this browser".
-            await context.AddInitScriptAsync("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });");
+            // Its DevTools answer once it's up.
+            JsonElement version;
+            for (var i = 0; ; i++)
+            {
+                try
+                {
+                    version = JsonDocument.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/json/version")).RootElement;
+                    break;
+                }
+                catch (Exception) when (i < 60)
+                {
+                    if (_process is { HasExited: true })
+                        throw new InvalidOperationException($"{name} closed right after starting (is it already open on {ProfileDir}?).");
+                    await Task.Delay(500);
+                }
+            }
+            var cdpUrl = version.GetProperty("webSocketDebuggerUrl").GetString()!;
+            _browser = await _playwright.Chromium.ConnectOverCDPAsync(cdpUrl, new() { Timeout = 30000 });
+            var context = _browser.Contexts.Count > 0 ? _browser.Contexts[0] : throw new InvalidOperationException("Chrome has no profile open.");
 
             var start = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
             // Tabs Chrome brought back from last time: the site opens what it needs.
@@ -981,9 +1016,6 @@ static partial class Helper
             // How the site finds this window, to open the bot's tabs in it (not in a sign-in window).
             await start.EvaluateAsync("() => { window.name = 'ds-home'; }");
 
-            using var http = new HttpClient();
-            var version = JsonDocument.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/json/version")).RootElement;
-            var cdpUrl = version.GetProperty("webSocketDebuggerUrl").GetString()!;
             var full = $"{name} {version.GetProperty("Browser").GetString()?.Split('/').LastOrDefault()}";
             log($"Browser: {full}");
 
@@ -1081,6 +1113,74 @@ static partial class Helper
             catch (Exception)
             {
                 // Chrome is closing.
+            }
+        }
+
+        /// <summary>The installed Google Chrome, or null.</summary>
+        static string? ChromePath()
+        {
+            var candidates = new List<string>();
+            if (OperatingSystem.IsWindows())
+                foreach (var root in new[] { "ProgramFiles", "ProgramFiles(x86)", "LocalAppData" })
+                    if (Environment.GetEnvironmentVariable(root) is { Length: > 0 } dir)
+                        candidates.Add(Path.Combine(dir, "Google", "Chrome", "Application", "chrome.exe"));
+            if (OperatingSystem.IsMacOS())
+            {
+                candidates.Add("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+                candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"));
+            }
+            if (OperatingSystem.IsLinux())
+                candidates.AddRange(["/opt/google/chrome/chrome", "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"]);
+            return candidates.FirstOrDefault(File.Exists);
+        }
+
+        /// <summary>The DevTools port of a Chrome already open on the helper's profile (it writes DevToolsActivePort there), if
+        /// it answers.</summary>
+        static async Task<int?> RunningPortAsync(HttpClient http)
+        {
+            var file = Path.Combine(ProfileDir, "DevToolsActivePort");
+            try
+            {
+                if (!File.Exists(file) || !int.TryParse(File.ReadLines(file).FirstOrDefault(), out var port))
+                    return null;
+                await http.GetStringAsync($"http://127.0.0.1:{port}/json/version");
+                return port;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Closes Chrome the way its own menu does (so the profile is saved), then makes sure it's gone.</summary>
+        public static async Task CloseAsync()
+        {
+            var browser = _browser;
+            _browser = null;
+            try
+            {
+                if (browser is { IsConnected: true })
+                {
+                    var cdp = await browser.NewBrowserCDPSessionAsync();
+                    await cdp.SendAsync("Browser.close");
+                }
+            }
+            catch (Exception)
+            {
+                // Already closing.
+            }
+            if (_process is { } p)
+            {
+                try
+                {
+                    if (!p.WaitForExit(10000))
+                        p.Kill(entireProcessTree: true);
+                }
+                catch (Exception)
+                {
+                }
+                _process = null;
             }
         }
 
