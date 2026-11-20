@@ -13,6 +13,7 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
     ILogger<Tracker> log)
     : BackgroundService
 {
+    private DateTimeOffset _lastForecastLookup;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, (DateTimeOffset? Next, DateTimeOffset At)> _forecasts = new();
 
     /// <summary>A restock looks likely now for this page: from 30 minutes before its forecast to 90 after (forecasts are
@@ -74,10 +75,11 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        if (DateTimeOffset.UtcNow - _lastCleanup > TimeSpan.FromHours(1))
+        // Every few minutes: one store's restock pattern looked up online, when it's never been, is a week old, or its
+        // predicted restock has passed (so the forecast moves on). One at a time keeps the AI's use low.
+        if (DateTimeOffset.UtcNow - _lastForecastLookup > TimeSpan.FromMinutes(3))
         {
-            _lastCleanup = DateTimeOffset.UtcNow;
-            // Once an hour: one store's restock pattern looked up online, if it's missing or a week old.
+            _lastForecastLookup = DateTimeOffset.UtcNow;
             _ = Task.Run(async () =>
             {
                 try
@@ -89,6 +91,10 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
                     log.LogWarning("Restock lookup failed: {Error}", e.Message);
                 }
             });
+        }
+        if (DateTimeOffset.UtcNow - _lastCleanup > TimeSpan.FromHours(1))
+        {
+            _lastCleanup = DateTimeOffset.UtcNow;
             if (settings.HistoryDays > 0)
             {
                 var cutoff = DateTimeOffset.UtcNow.AddDays(-settings.HistoryDays);

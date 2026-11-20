@@ -169,17 +169,27 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         one, and weigh them together:
         - Restock trackers, first: NowInStock (nowinstock.net: the product's tracker page for the owner's country, and its
           stock history log with dates and times), StockTrack (stocktrack.ca in Canada), HotStock, and similar trackers.
-        - Restock alert accounts and groups: X/Twitter, Discord and Telegram restock alerts, as reported or archived publicly.
-        - Forums and Reddit: deal forums (RedFlagDeals in Canada, Slickdeals in the US, HotUKDeals in the UK) and the
-          product's and store's subreddits, for recent "it's back" posts with times.
-        - The store itself: its announcements, launch or drop dates, flyers, and how it releases stock (online drops, queues).
+        - Restock alert accounts and groups: well-known restock accounts on X/Twitter, Threads and Bluesky (e.g. Wario64, and
+          the country's own PS5/console restock accounts), Discord and Telegram restock groups as reported or archived
+          publicly, and Facebook groups.
+        - Live restock streams and videos: YouTube/Twitch restock streamers (e.g. Jake Randall style streams) and their
+          posted drop times.
+        - News restock roundups: gaming and tech sites' "where to buy / restock tracker" articles (IGN, GameSpot, The Verge,
+          and the country's own, e.g. MobileSyrup or iPhone in Canada), which often list drop days and times.
+        - Forums and Reddit: deal forums (RedFlagDeals in Canada, Slickdeals in the US, HotUKDeals in the UK), the product's
+          subreddits (e.g. r/PS5, r/PS5Canada) and the store's (e.g. r/bestbuycanada), for recent "it's back" posts with times.
+        - The store itself: its announcements, launch or drop dates, its weekly flyer cycle (which day new deals start), and
+          how it releases stock (online drops, queues, time of day).
         - Near the owner: stores of this chain near the owner's area (given below) and whether they restock in store or for
           local pickup, and regional patterns (e.g. a province's stores getting stock on another day).
         Prefer recent reports (the last few months) over old ones, and dated tracker logs over hearsay. Convert times to the
         owner's time zone. Answer with JSON only:
         {
           "pattern": "the usual pattern in a few words, e.g. 'Thursdays around 11 am ET, every 1–2 weeks', or null if none is known",
-          "nextLikely": "ISO 8601 date and time of the next likely restock (with its UTC offset), or null if nothing points to one",
+          "nextLikely": "ISO 8601 date and time (with its UTC offset) of the next likely restock AFTER the given 'Now'. When there's any
+                         pattern at all, even a rough one (a usual weekday and time, a usual gap since the last drop), give its next
+                         occurrence after Now with low confidence rather than null; never a time that's already past. null only
+                         when nothing at all is known",
           "confidence": "low | medium | high (high only when several independent sources agree)",
           "summary": "two or three sentences: what the recent reports say, which kinds of source, and how sure that is",
           "nearYou": "one or two sentences about stores near the owner's area (in-store or pickup restocks), or null if nothing found",
@@ -246,7 +256,8 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         return row.Error;
     }
 
-    /// <summary>The background part: one store whose online forecast is missing or a week old, per call (hourly).</summary>
+    /// <summary>The background part, one store per call (every few minutes): one never looked up first, then one whose
+    /// predicted restock has passed (looked up again after 6 hours), then one a week old.</summary>
     public async Task RefreshOneStaleAsync(CancellationToken ct)
     {
         var settings = await settingsStore.GetAsync(ct);
@@ -255,9 +266,13 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var sites = await db.Sites.AsNoTracking().Where(s => s.Enabled && s.Product!.Enabled).Select(s => new { s.ProductId, s.Url }).ToListAsync(ct);
-        var weekAgo = DateTimeOffset.UtcNow.AddDays(-7);
-        var known = await db.RestockInsights.AsNoTracking().Where(x => x.FetchedAt > weekAgo).Select(x => new { x.ProductId, x.Domain }).ToListAsync(ct);
-        var stale = sites.FirstOrDefault(s => !known.Any(k => k.ProductId == s.ProductId && k.Domain == FindPagesController.Domain(s.Url)));
+        var now = DateTimeOffset.UtcNow;
+        var rows = await db.RestockInsights.AsNoTracking().Select(x => new { x.ProductId, x.Domain, x.FetchedAt, x.NextLikely }).ToListAsync(ct);
+        bool Fresh(int productId, string url, Func<DateTimeOffset, DateTimeOffset?, bool> ok) =>
+            rows.Any(r => r.ProductId == productId && r.Domain == FindPagesController.Domain(url) && ok(r.FetchedAt, r.NextLikely));
+        var stale = sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (_, _) => true))
+            ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, next) => !(next < now && now - at > TimeSpan.FromHours(6))))
+            ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, _) => now - at < TimeSpan.FromDays(7)));
         if (stale == null)
             return;
         log.LogInformation("Looking up {Store}'s restock pattern online", FindPagesController.Domain(stale.Url));
