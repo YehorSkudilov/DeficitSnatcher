@@ -213,7 +213,7 @@ export function Scans({ initial, productId, siteId }: { initial?: string; produc
                         {s.price !== null && s.totalPrice !== null && s.totalPrice !== s.price && <div className="faint small">{money(s.price, currency)} + ship</div>}
                       </td>
                       <td className="small" style={{ maxWidth: 300 }}>
-                        {s.match ? <span className="badge good">IN RANGE</span> : <span className={s.error ? "" : "muted"}>{s.error ?? s.verdict}</span>}
+                        {s.match ? <span className="badge good">IN RANGE</span> : <span className={`clamp ${s.error ? "" : "muted"}`} title={s.error ?? s.verdict}>{s.error ?? s.verdict}</span>}
                       </td>
                       <td className="small" style={{ maxWidth: 260 }}>
                         {s.purchaseId ? (

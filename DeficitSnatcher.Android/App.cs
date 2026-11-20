@@ -5,7 +5,7 @@ public sealed class App : Application
     public App() => UserAppTheme = AppTheme.Dark;
 
     protected override Window CreateWindow(IActivationState? activationState) =>
-        new(new NavigationPage(new MainPage()) { BarBackgroundColor = Theme.Background, BarTextColor = Theme.Text }) { Title = "Deficit Snatcher" };
+        new(new MainTabs()) { Title = "Deficit Snatcher" };
 }
 
 /// <summary>The site's colors.</summary>

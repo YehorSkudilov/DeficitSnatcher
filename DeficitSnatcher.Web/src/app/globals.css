@@ -874,3 +874,42 @@ details > summary {
   opacity: 0.5;
   cursor: default;
 }
+
+/* ---- Phones ---- */
+/* Long text in a table cell (a check's error): three lines, the rest in its tooltip (and in the row's details). */
+.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 360px;
+}
+@media (max-width: 720px) {
+  /* Tables keep a readable width and scroll sideways in their card, rather than squeezing a column to a word per line. */
+  .table-wrap table {
+    min-width: 640px;
+  }
+  .table-wrap {
+    -webkit-overflow-scrolling: touch;
+  }
+  .clamp {
+    max-width: 220px;
+  }
+  .card {
+    padding: 14px;
+  }
+  .table-wrap {
+    margin: 0 -14px;
+    padding: 0 14px;
+  }
+  h1 {
+    font-size: 22px;
+  }
+  /* Easier to hit with a thumb. */
+  .btn {
+    min-height: 38px;
+  }
+  .nav a {
+    padding: 8px 10px;
+  }
+}

@@ -266,7 +266,7 @@ export function SiteTable({
                 <StockBadge site={s} />
               </td>
               <td className="small" style={{ maxWidth: 280 }}>
-                {s.match ? <span className="badge good">BUY ZONE</span> : <span className="muted">{s.lastError ?? s.verdict}</span>}
+                {s.match ? <span className="badge good">BUY ZONE</span> : <span className="muted clamp" title={s.lastError ?? s.verdict}>{s.lastError ?? s.verdict}</span>}
               </td>
               <td className="small muted">{s.checking || checking.has(s.id) ? "checking…" : ago(s.lastCheckedAt, now)}</td>
               <td className="small muted">{s.enabled ? until(s.nextCheckAt, now) : "—"}</td>

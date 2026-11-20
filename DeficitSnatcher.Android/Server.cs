@@ -96,6 +96,15 @@ public static class Server
         }
     }
 
+    /// <summary>A current sign-in token for the site (signing in again when needed), for the Site tab.</summary>
+    public static async Task<string> TokenAsync()
+    {
+        if (_token != null)
+            return _token;
+        var password = await SecureStorage.Default.GetAsync("password") ?? throw new InvalidOperationException("Not signed in.");
+        return _token = await LoginAsync(Url, Username, password);
+    }
+
     /// <summary>Alarms after the last one seen, waiting up to <paramref name="waitSeconds"/> for one.</summary>
     public static async Task<AlarmsReply> WaitForAlarmsAsync(long after, int waitSeconds, CancellationToken ct)
     {
