@@ -42,6 +42,9 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
 {
     private static readonly string[] Levels = ["low", "medium", "high"];
 
+    /// <summary>How long after a predicted restock it's still "now" (matches the fast checks' window in Tracker).</summary>
+    private static readonly TimeSpan Window = TimeSpan.FromMinutes(90);
+
     public async Task<RestockForecast?> ForecastAsync(int siteId, CancellationToken ct)
     {
         using var scope = scopes.CreateScope();
@@ -136,7 +139,9 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
             }
         }
 
-        DateTimeOffset? onlineNext = online?.NextLikely is { } n && n > now ? n : null;
+        // A predicted time stays the forecast until its window is over (90 minutes after it, as the fast checks around it):
+        // drops often come late, and jumping a week ahead at the predicted minute would end those checks early.
+        DateTimeOffset? onlineNext = online?.NextLikely is { } n && n > now - Window ? n : null;
         var onlineConfidence = online?.Confidence is "medium" or "high" ? online.Confidence : "low";
 
         DateTimeOffset? nextAt;
@@ -176,7 +181,8 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         }
         else if (online?.NextLikely is { } past && Math.Max(1, Math.Ceiling((now - past).TotalDays / 7)) is var weeks && weeks <= 8)
         {
-            // Online reports pointed to a time that's gone: the same time the next week (until it's looked up again).
+            // Online reports pointed to a time that's gone (and its window): the same time the next week, until it's looked
+            // up again (which happens soon after a prediction passes, see RefreshOneStaleAsync).
             nextAt = past.AddDays(7 * weeks);
             basis = "online";
             confidence = "low";
@@ -379,6 +385,8 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         bool Fresh(int productId, string url, Func<DateTimeOffset, DateTimeOffset?, bool> ok) =>
             rows.Any(r => r.ProductId == productId && r.Domain == FindPagesController.Domain(url) && ok(r.FetchedAt, r.NextLikely));
         var stale = sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (_, _) => true))
+            // A prediction whose window has passed, looked up before it did: looked up again right away (once).
+            ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, next) => !(next + Window < now && at < next + Window)))
             ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, next) => !(next < now && now - at > TimeSpan.FromHours(6))))
             ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, next) => !(next == null && now - at > TimeSpan.FromDays(1))))
             ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, _) => now - at < TimeSpan.FromDays(7)));
