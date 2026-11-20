@@ -461,5 +461,6 @@ export type RestockForecast = {
   sources: { title: string; url: string }[];
   onlineCheckedAt: string | null;
   onlineError: string | null;
+  onlineLookupAvailable: boolean;
   timeZone: string;
 };

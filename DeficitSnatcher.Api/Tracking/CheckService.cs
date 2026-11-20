@@ -36,7 +36,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         {
             var zone = RestockForecaster.Zone(settings.TimeZone);
             var localUntil = TimeZoneInfo.ConvertTime(until, zone);
-            site.LastError = $"Resting: the store blocked the last checks, so it isn't asked again until {localUntil:HH:mm} ({settings.TimeZone}); blocks wear off "
+            site.LastError = $"Resting: the store blocked the last checks, so it isn't asked again until {localUntil:HH:mm} ({settings.TimeZone}) (blocks wear off "
                 + "with time; checking again right away keeps them on). Check now still checks.";
             await db.SaveChangesAsync(CancellationToken.None);
             return new(null, null, null, null);

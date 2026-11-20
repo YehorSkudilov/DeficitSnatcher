@@ -303,6 +303,7 @@ export function RestockCell({ f }: { f?: RestockForecast }) {
   if (!f) return <span className="faint">—</span>;
   if (f.inStockNow) return <span className="badge good">In stock now</span>;
   if (!f.when && f.onlineCheckedAt) return <span className="faint" title={f.onlineError ?? f.explanation}>No estimate</span>;
+  if (!f.when && !f.onlineLookupAvailable) return <span className="faint" title="Set up the AI API key to search current restock reports.">Forecast unavailable</span>;
   if (!f.when) return <span className="faint" title={f.explanation}>Learning…</span>;
   const cls = { low: "", medium: "info", high: "good" }[f.confidence];
   return (

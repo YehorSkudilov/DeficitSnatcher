@@ -15,10 +15,6 @@ on:
         required: false
         type: boolean
         default: false
-  push:
-    branches: [main]
-    paths: ["DeficitSnatcher.Android/**"]
-
 permissions:
   contents: write
 
@@ -125,7 +121,7 @@ jobs:
             echo "Deployed $SHA."
 
   android:
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_android) }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_android }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

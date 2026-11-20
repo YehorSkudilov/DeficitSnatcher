@@ -29,6 +29,7 @@ public sealed record RestockForecast(
     List<RestockSource> Sources,
     DateTimeOffset? OnlineCheckedAt,
     string? OnlineError,
+    bool OnlineLookupAvailable,
     string TimeZone);
 
 /// <summary>
@@ -58,7 +59,8 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
                 restocks.Add(points[i].At);
         var insight = await db.RestockInsights.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProductId == site.ProductId && x.Domain == FindPagesController.Domain(site.Url), ct);
-        return Combine(restocks, insight, site.LastInStock == true, zone, settings.TimeZone);
+        return Combine(restocks, insight, site.LastInStock == true, zone, settings.TimeZone,
+            settings.AiRestockForecast && settings.AiEnabled && ai.HasKey);
     }
 
     /// <summary>The short forecast for each page of a product (for its list).</summary>
@@ -74,7 +76,8 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         return result;
     }
 
-    private static RestockForecast Combine(List<DateTimeOffset> restocks, RestockInsight? online, bool inStockNow, TimeZoneInfo zone, string zoneName)
+    private static RestockForecast Combine(List<DateTimeOffset> restocks, RestockInsight? online, bool inStockNow, TimeZoneInfo zone, string zoneName,
+        bool onlineLookupAvailable)
     {
         var now = DateTimeOffset.UtcNow;
         var sources = online == null ? [] : JsonSerializer.Deserialize<List<RestockSource>>(online.Sources, Buying.Buyer.JsonOptions) ?? [];
@@ -161,7 +164,7 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
 
         var when = nextAt is { } at ? Format(TimeZoneInfo.ConvertTime(at, zone), now, zone) : null;
         return new RestockForecast(nextAt, when, confidence, basis, explanation, inStockNow, [.. restocks.AsEnumerable().Reverse().Take(30)],
-            historyPattern, online?.Pattern, online?.Summary, sources, online?.FetchedAt, online?.Error, zoneName);
+            historyPattern, online?.Pattern, online?.Summary, sources, online?.FetchedAt, online?.Error, onlineLookupAvailable, zoneName);
     }
 
     private const string Instructions = """
