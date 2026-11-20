@@ -28,7 +28,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         var settings = await settingsStore.GetAsync(ct);
         var now = DateTimeOffset.UtcNow;
         // Its helper is busy for a moment: no check now rather than one on the server that the store blocks (not a failure).
-        if (!manual && workers.WaitsForHelper(site) is { } waiting)
+        if (!manual && workers.Waits(site) is { } waiting)
         {
             site.LastError = waiting;
             await db.SaveChangesAsync(CancellationToken.None);
@@ -47,6 +47,12 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         catch (Exception e) when (!ct.IsCancellationRequested)
         {
             var message = e is TaskCanceledException ? $"Timed out after {settings.RequestTimeoutSeconds} s." : e.Message.Split('\n')[0];
+            // Blocked: that worker rests from this page for a while (each block in a row, longer).
+            if (e is BlockedException)
+            {
+                var rest = workers.Blocked(site.Id, worker);
+                message += $" It rests from here for {(rest.TotalHours >= 1 ? $"{rest.TotalHours:0.#} h" : $"{rest.TotalMinutes:0} min")}.";
+            }
             site.LastCheckedAt = now;
             site.LastError = message;
             site.ConsecutiveErrors++;
@@ -66,7 +72,8 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             db.Scans.Add(failed);
             await db.SaveChangesAsync(CancellationToken.None);
             log.LogInformation("Check of {Site} failed: {Error}", site.Name, message);
-            if (settings.ScanSnapshots != "Off")
+            // Not after a block: the screenshot would be one more visit to a store that just turned it away.
+            if (settings.ScanSnapshots != "Off" && e is not BlockedException)
                 followUp.Snapshot(failed.Id, site.Url, site.CookiesEncrypted, "The check failed", null, null, worker,
                     new Site { Id = site.Id, Url = site.Url });
             // Keeps failing in a way a different reader might get past (blocked, timed out, changed page), not a dead link.
@@ -79,6 +86,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             return new(null, null, message, null, failed.Id);
         }
         var duration = (int)watch.ElapsedMilliseconds;
+        workers.Succeeded(site.Id, worker);
 
         if (site.ConsecutiveErrors >= settings.ErrorThreshold)
             await notifier.NotifyAsync(NotifyKind.PageRecovered, EventLevel.Info, $"{site.Name} is working again.", site.Id);
