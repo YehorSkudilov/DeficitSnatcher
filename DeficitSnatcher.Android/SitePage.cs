@@ -11,8 +11,6 @@ public sealed class SitePage : ContentPage
 {
     private readonly Microsoft.Maui.Controls.WebView _web = new() { BackgroundColor = Theme.Background };
     private readonly Label _message = new() { TextColor = Theme.Muted, FontSize = 15, Margin = new Thickness(20) };
-    // Pull down at the top of the page to reload it, like in a browser.
-    private readonly RefreshView _refresh = new() { RefreshColor = Theme.Accent, BackgroundColor = Theme.Background };
     private string? _loadedFor;
     private bool _signedIn;
 
@@ -22,11 +20,8 @@ public sealed class SitePage : ContentPage
         BackgroundColor = Theme.Background;
         StatusBarSpace.Keep(this);
         _web.Navigating += OnNavigating;
-        _refresh.Content = _web;
-        _refresh.Command = new Command(() => _web.Reload());
         _web.Navigated += async (_, e) =>
         {
-            _refresh.IsRefreshing = false;
             if (e.Result != WebNavigationResult.Success || _signedIn)
                 return;
             // The site keeps its sign-in in localStorage (ds.token): put the app's there once, then reload into it.
@@ -59,7 +54,7 @@ public sealed class SitePage : ContentPage
         {
             _loadedFor = Server.Url;
             _signedIn = false;
-            Content = _refresh;
+            Content = _web;
             _web.Source = Server.Url + "/#dashboard";
         }
     }
@@ -76,15 +71,19 @@ public sealed class SitePage : ContentPage
         }
     }
 
-    protected override bool OnBackButtonPressed()
+    /// <summary>
+    /// Back goes back in the site. Asks the web view itself: the site moves between screens by its address's #part, which
+    /// the MAUI web view doesn't count as navigating (its CanGoBack stays false).
+    /// </summary>
+    public bool GoBack()
     {
-        if (Content == _refresh && _web.CanGoBack)
-        {
-            _web.GoBack();
-            return true;
-        }
-        return base.OnBackButtonPressed();
+        if (Content != _web || _web.Handler?.PlatformView is not global::Android.Webkit.WebView view || !view.CanGoBack())
+            return false;
+        view.GoBack();
+        return true;
     }
+
+    protected override bool OnBackButtonPressed() => GoBack() || base.OnBackButtonPressed();
 }
 
 /// <summary>The two tabs, at the bottom: the alarm (status, test, updates) and the site.</summary>
@@ -98,5 +97,17 @@ public sealed class MainTabs : Microsoft.Maui.Controls.TabbedPage
         On<Microsoft.Maui.Controls.PlatformConfiguration.Android>().SetToolbarPlacement(ToolbarPlacement.Bottom);
         Children.Add(new MainPage { Title = "Alarm", IconImageSource = "tab_alarm.png" });
         Children.Add(new SitePage { IconImageSource = "tab_site.png" });
+    }
+
+    /// <summary>
+    /// Back: back in the site when on the Site tab; otherwise the app goes to the background (as Home does) instead of
+    /// closing, so it opens again where it was.
+    /// </summary>
+    protected override bool OnBackButtonPressed()
+    {
+        if (CurrentPage is SitePage site && site.GoBack())
+            return true;
+        Platform.CurrentActivity?.MoveTaskToBack(true);
+        return true;
     }
 }

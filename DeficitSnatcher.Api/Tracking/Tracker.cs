@@ -10,7 +10,7 @@ namespace DeficitSnatcher.Api.Tracking;
 /// never two of the same host closer than the settings allow, and backing off a site that keeps failing.
 /// </summary>
 public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsStore, CheckService checks, Ai.RestockForecaster forecaster,
-    BrowserPool browsers, ILogger<Tracker> log)
+    ILogger<Tracker> log)
     : BackgroundService
 {
     /// <summary>The most one check may take in all (page, reading it, saving): past it, the check is given up.</summary>
@@ -164,7 +164,6 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
                 catch (Exception e) when (!ct.IsCancellationRequested && e is TimeoutException or OperationCanceledException)
                 {
                     log.LogWarning("Check of site {Id} took over {Limit} s; given up, next one as usual", id, CheckLimit(settings).TotalSeconds);
-                    browsers.ResetCamoufox();
                     errors = site.ConsecutiveErrors + 1;
                 }
                 catch (Exception e)

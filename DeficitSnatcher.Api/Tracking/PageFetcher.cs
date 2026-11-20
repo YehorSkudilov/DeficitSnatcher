@@ -71,6 +71,19 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSe
 
     private async Task<(string Html, string Engine)> RenderAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site site)
     {
+        try
+        {
+            return await RenderOnceAsync(url, cookies, settings, ct, site);
+        }
+        catch (Microsoft.Playwright.PlaywrightException e) when (!ct.IsCancellationRequested && e.Message.Contains("has been closed"))
+        {
+            // The browser restarted or dropped the tab under us: not the store's doing, so once more on a fresh one.
+            return await RenderOnceAsync(url, cookies, settings, ct, site);
+        }
+    }
+
+    private async Task<(string Html, string Engine)> RenderOnceAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site site)
+    {
         await using var lease = await browsers.OpenAsync(settings, cookies, ct, site);
         var page = await lease.NewPageAsync();
         await page.GotoAsync(url.ToString(), new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = settings.RequestTimeoutSeconds * 1000 });

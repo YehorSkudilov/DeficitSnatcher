@@ -10,6 +10,7 @@ import { Deploy } from "./Deploy";
 import { SettingsPage } from "./Settings";
 import { Login } from "./Login";
 import { useData } from "./ui";
+import { PullToRefresh } from "./PullToRefresh";
 
 /** The screen from the address's #part: #products, #product/3, #site/12, #purchase/7… */
 function subscribeHash(f: () => void) {
@@ -56,8 +57,16 @@ export function App() {
   }, []);
 
   if (signedIn === null || route === "") return null;
-  if (!signedIn) return <Login onSignedIn={() => setSignedIn(true)} />;
-  return <Shell route={route} onSignOut={() => (setToken(null), setSignedIn(false))} />;
+  return (
+    <>
+      <PullToRefresh />
+      {signedIn ? (
+        <Shell route={route} onSignOut={() => (setToken(null), setSignedIn(false))} />
+      ) : (
+        <Login onSignedIn={() => setSignedIn(true)} />
+      )}
+    </>
+  );
 }
 
 function Shell({ route, onSignOut }: { route: string; onSignOut: () => void }) {

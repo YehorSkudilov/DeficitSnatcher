@@ -114,19 +114,29 @@ public sealed class BrowserPool(BrowserSessions sessions, ILogger<BrowserPool> l
         }
     }
 
+    private int _camoufoxHangs;
+
+    /// <summary>A check on Camoufox got its page: the connection is fine.</summary>
+    public void CamoufoxAnswered() => _camoufoxHangs = 0;
+
     /// <summary>
-    /// Drops the Camoufox connection (a check hung on it): the next check connects afresh. The old one is closed in the
-    /// background, so a wedged connection can't hold anything up.
+    /// A check hung on Camoufox. Two in a row with nothing working between: the connection is dropped and the next check
+    /// connects afresh. The old one is closed a few minutes later, not now: closing it would kill every other check
+    /// still on it.
     /// </summary>
-    public void ResetCamoufox()
+    public void CamoufoxHung()
     {
+        if (Interlocked.Increment(ref _camoufoxHangs) < 2)
+            return;
+        _camoufoxHangs = 0;
         var old = _camoufox;
         _camoufox = null;
         if (old == null)
             return;
-        log.LogWarning("Dropping the Camoufox connection (a check hung); reconnecting on the next check");
+        log.LogWarning("Camoufox stopped answering; reconnecting");
         _ = Task.Run(async () =>
         {
+            await Task.Delay(TimeSpan.FromMinutes(3));
             try
             {
                 await old.CloseAsync().WaitAsync(TimeSpan.FromSeconds(15));

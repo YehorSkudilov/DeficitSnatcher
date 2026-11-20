@@ -47,15 +47,18 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             var cookies = site.CookiesEncrypted == null ? [] : SiteCookies.Parse(box.Decrypt(site.CookiesEncrypted), site.Url);
             // A hard limit on top of the page's own timeouts: a browser that stops answering mustn't hold the check forever.
             result = await fetcher.FetchAsync(site, cookies, settings, ct).WaitAsync(FetchLimit(settings), ct);
+            browsers.CamoufoxAnswered();
         }
         catch (Exception e) when (!ct.IsCancellationRequested)
         {
             if (e is TimeoutException)
-                browsers.ResetCamoufox();
+                browsers.CamoufoxHung();
+            else if (e is BlockedException)
+                browsers.CamoufoxAnswered();
             var message = e switch
             {
                 TaskCanceledException => $"Timed out after {settings.RequestTimeoutSeconds} s.",
-                TimeoutException => $"The browser stopped answering (no page after {FetchLimit(settings).TotalSeconds:0} s); it reconnects for the next check.",
+                TimeoutException => $"The page didn't load in {FetchLimit(settings).TotalSeconds:0} s (the browser was too slow or stuck); tried again next check.",
                 _ => e.Message.Split('\n')[0],
             };
             // Blocked: the page rests for a while (each block in a row, longer).
