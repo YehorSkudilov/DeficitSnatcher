@@ -10,6 +10,7 @@ public sealed record NewHelperRequest(string? Name);
 public sealed record NewHelperResponse(int Id, string Key);
 public sealed record RenameRequest(string Name);
 public sealed record OpenLoginRequest(string Domain);
+public sealed record CodeRequest(string Domain, string Code);
 public sealed record ResetRequest(string? Domain);
 public sealed record ChecksRequest(bool On, string? Domain);
 public sealed record HelperVersionsDto(string? Latest, string? Error);
@@ -128,6 +129,16 @@ public static class RunnerEndpoints
                 : Results.Conflict(new { error = $"{hub.NameOf(id)} is too old to update itself. Download it again from this tab and open it once (your setup is kept); after that it updates by itself." });
         });
         // Sign in with your saved sign-in for that store, now (in the background; the store's row updates).
+        // Sign-ins waiting for a code the store sent you, and the code for one.
+        app.MapGet("/api/runners/codes", (LoginWatcher logins) => logins.PendingCodes());
+        app.MapPost("/api/runners/{id:int}/code", (int id, CodeRequest request, LoginWatcher logins) =>
+            string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Domain)
+                ? Results.BadRequest("A store and a code, please.")
+                : logins.SubmitCode(id, request.Domain.Trim().ToLowerInvariant(), request.Code)
+                    ? Results.NoContent()
+                    : Results.Problem("It isn't waiting for a code any more (it gave up after 5 minutes, or it's signed in already).",
+                        statusCode: 409));
+
         app.MapPost("/api/runners/{id:int}/sign-in", (int id, OpenLoginRequest request, LoginWatcher logins) =>
         {
             if (!hub.IsConnected(id))

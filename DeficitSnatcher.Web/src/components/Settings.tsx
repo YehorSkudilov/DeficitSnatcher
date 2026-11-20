@@ -174,6 +174,12 @@ function SettingsForm({ initial }: { initial: Settings }) {
             <option value="Chromium">Chromium (in the API&apos;s container, with a window on a virtual screen)</option>
           </select>
         </Field>
+        <Field
+          label="Auto sign-in cooldown (minutes)"
+          hint="After a PC helper tries your saved sign-in for a store by itself, it waits this long before trying again: time for a store that flagged it to settle (Sign in for me doesn't wait)."
+        >
+          <NumberInput value={s.autoSignInCooldownMinutes} min={10} onChange={(v) => set({ autoSignInCooldownMinutes: v ?? 120 })} />
+        </Field>
         <Field label="Keep browser sessions (minutes)" hint="Each page keeps its cookies and storage across checks and into its checkout this long, then starts fresh (and at once when the store blocks it, or you press Reset on the page). 0: never kept.">
             <NumberInput value={s.browserSessionMinutes} min={0} onChange={(v) => set({ browserSessionMinutes: v ?? 0 })} />
         </Field>

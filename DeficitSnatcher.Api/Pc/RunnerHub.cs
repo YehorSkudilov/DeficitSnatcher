@@ -64,6 +64,20 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
             .ToHashSet(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>May this helper check and buy at this store (domain, e.g. walmart.ca)?</summary>
+    private readonly ConcurrentDictionary<(int, string), bool> _paused = new();
+
+    /// <summary>A helper signed out of a store you saved a sign-in for gets none of its checks or buys until it's signed in
+    /// again (see LoginWatcher).</summary>
+    public void SetPaused(int id, string domain, bool paused)
+    {
+        if (paused)
+            _paused[(id, domain)] = true;
+        else
+            _paused.TryRemove((id, domain), out _);
+    }
+
+    public bool IsPaused(int id, string domain) => _paused.ContainsKey((id, domain));
+
     public bool Allowed(int id, string domain) =>
         !_prefs.TryGetValue(id, out var p) || p.ChecksEnabled && !p.Off.Contains(domain);
 

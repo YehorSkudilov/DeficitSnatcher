@@ -6,7 +6,8 @@ namespace DeficitSnatcher.Api.Pc;
 /// <summary>
 /// Who does each check: the connected PC helpers and the server, taking turns page by page, so a page's checks are spread
 /// over all of them and never two at once. Helpers first: each gets two turns for the server's one. Pages set to "Run on my
-/// PC" leave the server out while any helper is connected (those stores block it).
+/// PC" leave the server out while any helper is connected (those stores block it). A helper signed out of a store you saved a
+/// sign-in for sits that store out until it's signed in again.
 /// Workers are named "server" or "pc:{helper id}".
 /// </summary>
 public sealed class WorkerPool(RunnerHub hub)
@@ -32,7 +33,7 @@ public sealed class WorkerPool(RunnerHub hub)
     public string Best(Site? site, string? preferred = null)
     {
         var domain = site == null ? null : LoginWatcher.Domain(site.Url);
-        bool ok(int id) => !hub.IsSigningIn(id) && (domain == null || hub.Allowed(id, domain));
+        bool ok(int id) => !hub.IsSigningIn(id) && (domain == null || hub.Allowed(id, domain) && !hub.IsPaused(id, domain));
         if (PcId(preferred) is { } p && hub.IsConnected(p) && ok(p))
             return preferred!;
         if (preferred == Server && site?.RunOnPc != true)
@@ -51,7 +52,7 @@ public sealed class WorkerPool(RunnerHub hub)
     private List<string> Order(Site site)
     {
         var domain = LoginWatcher.Domain(site.Url);
-        var helpers = hub.ConnectedIds.Where(id => !hub.IsSigningIn(id) && hub.Allowed(id, domain)).Select(Pc).ToList();
+        var helpers = hub.ConnectedIds.Where(id => !hub.IsSigningIn(id) && hub.Allowed(id, domain) && !hub.IsPaused(id, domain)).Select(Pc).ToList();
         var order = new List<string>();
         order.AddRange(helpers);
         if (!(site.RunOnPc && helpers.Count > 0))

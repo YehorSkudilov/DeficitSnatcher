@@ -70,5 +70,6 @@ public sealed class SettingsStore(IServiceScopeFactory scopes, SecretBox box)
     }
 }
 
-/// <summary>Your account at a store (domain, e.g. walmart.ca).</summary>
-public sealed record StoreAccount(string Domain, string Email, string Password);
+/// <summary>Your account at a store (domain, e.g. walmart.ca). <see cref="SignInUrl"/>: its sign-in page if you gave it;
+/// <see cref="LearnedSignInUrl"/>: the one a helper last signed in on (found by itself, or by the AI).</summary>
+public sealed record StoreAccount(string Domain, string Email, string Password, string? SignInUrl = null, string? LearnedSignInUrl = null);

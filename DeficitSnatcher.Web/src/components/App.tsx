@@ -10,6 +10,7 @@ import { Deploy } from "./Deploy";
 import { Helpers } from "./Helpers";
 import { SettingsPage } from "./Settings";
 import { Login } from "./Login";
+import { PendingCodes } from "./PendingCodes";
 import { useData } from "./ui";
 
 /** The screen from the address's #part: #products, #product/3, #site/12, #purchase/7… */
@@ -87,6 +88,7 @@ function Shell({ route, onSignOut }: { route: string; onSignOut: () => void }) {
         </a>
       </nav>
       <main className="main">
+        <PendingCodes />
         {screen === "dashboard" && <Dashboard />}
         {screen === "products" && <Products />}
         {screen === "product" && <ProductPage key={arg} id={arg === "new" ? null : Number(arg)} />}

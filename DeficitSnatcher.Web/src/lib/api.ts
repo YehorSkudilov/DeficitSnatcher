@@ -152,7 +152,7 @@ export type CheckAllItem = {
   buyMessage: string | null;
 };
 
-export type StoreAccount = { domain: string; email: string; hasPassword: boolean };
+export type StoreAccount = { domain: string; email: string; hasPassword: boolean; signInUrl: string | null; learnedSignInUrl: string | null };
 
 export type StoreLogin = {
   domain: string;
@@ -160,6 +160,8 @@ export type StoreLogin = {
   checkedAt: string | null;
   detail: string | null;
   accountUrl: string;
+  paused: boolean;
+  retryAt: string | null;
 };
 
 export type WorkerInfo = {
@@ -420,6 +422,7 @@ export type Settings = {
   camoufoxUrl: string;
   appBrowser: "Chromium" | "Camoufox";
   browserSessionMinutes: number;
+  autoSignInCooldownMinutes: number;
   userAgent: string;
   historyDays: number;
   scanHistoryDays: number;

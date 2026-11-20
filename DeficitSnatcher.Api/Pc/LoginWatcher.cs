@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using DeficitSnatcher.Api.Data;
 using DeficitSnatcher.Api.Notifications;
 using DeficitSnatcher.Api.Tracking;
@@ -7,7 +8,8 @@ using Microsoft.Playwright;
 
 namespace DeficitSnatcher.Api.Pc;
 
-public sealed record StoreLoginDto(string Domain, string Status, DateTimeOffset? CheckedAt, string? Detail, string AccountUrl);
+public sealed record StoreLoginDto(string Domain, string Status, DateTimeOffset? CheckedAt, string? Detail, string AccountUrl, bool Paused = false,
+    DateTimeOffset? RetryAt = null);
 
 /// <summary>
 /// Which stores each PC helper's Chrome is signed in to: it opens the store's account page in that Chrome now and then (when
@@ -87,10 +89,37 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         using var scope = scopes.CreateScope();
         var rows = await scope.ServiceProvider.GetRequiredService<AppDbContext>().RunnerLogins.AsNoTracking()
             .Where(l => l.RunnerId == runnerId).ToDictionaryAsync(l => l.Domain);
+        var cooldown = TimeSpan.FromMinutes((await settingsStore.GetAsync()).AutoSignInCooldownMinutes);
         return stores.OrderBy(s => s.Key).Select(s => rows.TryGetValue(s.Key, out var r)
-                ? new StoreLoginDto(s.Key, r.Status, r.CheckedAt, r.Detail, AccountUrl(s.Key, s.Value.Url))
+                ? new StoreLoginDto(s.Key, r.Status, r.CheckedAt, r.Detail, AccountUrl(s.Key, s.Value.Url), hub.IsPaused(runnerId, s.Key),
+                    hub.IsPaused(runnerId, s.Key) && _autoTried.TryGetValue((runnerId, s.Key), out var at) ? at + cooldown : (DateTimeOffset?)null)
                 : new StoreLoginDto(s.Key, "unknown", null, null, AccountUrl(s.Key, s.Value.Url)))
             .ToList();
+    }
+
+    /// <summary>Which helpers sit which stores out (signed out of a store you saved a sign-in for): from what was last seen.
+    /// At start, and when a saved sign-in is added or removed.</summary>
+    public async Task RefreshPausedAsync()
+    {
+        using var scope = scopes.CreateScope();
+        var rows = await scope.ServiceProvider.GetRequiredService<AppDbContext>().RunnerLogins.AsNoTracking().ToListAsync();
+        foreach (var r in rows)
+            hub.SetPaused(r.RunnerId, r.Domain, await ShouldPauseAsync(r.Status, r.Domain));
+    }
+
+    private async Task<bool> ShouldPauseAsync(string status, string domain) =>
+        status is "signedOut" or "humanCheck" && await AccountForAsync(domain) != null;
+
+    private async Task RetryPausedAsync(CancellationToken stop)
+    {
+        using var scope = scopes.CreateScope();
+        var rows = await scope.ServiceProvider.GetRequiredService<AppDbContext>().RunnerLogins.AsNoTracking()
+            .Where(l => l.Status == "signedOut" || l.Status == "humanCheck").ToListAsync(stop);
+        var cooldown = TimeSpan.FromMinutes((await settingsStore.GetAsync(stop)).AutoSignInCooldownMinutes);
+        foreach (var r in rows)
+            if (hub.IsConnected(r.RunnerId) && hub.IsPaused(r.RunnerId, r.Domain)
+                && (!_autoTried.TryGetValue((r.RunnerId, r.Domain), out var at) || DateTimeOffset.UtcNow - at >= cooldown))
+                await CheckAllAsync(r.RunnerId, stop, r.Domain);
     }
 
     /// <summary>Check this helper again soon (the next minute).</summary>
@@ -105,6 +134,7 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         };
         try
         {
+            await RefreshPausedAsync();
             await Task.Delay(TimeSpan.FromSeconds(30), stop);
         }
         catch (OperationCanceledException)
@@ -113,6 +143,19 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         }
         while (!stop.IsCancellationRequested)
         {
+            // Stores a helper sits out (signed out): signed in again by itself as soon as the cooldown since its last try is over.
+            try
+            {
+                await RetryPausedAsync(stop);
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception e)
+            {
+                log.LogWarning("Couldn't retry signing in: {Error}", e.Message);
+            }
             foreach (var id in hub.ConnectedIds)
             {
                 if (_checked.TryGetValue(id, out var at) && DateTimeOffset.UtcNow - at < Every)
@@ -158,7 +201,7 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
                 var (status, detail) = await CheckOneAsync(runnerId, url, ct);
                 // Signed out, and you saved your sign-in for this store: it signs in (at most every 6 hours by itself, so a
                 // wrong password can't lock the account).
-                if (status == "signedOut" && await AccountForAsync(domain) != null && AutoAttemptAllowed(runnerId, domain))
+                if (status == "signedOut" && await AccountForAsync(domain) != null && await AutoAttemptAllowedAsync(runnerId, domain))
                 {
                     await SignInAsync(runnerId, domain, ct);
                     continue;
@@ -310,15 +353,19 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         row.Detail = detail?[..Math.Min(detail.Length, 500)];
         row.CheckedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
+        var paused = await ShouldPauseAsync(status, domain);
+        hub.SetPaused(runnerId, domain, paused);
 
         if (status == before || !alert)
             return;
         var name = hub.NameOf(runnerId);
-        var link = notifier.Link("helpers");
+        var link = siteId > 0 ? notifier.Link($"site/{siteId}") : notifier.Link("helpers");
         if (status == "signedOut")
             await notifier.NotifyAsync(NotifyKind.SignedOut, EventLevel.Warning,
-                $"{name} isn't signed in to {domain}. Sign in so it can check out: on the site's Helpers tab, press Log in next to {domain} "
-                + $"and the store opens in that computer's Chrome.", siteId, AccountUrl(domain, pageUrl), link);
+                $"{name} isn't signed in to {domain}. "
+                + (paused ? $"It sits {domain} out until it's signed in, and tries your saved sign-in again by itself after the cooldown. " : "")
+                + $"To sign in now: Log in next to {domain} on its product's page, and the store opens in that computer's Chrome.",
+                siteId, AccountUrl(domain, pageUrl), link);
         else if (status == "humanCheck")
             await notifier.NotifyAsync(NotifyKind.HumanCheck, EventLevel.Warning,
                 $"{domain} wants you to prove you're human in {name}'s Chrome. On the Helpers tab press Log in next to {domain} "
@@ -396,10 +443,13 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
 
     private readonly ConcurrentDictionary<(int, string), DateTimeOffset> _autoTried = new();
 
-    private bool AutoAttemptAllowed(int runnerId, string domain)
+    /// <summary>Whether it may try your saved sign-in by itself now (Settings → auto sign-in cooldown since its last try);
+    /// it notes the try.</summary>
+    private async Task<bool> AutoAttemptAllowedAsync(int runnerId, string domain)
     {
         var now = DateTimeOffset.UtcNow;
-        if (_autoTried.TryGetValue((runnerId, domain), out var at) && now - at < TimeSpan.FromHours(6))
+        var cooldown = TimeSpan.FromMinutes((await settingsStore.GetAsync()).AutoSignInCooldownMinutes);
+        if (_autoTried.TryGetValue((runnerId, domain), out var at) && now - at < cooldown)
             return false;
         _autoTried[(runnerId, domain)] = now;
         return true;
@@ -424,12 +474,15 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
     {
         var stores = await StoresAsync();
         stores.TryGetValue(domain, out var site);
-        var url = AccountUrl(domain, site.Url);
         var account = await AccountForAsync(domain);
         if (account == null)
             return;
+        // Where to start: the sign-in page you gave, else the one it last signed in on, else the store's account page.
+        var url = account.SignInUrl ?? account.LearnedSignInUrl ?? AccountUrl(domain, site.Url);
         var name = hub.NameOf(runnerId);
-        var (ok, detail, stoppedAt) = await FillSignInAsync(runnerId, url, account, ct);
+        var (ok, detail, stoppedAt, formUrl) = await FillSignInAsync(runnerId, domain, site.SiteId, url, account, ct);
+        if (ok && account.SignInUrl == null && formUrl != null && formUrl != account.LearnedSignInUrl)
+            await LearnSignInPageAsync(account, formUrl);
         if (ok)
         {
             await SaveAsync(runnerId, domain, "signedIn", detail, site.SiteId, site.Url);
@@ -445,8 +498,9 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
             site.SiteId, url, notifier.Link("helpers"));
     }
 
-    private async Task<(bool Ok, string Detail, string? StoppedAt)> FillSignInAsync(int runnerId, string url, Settings.StoreAccount account,
-        CancellationToken ct)
+    /// <summary>Signs in; FormUrl is the page the password went in on (remembered for next time).</summary>
+    private async Task<(bool Ok, string Detail, string? StoppedAt, string? FormUrl)> FillSignInAsync(int runnerId, string domain, int siteId,
+        string url, Settings.StoreAccount account, CancellationToken ct)
     {
         IPage? page = null;
         try
@@ -461,38 +515,65 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
             {
             }
             await Task.Delay(TimeSpan.FromSeconds(3), ct);
+            string? formUrl = null;
+            var looked = 0;
             var passwordSent = false;
-            for (var step = 0; step < 4; step++)
+            var humanAsked = false;
+            var codesSent = 0;
+            for (var step = 0; step < 8; step++)
             {
                 var (status, detail) = await ReadAsync(page);
                 if (status == "signedIn")
-                    return (true, detail ?? "Signed in.", null);
+                    return (true, detail ?? "Signed in.", null, formUrl);
                 if (status == "humanCheck")
-                    return (false, "the store wants you to prove you're human.", page.Url);
+                {
+                    // Yours to do: the page comes up on that computer, you're alerted, and it carries on as soon as it's done.
+                    if (humanAsked || !await WaitForHumanAsync(runnerId, domain, siteId, page, ct))
+                        return (false, "the store wants you to prove you're human, and it wasn't done within "
+                            + $"{AskFor.TotalMinutes:0} minutes.", page.Url, formUrl);
+                    humanAsked = true;
+                    continue;
+                }
                 if (await Visible(page, CodeFields))
-                    return (false, "the store sent you a code to type in.", page.Url);
+                {
+                    // A code the store sent you (text, email, app): you type it on the site, it goes in here.
+                    if (codesSent >= 2)
+                        return (false, "the store didn't take the code.", page.Url, formUrl);
+                    var code = await AskCodeAsync(runnerId, domain, siteId, page, ct);
+                    if (code == null)
+                        return (false, $"the store sent you a code and none was entered within {AskFor.TotalMinutes:0} minutes.", page.Url, formUrl);
+                    var field = page.Locator(CodeFields).First;
+                    await field.FillAsync(code);
+                    await field.PressAsync("Enter");
+                    codesSent++;
+                    await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                    continue;
+                }
 
                 var password = page.Locator("input[type=password]:visible").First;
                 var user = page.Locator(UserFields).First;
                 var hasPassword = await Visible(page, "input[type=password]:visible");
                 if (hasPassword && passwordSent)
-                    return (false, "it still asks for the password (is the saved one right?).", page.Url);
+                    return (false, "it still asks for the password (is the saved one right?).", page.Url, formUrl);
                 if (await Visible(page, UserFields) && string.IsNullOrEmpty(await user.InputValueAsync()))
                     await user.FillAsync(account.Email);
                 var before = page.Url;
                 if (hasPassword)
                 {
+                    formUrl = page.Url;
                     await password.FillAsync(account.Password);
                     await password.PressAsync("Enter");
                     passwordSent = true;
                 }
                 else if (await Visible(page, UserFields))
                     await user.PressAsync("Enter");
-                else if (page.Locator("a:visible, button:visible").Filter(new() { HasTextRegex = new System.Text.RegularExpressions.Regex(@"^\s*(sign|log)\s?in\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase) }).First is { } signIn
-                         && await signIn.CountAsync() > 0)
-                    await signIn.ClickAsync();
+                else if (looked < 3 && await FindSignInAsync(page, domain, siteId, looked++, ct))
+                {
+                    // Went to (or opened) where it signs in: look again.
+                }
                 else
-                    return (false, "couldn't find where to sign in on its page.", page.Url);
+                    return (false, "couldn't find where to sign in (give its sign-in page with your saved sign-in, on the product's page).",
+                        page.Url, formUrl);
 
                 await Task.Delay(TimeSpan.FromSeconds(4), ct);
                 // Enter didn't go anywhere: the form's own button.
@@ -504,15 +585,15 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
                 }
             }
             var (final, finalDetail) = await ReadAsync(page);
-            return final == "signedIn" ? (true, finalDetail ?? "Signed in.", null) : (false, "it didn't get signed in.", page.Url);
+            return final == "signedIn" ? (true, finalDetail ?? "Signed in.", null, formUrl) : (false, "it didn't get signed in.", page.Url, formUrl);
         }
         catch (PcHelperException e)
         {
-            return (false, e.Message, null);
+            return (false, e.Message, null, null);
         }
         catch (PlaywrightException e)
         {
-            return (false, e.Message.Split('\n')[0], page?.Url);
+            return (false, e.Message.Split('\n')[0], page?.Url, null);
         }
         finally
         {
@@ -525,6 +606,200 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
                 {
                 }
         }
+    }
+
+    // ---- Finding where a store signs in ----
+
+    private static readonly System.Text.RegularExpressions.Regex SignInText = new(
+        @"^\s*(sign|log)\s?-?\s?(in|on)\b|^\s*login\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    private static readonly System.Text.RegularExpressions.Regex AccountText = new(
+        @"\b(sign|log)\s?-?\s?(in|on)\b|\blogin\b|\bmy account\b|^\s*account\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    private const string SignInLinks =
+        "a[href*=login i]:visible, a[href*=signin i]:visible, a[href*=sign-in i]:visible, a[href*=logon i]:visible, a[href*=log-in i]:visible";
+
+    /// <summary>
+    /// The page has no sign-in form: goes where it signs in. First by what's on this page (a "Sign in" / "Log in" / "My account"
+    /// link or button, or a link to a login address), then from the store's home page, then by asking the AI which of the
+    /// page's links and buttons leads to signing in. True when it went somewhere.
+    /// </summary>
+    private async Task<bool> FindSignInAsync(IPage page, string domain, int siteId, int attempt, CancellationToken ct)
+    {
+        if (attempt == 1 && Uri.TryCreate(page.Url, UriKind.Absolute, out var here))
+        {
+            try
+            {
+                await page.GotoAsync(here.GetLeftPart(UriPartial.Authority) + "/", new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });
+            }
+            catch (TimeoutException)
+            {
+            }
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);
+        }
+        if (attempt < 2)
+        {
+            foreach (var regex in new[] { SignInText, AccountText })
+            {
+                var target = page.Locator("a:visible, button:visible, [role=button]:visible, [role=link]:visible").Filter(new() { HasTextRegex = regex }).First;
+                if (await target.CountAsync() > 0)
+                {
+                    await target.ClickAsync(new() { Timeout = 10000 });
+                    await Task.Delay(TimeSpan.FromSeconds(4), ct);
+                    return true;
+                }
+            }
+            var link = page.Locator(SignInLinks).First;
+            if (await link.CountAsync() > 0)
+            {
+                await link.ClickAsync(new() { Timeout = 10000 });
+                await Task.Delay(TimeSpan.FromSeconds(4), ct);
+                return true;
+            }
+            // Nothing here: from the home page next.
+            return attempt == 0;
+        }
+        return await AskAiForSignInAsync(page, domain, siteId, ct);
+    }
+
+    /// <summary>The page's links and buttons go to the AI, which says which one leads to signing in.</summary>
+    private async Task<bool> AskAiForSignInAsync(IPage page, string domain, int siteId, CancellationToken ct)
+    {
+        using var scope = scopes.CreateScope();
+        var ai = scope.ServiceProvider.GetRequiredService<Ai.OpenAiClient>();
+        if (!await ai.AvailableAsync(ct))
+            return false;
+        var items = await page.EvaluateAsync<JsonElement>("""
+            () => [...document.querySelectorAll('a, button, [role=button], [role=link]')]
+              .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+              .slice(0, 150)
+              .map((e, i) => ({ i, text: (e.innerText || e.getAttribute('aria-label') || e.title || '').trim().slice(0, 60), href: e.getAttribute('href') || '' }))
+            """);
+        var list = new System.Text.StringBuilder();
+        foreach (var item in items.EnumerateArray())
+            list.AppendLine($"{item.GetProperty("i").GetInt32()}: \"{item.GetProperty("text").GetString()}\" {item.GetProperty("href").GetString()}");
+        JsonElement answer;
+        try
+        {
+            answer = await ai.AskJsonAsync("find-sign-in", siteId > 0 ? siteId : null, null,
+                "You help a browser sign in to an online store (" + domain + ") for its owner. You get the current page's address and its "
+                + "visible links and buttons (index: \"text\" href). Pick the one that leads to the sign-in page or opens the sign-in form "
+                + "(often \"Sign in\", \"Log in\", \"Account\", a person icon, \"My account\"; not \"Create account\" or \"Sign up\"). If "
+                + "none does but you know the store's sign-in address, give it. Answer JSON: {\"index\": number or null, \"url\": string or "
+                + "null, \"why\": short}.",
+                [Ai.OpenAiClient.Text($"Page: {page.Url}\nTitle: {await page.TitleAsync()}\n\n{list}")], ct);
+        }
+        catch (Ai.OpenAiClient.AiException e)
+        {
+            log.LogInformation("AI couldn't help find {Domain}'s sign-in: {Error}", domain, e.Message);
+            return false;
+        }
+        if (answer.TryGetProperty("index", out var index) && index.ValueKind == JsonValueKind.Number)
+        {
+            var el = page.Locator("a, button, [role=button], [role=link]").Filter(new() { Visible = true }).Nth(index.GetInt32());
+            if (await el.CountAsync() > 0)
+            {
+                await el.ClickAsync(new() { Timeout = 10000 });
+                await Task.Delay(TimeSpan.FromSeconds(4), ct);
+                return true;
+            }
+        }
+        if (answer.TryGetProperty("url", out var url) && url.GetString() is { Length: > 0 } u
+            && Uri.TryCreate(new Uri(page.Url), u, out var target) && target.Scheme is "http" or "https" && Domain(target.ToString()) == domain)
+        {
+            await page.GotoAsync(target.ToString(), new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>Remembers the page it signed in on, to start there next time.</summary>
+    private async Task LearnSignInPageAsync(Settings.StoreAccount account, string url)
+    {
+        var all = await settingsStore.GetStoreAccountsAsync();
+        var i = all.FindIndex(a => a.Domain == account.Domain);
+        if (i < 0)
+            return;
+        all[i] = all[i] with { LearnedSignInUrl = url };
+        await settingsStore.SaveStoreAccountsAsync(all);
+    }
+
+    // ---- Waiting for you: a code the store sent you, or proving you're human ----
+
+    /// <summary>How long a sign-in waits for you (a code, a captcha) before it gives up.</summary>
+    public static readonly TimeSpan AskFor = TimeSpan.FromMinutes(5);
+
+    public sealed record PendingCodeDto(int RunnerId, string Helper, string Domain, DateTimeOffset Since, DateTimeOffset Until);
+
+    private sealed record PendingCode(PendingCodeDto Info, TaskCompletionSource<string> Code);
+
+    private readonly ConcurrentDictionary<(int, string), PendingCode> _codes = new();
+
+    /// <summary>Sign-ins waiting for a code you got from the store.</summary>
+    public List<PendingCodeDto> PendingCodes() => _codes.Values.Select(p => p.Info).OrderBy(p => p.Since).ToList();
+
+    /// <summary>The code for a waiting sign-in; false when nothing is waiting for it (it gave up, or it's done).</summary>
+    public bool SubmitCode(int runnerId, string domain, string code) =>
+        _codes.TryGetValue((runnerId, domain), out var p) && p.Code.TrySetResult(code.Trim());
+
+    private async Task<string?> AskCodeAsync(int runnerId, string domain, int siteId, IPage page, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var pending = new PendingCode(new PendingCodeDto(runnerId, hub.NameOf(runnerId), domain, now, now + AskFor),
+            new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously));
+        _codes[(runnerId, domain)] = pending;
+        try
+        {
+            await notifier.NotifyAsync(NotifyKind.SignedOut, EventLevel.Warning,
+                $"{hub.NameOf(runnerId)} is signing in to {domain} and the store sent you a verification code: enter it on the site "
+                + $"(it waits {AskFor.TotalMinutes:0} minutes).", siteId, null, notifier.Link("dashboard"));
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(AskFor);
+            // Its page gone (the helper restarted, or the tab was closed): nothing to type it into, so it stops asking.
+            void closed(object? _, IPage __) => timeout.Cancel();
+            page.Close += closed;
+            try
+            {
+                if (page.IsClosed)
+                    return null;
+                return await pending.Code.Task.WaitAsync(timeout.Token);
+            }
+            finally
+            {
+                page.Close -= closed;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        finally
+        {
+            _codes.TryRemove(new KeyValuePair<(int, string), PendingCode>((runnerId, domain), pending));
+        }
+    }
+
+    /// <summary>The page comes up on that computer and you're alerted; true once it's the store again.</summary>
+    private async Task<bool> WaitForHumanAsync(int runnerId, string domain, int siteId, IPage page, CancellationToken ct)
+    {
+        await HumanCheck.ShowAsync(page);
+        await notifier.NotifyAsync(NotifyKind.HumanCheck, EventLevel.Warning,
+            $"{hub.NameOf(runnerId)} is signing in to {domain} and the store wants you to prove you're human: do it in the Chrome window "
+            + $"that came up on that computer. It carries on by itself once it's done (it waits {AskFor.TotalMinutes:0} minutes).", siteId);
+        var until = DateTimeOffset.UtcNow + AskFor;
+        while (DateTimeOffset.UtcNow < until)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);
+            try
+            {
+                if ((await ReadAsync(page)).Status != "humanCheck")
+                    return true;
+            }
+            catch (PlaywrightException)
+            {
+                // Mid-navigation: look again.
+            }
+        }
+        return false;
     }
 
     private static async Task<bool> Visible(IPage page, string selector)

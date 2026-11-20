@@ -36,6 +36,10 @@ CloseApplications=no
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
+#if !FileExists(AddBackslash(SourceDir) + ".playwright\package\package.json")
+  #error The helper's .playwright folder (the driver it runs Chrome with) is missing from SourceDir
+#endif
+
 [Icons]
 Name: "{userprograms}\Deficit Snatcher PC helper"; Filename: "{app}\DeficitSnatcher.Runner.exe"
 

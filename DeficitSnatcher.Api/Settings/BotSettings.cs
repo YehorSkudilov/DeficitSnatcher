@@ -130,6 +130,9 @@ public sealed record BotSettings
     public bool NotifySignedOut { get; init; } = true;
     /// <summary>A store wants you to prove you're human on a PC helper.</summary>
     public bool NotifyHumanCheck { get; init; } = true;
+    /// <summary>After a helper tries your saved sign-in for a store by itself, it waits this long before trying again (so a
+    /// store that flagged it has time to settle, and a wrong password can't lock the account). The button doesn't wait.</summary>
+    public int AutoSignInCooldownMinutes { get; init; } = 120;
     /// <summary>A site is reported as failing once this many checks in a row failed (and again when it recovers).</summary>
     public int ErrorThreshold { get; init; } = 5;
 
@@ -173,6 +176,7 @@ public sealed record BotSettings
         CamoufoxUrl = string.IsNullOrWhiteSpace(CamoufoxUrl) ? DefaultCamoufoxUrl : CamoufoxUrl.Trim(),
         AppBrowser = AppBrowser == "Chromium" ? AppBrowser : "Camoufox",
         BrowserSessionMinutes = Math.Clamp(BrowserSessionMinutes, 0, 30 * 24 * 60),
+        AutoSignInCooldownMinutes = Math.Clamp(AutoSignInCooldownMinutes, 10, 7 * 24 * 60),
     };
 }
 

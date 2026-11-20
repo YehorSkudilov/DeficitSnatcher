@@ -95,8 +95,9 @@ export function HelperStores({ urls }: { urls: string[] }) {
         </div>
       )}
       <div className="small faint">
-        A saved sign-in lets a helper sign itself back in when it finds itself signed out. A captcha or a code from the store opens on that
-        computer for you, with an alert.
+        With a saved sign-in, a helper that finds itself signed out sits the store out and signs itself back in (after the cooldown in
+        Settings). A code the store sends you is asked for here on the site; a captcha comes up on that computer. Either way it carries on
+        once it&apos;s done.
       </div>
     </div>
   );
@@ -165,6 +166,11 @@ function StoreRow({ domain, h, first, rows, saved, onEditSignIn, reload }: {
             {text}
           </span>
           {l?.checkedAt && <span className="faint small"> {ago(l.checkedAt, now)}</span>}
+          {l?.paused && (
+            <div className="small faint" title="It doesn't check or buy this store until it's signed in again: the server or another helper does meanwhile">
+              Paused here until signed in{l.retryAt ? ` · tries again ${ago(l.retryAt, now)}` : ""}
+            </div>
+          )}
         </td>
         <td>
           <button
@@ -223,10 +229,11 @@ function AccountForm({ domain, account, onDone }: { domain: string; account?: St
   const act = useAction();
   const [email, setEmail] = useState(account?.email ?? "");
   const [password, setPassword] = useState("");
+  const [signInUrl, setSignInUrl] = useState(account?.signInUrl ?? "");
   const save = async () => {
     let ok = false;
     await act.run(async () => {
-      await api.put(`/api/store-accounts/${encodeURIComponent(domain)}`, { email, password: password || null });
+      await api.put(`/api/store-accounts/${encodeURIComponent(domain)}`, { email, password: password || null, signInUrl: signInUrl.trim() || null });
       ok = true;
     });
     if (ok) onDone();
@@ -262,6 +269,15 @@ function AccountForm({ domain, account, onDone }: { domain: string; account?: St
         )}
         <span className="faint small">Encrypted; the password is never shown again.</span>
       </div>
+      <input
+        type="url"
+        autoComplete="off"
+        placeholder={account?.learnedSignInUrl ? `Sign-in page (found: ${account.learnedSignInUrl})` : "Sign-in page (optional: found by itself, or by the AI)"}
+        value={signInUrl}
+        onChange={(e) => setSignInUrl(e.target.value)}
+        style={{ maxWidth: 488 }}
+        title="Where the helper goes to sign in. Leave empty and it finds it (and remembers it); give it if it keeps landing on the wrong page."
+      />
       <ErrorNote error={act.error} />
     </div>
   );
