@@ -12,6 +12,7 @@ export function SettingsPage() {
         <h1>Settings</h1>
       </div>
       <ErrorNote error={loaded.error} />
+      <AndroidApp />
       {loaded.data && <SettingsForm initial={loaded.data} />}
       <ProfileForm />
     </div>
@@ -175,6 +176,35 @@ function ProfileFields({ initial }: { initial: Profile }) {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The Android app: where to get it, and a test ring. */
+function AndroidApp() {
+  const ring = useAction();
+  const [rung, setRung] = useState(false);
+  const test = async () => {
+    setRung(false);
+    const r = await ring.run(() => api.post("/api/alarms/test"));
+    if (r !== undefined) setRung(true);
+  };
+  return (
+    <div className="card stack">
+      <div className="card-head" style={{ marginBottom: 0 }}>
+        <h2>Android app</h2>
+        <button className="btn small" disabled={ring.busy} onClick={test}>
+          Ring my phone
+        </button>
+      </div>
+      <p className="muted small" style={{ margin: 0 }}>
+        It stays connected to this site and rings loudly when something is in stock in your range; turning the alarm off opens the
+        store&apos;s page so you can buy it. It updates itself.{" "}
+        <a href="https://github.com/YehorSkudilov/DeficitSnatcher/releases/download/android/DeficitSnatcher.apk">Download the APK</a>, open
+        it on the phone (allow installing from your browser), then sign in with this site&apos;s address, username and password.
+      </p>
+      {rung && <div className="notice good small">Rung: the app should be ringing now (within a few seconds).</div>}
+      <ErrorNote error={ring.error} />
     </div>
   );
 }

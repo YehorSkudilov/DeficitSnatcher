@@ -11,7 +11,7 @@ namespace DeficitSnatcher.Api.Tracking;
 /// range, a lower price, a site that keeps failing) and buy when it's a match and auto-buy is on.
 /// </summary>
 public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetcher, SettingsStore settingsStore, SecretBox box,
-    Notifier notifier, Buyer buyer, ScanFollowUp followUp, Backoff backoff, ILogger<CheckService> log)
+    Notifier notifier, Buyer buyer, ScanFollowUp followUp, Backoff backoff, Alarms.AlarmService alarms, ILogger<CheckService> log)
 {
     public sealed record CheckOutcome(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage, long? ScanId = null,
         int? PurchaseId = null);
@@ -149,9 +149,12 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
 
         var money = $"{settings.Currency}";
         if (verdict.Match && !before.Match)
-            await notifier.NotifyAsync(NotifyKind.InStock, EventLevel.Good,
-                $"{product.Name} is IN STOCK at {site.Name} for {verdict.TotalPrice:0.00} {money} (your range {product.MinPrice:0.00}–{product.MaxPrice:0.00}).",
-                site.Id, site.Url);
+        {
+            var text = $"{product.Name} is IN STOCK at {site.Name} for {verdict.TotalPrice:0.00} {money} (your range {product.MinPrice:0.00}–{product.MaxPrice:0.00}).";
+            // The phone rings first: every second counts.
+            await alarms.RaiseAsync(product.Name, site.Name, verdict.TotalPrice, site.Url, text, site.Id);
+            await notifier.NotifyAsync(NotifyKind.InStock, EventLevel.Good, text, site.Id, site.Url);
+        }
         // Came into stock, but not in the range: worth knowing (e.g. the price went up). Never for going out of stock.
         else if (inStock && previousInStock != true && !firstScan)
             await notifier.NotifyAsync(NotifyKind.InStockOutOfRange, EventLevel.Info,

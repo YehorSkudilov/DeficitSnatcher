@@ -69,6 +69,7 @@ builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddHttpClient(nameof(Notifier), c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<Notifier>();
 builder.Services.AddSingleton<Backoff>();
+builder.Services.AddSingleton<DeficitSnatcher.Api.Alarms.AlarmService>();
 builder.Services.AddSingleton<BrowserPool>();
 builder.Services.AddSingleton<BrowserSessions>();
 // Timeouts are per request, from settings (PageFetcher).
@@ -147,6 +148,7 @@ app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
 app.MapControllers();
+DeficitSnatcher.Api.Alarms.AlarmEndpoints.Map(app);
 app.MapGet("/api/health", async (AppDbContext db, CancellationToken ct) =>
 {
     try

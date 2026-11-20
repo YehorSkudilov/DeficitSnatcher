@@ -16,6 +16,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RestockInsight> RestockInsights => Set<RestockInsight>();
     public DbSet<StoredValue> StoredValues => Set<StoredValue>();
     public DbSet<BrowserSession> BrowserSessions => Set<BrowserSession>();
+    public DbSet<Alarm> Alarms => Set<Alarm>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -80,6 +81,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.SourceType).HasMaxLength(50);
             e.Property(x => x.Error).HasMaxLength(1000);
             e.HasOne<Scan>().WithOne().HasForeignKey<ScanSnapshot>(x => x.ScanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<Alarm>(e =>
+        {
+            e.HasIndex(x => x.At);
+            e.Property(x => x.Product).HasMaxLength(200);
+            e.Property(x => x.Store).HasMaxLength(200);
+            e.Property(x => x.Price).HasPrecision(12, 2);
+            e.Property(x => x.Url).HasMaxLength(2000);
+            e.Property(x => x.Message).HasMaxLength(1000);
         });
         b.Entity<BrowserSession>(e =>
         {

@@ -305,3 +305,19 @@ public class StoredValue
     public string Key { get; set; } = "";
     public string Value { get; set; } = "";
 }
+
+/// <summary>A match (in stock, in range) that rings the Android app: what it's about and where to buy it.</summary>
+public class Alarm
+{
+    public long Id { get; set; }
+    public DateTimeOffset At { get; set; }
+    public int? SiteId { get; set; }
+    public string Product { get; set; } = "";
+    public string Store { get; set; } = "";
+    public decimal? Price { get; set; }
+    /// <summary>The store's product page: opened when the alarm is turned off.</summary>
+    public string Url { get; set; } = "";
+    public string Message { get; set; } = "";
+    /// <summary>From the Test button: rings, but isn't a real match.</summary>
+    public bool Test { get; set; }
+}
