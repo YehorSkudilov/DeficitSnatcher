@@ -91,7 +91,7 @@ public sealed class MainTabs : Microsoft.Maui.Controls.TabbedPage
         SelectedTabColor = Theme.Accent;
         UnselectedTabColor = Theme.Muted;
         On<Microsoft.Maui.Controls.PlatformConfiguration.Android>().SetToolbarPlacement(ToolbarPlacement.Bottom);
-        Children.Add(new MainPage { Title = "Alarm" });
-        Children.Add(new SitePage());
+        Children.Add(new MainPage { Title = "Alarm", IconImageSource = "tab_alarm.png" });
+        Children.Add(new SitePage { IconImageSource = "tab_site.png" });
     }
 }

@@ -281,6 +281,11 @@ code,
 
 /* ---- Buttons ---- */
 .btn {
+  /* The label centred, whatever the button's height (links styled as buttons too). */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   appearance: none;
   border: 1px solid var(--stroke);
   background: var(--surface-2);
