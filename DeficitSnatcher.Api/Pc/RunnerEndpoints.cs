@@ -78,7 +78,7 @@ public static class RunnerEndpoints
                 all.Count(r => r.Connected));
         });
         // Every helper and the server, with what each has done lately and (helpers) which stores they're signed in to.
-        app.MapGet("/api/runners", async (AppDbContext db, LoginWatcher logins) =>
+        app.MapGet("/api/runners", async (AppDbContext db, LoginWatcher logins, Settings.SettingsStore settingsStore) =>
         {
             var all = await hub.ListAsync();
             var now = DateTimeOffset.UtcNow;
@@ -108,7 +108,8 @@ public static class RunnerEndpoints
             foreach (var r in all)
                 rows.Add(Row(WorkerPool.Pc(r.Id), r.Id, r.Name, r.Connected, r.Machine, r.Browser, r.Since, r.LastSeen, r.CreatedAt,
                     r.Version, r.CanUpdate, r.ChecksEnabled, r.DisabledDomains, await logins.ListAsync(r.Id)));
-            rows.Add(Row(WorkerPool.Server, null, "Server", true, Environment.MachineName, "Chromium", null, null, null, null, false, true, [], []));
+            rows.Add(Row(WorkerPool.Server, null, "Server", true, Environment.MachineName,
+                Tracking.BrowserPool.EngineName(Tracking.BrowserPool.EngineFor(await settingsStore.GetAsync())), null, null, null, null, false, true, [], []));
             return rows;
         });
         app.MapPut("/api/runners/{id:int}/checks", async (int id, ChecksRequest request) =>

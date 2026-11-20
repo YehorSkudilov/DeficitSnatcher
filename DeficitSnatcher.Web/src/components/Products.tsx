@@ -1,5 +1,6 @@
 "use client";
 
+import { HelperStores } from "./HelperStores";
 import { useState } from "react";
 import { api, type Product, type ProductInput, type RestockForecast, type Settings, type Site } from "@/lib/api";
 import { money } from "@/lib/format";
@@ -169,6 +170,8 @@ export function ProductPage({ id }: { id: number | null }) {
           <SiteTable sites={sites.data ?? []} currency={currency} now={now} onChanged={() => void sites.reload()} results={checked} forecasts={forecasts.data ?? undefined} />
         </div>
       )}
+
+      {p && sites.data && <HelperStores urls={sites.data.map((s) => s.url)} />}
 
       {p && (
         <div id="logs">
