@@ -40,10 +40,11 @@ public sealed record BotSettings
     public string ProxyUrl { get; init; } = "";
     // The app's browser (BrowserPool).
     /// <summary>The Camoufox Playwright server (DeficitSnatcher.Camoufox), e.g. ws://camoufox:4444/camoufox in Docker.</summary>
-    public string CamoufoxUrl { get; init; } = "";
-    /// <summary>The server's browser, for Browser-kind pages, checkouts, screenshots and the AI: Chromium (here) or
-    /// Camoufox.</summary>
-    public string AppBrowser { get; init; } = "Chromium";
+    public string CamoufoxUrl { get; init; } = DefaultCamoufoxUrl;
+    public const string DefaultCamoufoxUrl = "ws://camoufox:4444/camoufox";
+    /// <summary>The server's browser, for Browser-kind pages, checkouts, screenshots and the AI: Camoufox (the default: it
+    /// hides automation better) or Chromium (here, in the API's container).</summary>
+    public string AppBrowser { get; init; } = "Camoufox";
     /// <summary>A page's browser session (cookies, local storage) is carried from check to check and into checkouts for
     /// this long, then started afresh; 0: every browser starts as a new visitor.</summary>
     public int BrowserSessionMinutes { get; init; } = 180;
@@ -169,8 +170,8 @@ public sealed record BotSettings
         SmtpPassword = SmtpPassword ?? "",
         EmailFrom = EmailFrom?.Trim() ?? "",
         ProxyUrl = ProxyUrl?.Trim() ?? "",
-        CamoufoxUrl = CamoufoxUrl?.Trim() ?? "",
-        AppBrowser = AppBrowser == "Camoufox" ? AppBrowser : "Chromium",
+        CamoufoxUrl = string.IsNullOrWhiteSpace(CamoufoxUrl) ? DefaultCamoufoxUrl : CamoufoxUrl.Trim(),
+        AppBrowser = AppBrowser == "Chromium" ? AppBrowser : "Camoufox",
         BrowserSessionMinutes = Math.Clamp(BrowserSessionMinutes, 0, 30 * 24 * 60),
     };
 }

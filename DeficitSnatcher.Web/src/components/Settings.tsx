@@ -170,8 +170,8 @@ function SettingsForm({ initial }: { initial: Settings }) {
           hint="The server's browser for Browser-kind pages, checkouts, screenshots and the AI. Pages on the PC helper use its Chrome. Each page keeps its own session (cookies and storage) in it."
         >
           <select value={s.appBrowser} onChange={(e) => set({ appBrowser: e.target.value as Settings["appBrowser"] })}>
-            <option value="Chromium">Chromium (here, with a window on a virtual screen)</option>
-            <option value="Camoufox">Camoufox (a Firefox that hides automation; the camoufox service)</option>
+            <option value="Camoufox">Camoufox (a Firefox that hides automation; the default)</option>
+            <option value="Chromium">Chromium (in the API&apos;s container, with a window on a virtual screen)</option>
           </select>
         </Field>
         <Field label="Keep browser sessions (minutes)" hint="Each page keeps its cookies and storage across checks and into its checkout this long, then starts fresh (and at once when the store blocks it, or you press Reset on the page). 0: never kept.">
@@ -181,8 +181,8 @@ function SettingsForm({ initial }: { initial: Settings }) {
           label="Camoufox"
           hint={
             <>
-              Its Playwright server. In Docker: <code>ws://camoufox:4444/camoufox</code>, with the <code>COMPOSE_PROFILES</code> GitHub variable set to{" "}
-              <code>camoufox</code> so it runs. Uses the proxy above when one is set.
+              Its Playwright server: <code>ws://camoufox:4444/camoufox</code>, the camoufox container that runs with the app. Uses the proxy above
+              when one is set.
             </>
           }
         >

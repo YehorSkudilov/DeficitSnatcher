@@ -1,5 +1,4 @@
-# Camoufox (a Firefox that hides automation) as a Playwright server (serve.py) the API uses as its browser.
-# Started by docker compose only with the camoufox profile (COMPOSE_PROFILES=camoufox in .env).
+# Camoufox (a Firefox that hides automation) as a Playwright server (serve.py): the API's browser by default.
 #   docker build -t deficitsnatcher-camoufox DeficitSnatcher.Camoufox
 FROM python:3.12-slim-bookworm
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1

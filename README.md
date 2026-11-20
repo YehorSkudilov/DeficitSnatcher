@@ -2,11 +2,12 @@
 
 Watches stores for a PS5 Pro (or anything else) and buys it automatically when it's in stock within your price range.
 
-- **DeficitSnatcher.Api**: ASP.NET Core (.NET 11) + Postgres. Checks the sites, decides, buys (Chromium via
+- **DeficitSnatcher.Api**: ASP.NET Core (.NET 11) + Postgres. Checks the sites, decides, buys (in Camoufox or Chromium, via
   Playwright), sends notifications, and runs deploys.
 - **DeficitSnatcher.Web**: Next.js exported as a static site, served by nginx. nginx also passes `/api` to the API, so
   the browser only ever talks to one address.
-- **docker-compose.yml**: all three (database, API, site) in one `docker compose up`.
+- **DeficitSnatcher.Camoufox**: Camoufox (a Firefox that hides automation), the app's browser by default.
+- **docker-compose.yml**: all four (database, API, site, Camoufox) in one `docker compose up`.
 
 One account, no sign-ups: the username and password come from the environment (GitHub secrets on the server).
 
@@ -59,8 +60,8 @@ browser**. Pages on a PC helper always use its Chrome.
 
 | Browser | What it is |
 |---|---|
-| **Chromium** | Here in the API's container, with a window on a virtual screen (Xvfb). The default. |
-| **Camoufox** | [Camoufox](https://camoufox.com), a Firefox that hides automation and keeps a consistent fingerprint. `DeficitSnatcher.Camoufox` runs it as a Playwright server; the API connects to `ws://camoufox:4444/camoufox` (Playwright's `Firefox.ConnectAsync`) and drives it like Chromium: checks, checkouts, the AI. Runs with the `COMPOSE_PROFILES` GitHub variable set to `camoufox` (Deploy writes it to .env). Uses the proxy when one is set. **Its Playwright and the API's must be the same version** (1.62.0 in both `DeficitSnatcher.Api.csproj` and `DeficitSnatcher.Camoufox/requirements.txt`): a client only talks to its own version's server. |
+| **Camoufox** (default) | [Camoufox](https://camoufox.com), a Firefox that hides automation and keeps a consistent fingerprint. `DeficitSnatcher.Camoufox` runs it as a Playwright server; the API connects to `ws://camoufox:4444/camoufox` (Playwright's `Firefox.ConnectAsync`) and drives it like Chromium: checks, checkouts, the AI. Its container (`camoufox` in docker-compose.yml) always runs. Uses the proxy when one is set. **Its Playwright and the API's must be the same version** (1.62.0 in both `DeficitSnatcher.Api.csproj` and `DeficitSnatcher.Camoufox/requirements.txt`): a client only talks to its own version's server. |
+| **Chromium** | Here in the API's container, with a window on a virtual screen (Xvfb). |
 
 **Sessions.** Every page keeps its own browser session on the server: its cookies and local storage are saved (encrypted,
 in the database, so they survive restarts) when a check, checkout or screenshot is done, and put back into the next

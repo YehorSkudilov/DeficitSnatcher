@@ -1,7 +1,7 @@
 name: Deploy
 
 # Runs from the site's Deploy tab (or Actions → Deploy → Run workflow). Builds and restarts everything on the server
-# with docker compose: the database, the API and the site.
+# with docker compose: the database, the API, Camoufox (the app's browser) and the site.
 on:
   workflow_dispatch:
 
@@ -54,8 +54,6 @@ jobs:
 
             App__PublicUrl=${{ vars.PUBLIC_URL }}
             WEB_PORT=${{ vars.WEB_PORT || '8090' }}
-            # Optional services: "camoufox" also runs the Camoufox browser service (Camoufox-kind pages).
-            COMPOSE_PROFILES=${{ vars.COMPOSE_PROFILES }}
 
             OpenAI__ApiKey=${{ secrets.OPENAI_API_KEY }}
 
@@ -99,6 +97,8 @@ jobs:
                 docker compose logs --tail 60 api
                 echo "----- web -----"
                 docker compose logs --tail 20 web
+                echo "----- camoufox -----"
+                docker compose logs --tail 20 camoufox
                 exit 1
               fi
               sleep 2

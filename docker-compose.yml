@@ -1,4 +1,5 @@
-# Everything: the database, the API (with Chromium, on a virtual screen) and the site (nginx: the pages, and /api passed to the API).
+# Everything: the database, the API (with Chromium, on a virtual screen), Camoufox (the default browser) and the site (nginx:
+# the pages, and /api passed to the API).
 # Settings come from .env next to this file (copy .env.example); on the server the Deploy workflow writes it.
 #
 #   docker compose up -d --build        everything, on http://localhost:${WEB_PORT}
@@ -49,12 +50,11 @@ services:
       retries: 6
       start_period: 30s
 
-  # Camoufox (a Firefox that hides automation) as the app's browser (Settings → Checking → App browser). The API connects
-  # to ws://camoufox:4444/camoufox. Only runs with COMPOSE_PROFILES=camoufox in .env.
+  # Camoufox (a Firefox that hides automation): the app's browser by default (Settings → Checking → App browser). The API
+  # connects to ws://camoufox:4444/camoufox.
   camoufox:
     build:
       context: DeficitSnatcher.Camoufox
-    profiles: ["camoufox"]
     restart: unless-stopped
     expose:
       - "4444"

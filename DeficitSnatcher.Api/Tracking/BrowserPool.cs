@@ -197,7 +197,7 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
     public const string Chromium = "chromium", Camoufox = "camoufox";
 
     /// <summary>The server's browser: Settings → App browser.</summary>
-    public static string EngineFor(BotSettings settings) => settings.AppBrowser == "Camoufox" ? Camoufox : Chromium;
+    public static string EngineFor(BotSettings settings) => settings.AppBrowser == "Chromium" ? Chromium : Camoufox;
 
     public static string EngineName(string engine) => engine == Camoufox ? "Camoufox" : "Chromium";
 
@@ -271,7 +271,7 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
     private async Task<IBrowserContext> CamoufoxContextAsync(BotSettings settings, string? state, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(settings.CamoufoxUrl))
-            throw new BrowserEngineException("Camoufox isn't set up: add its address in Settings → Checking (ws://camoufox:4444/camoufox in Docker).");
+            throw new BrowserEngineException($"Camoufox isn't set up: add its address in Settings → Checking ({BotSettings.DefaultCamoufoxUrl} in Docker).");
         var browser = await CamoufoxBrowserAsync(settings.CamoufoxUrl, ct);
         // Its own fingerprint (user agent, screen, fonts, timezone…) stays as Camoufox made it: nothing is overridden here.
         var options = new BrowserNewContextOptions { StorageState = state };
@@ -308,7 +308,7 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
                 var first = e.Message.Split('\n')[0];
                 throw new BrowserEngineException($"Couldn't reach Camoufox at {url}: " + (first.Contains("428")
                     ? "its Playwright isn't the API's version (both must be the same: see DeficitSnatcher.Camoufox/requirements.txt)."
-                    : first));
+                    : first + " Is the camoufox container running? Or pick Chromium in Settings → Checking → App browser."));
             }
             _camoufoxUrl = url;
             return _camoufox;
