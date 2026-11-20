@@ -85,7 +85,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             };
             db.Scans.Add(failed);
             await db.SaveChangesAsync(CancellationToken.None);
-            log.LogInformation("Check of {Site} failed: {Error}", site.Name, message);
+            log.LogInformation(e, "Check of {Site} failed after {ElapsedMs} ms: {Error}", site.Name, watch.ElapsedMilliseconds, message);
             // Not after a block: the screenshot would be one more visit to a store that just turned it away.
             if (settings.ScanSnapshots != "Off" && e is not BlockedException)
                 followUp.Snapshot(failed.Id, site.Url, site.CookiesEncrypted, "The check failed", null, null,

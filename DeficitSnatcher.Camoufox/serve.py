@@ -67,12 +67,12 @@ class LogForwarder:
             line = self.lines.get()
             payload = json.dumps({"line": line}).encode("utf-8")
             request = urllib.request.Request(self.url, data=payload, headers={"Content-Type": "application/json"})
-            for attempt in range(3):
+            for attempt in range(15):
                 try:
                     with urllib.request.urlopen(request, timeout=3):
                         break
                 except Exception:
-                    if attempt < 2:
+                    if attempt < 14:
                         threading.Event().wait(1)
 
 

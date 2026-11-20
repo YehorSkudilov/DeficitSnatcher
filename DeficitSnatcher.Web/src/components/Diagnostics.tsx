@@ -47,7 +47,7 @@ export function Diagnostics() {
         </div>
       </div>
       <div className="small muted">
-        Keeps up to 3,000 recent lines in memory. A server restart clears them. Passwords, cookies, tokens, URL query strings,
+        Keeps up to 3,000 recent lines in memory. A server restart clears them. Passwords, cookies, tokens, email addresses, URL query strings,
         and long card-like numbers are redacted before display and copy.
       </div>
       <ErrorNote error={loaded.error} />

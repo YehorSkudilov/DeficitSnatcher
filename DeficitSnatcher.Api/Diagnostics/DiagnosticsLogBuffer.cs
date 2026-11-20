@@ -37,6 +37,7 @@ public sealed partial class DiagnosticsLogBuffer : ILoggerProvider
         value = CookieHeader().Replace(value, "$1=[REDACTED]");
         value = SensitiveAssignment().Replace(value, "$1=[REDACTED]");
         value = UrlQuery().Replace(value, "$1?[REDACTED]");
+        value = Email().Replace(value, "[REDACTED_EMAIL]");
         value = LongNumber().Replace(value, "[REDACTED_NUMBER]");
         return value;
     }
@@ -66,6 +67,9 @@ public sealed partial class DiagnosticsLogBuffer : ILoggerProvider
 
     [GeneratedRegex("(?i)(https?://[^\\s?<>\\\"]+)\\?[^\\s<>\\\"]*", RegexOptions.CultureInvariant)]
     private static partial Regex UrlQuery();
+
+    [GeneratedRegex("(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b", RegexOptions.CultureInvariant)]
+    private static partial Regex Email();
 
     [GeneratedRegex("(?<!\\d)(?:\\d[ -]?){13,19}(?!\\d)", RegexOptions.CultureInvariant)]
     private static partial Regex LongNumber();

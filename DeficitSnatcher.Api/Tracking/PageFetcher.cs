@@ -5,7 +5,7 @@ using DeficitSnatcher.Api.Settings;
 namespace DeficitSnatcher.Api.Tracking;
 
 /// <summary>Fetches a site's product page and reads it (see PageParser), the way the site's kind says.</summary>
-public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSessions sessions)
+public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSessions sessions, ILogger<PageFetcher> log)
 {
     public static SocketsHttpHandler CreateHandler() => new()
     {
@@ -89,7 +89,10 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSe
     private async Task<(string Html, string Engine, int? Status, TimeSpan? RetryAfter)> RenderOnceAsync(Uri url,
         List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site site)
     {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        log.LogInformation("Browser check for {Site} waiting for a browser context", site.Name);
         await using var lease = await browsers.OpenAsync(settings, cookies, ct, site);
+        log.LogInformation("Browser check for {Site} opened {Engine} context in {ElapsedMs} ms", site.Name, lease.Engine, watch.ElapsedMilliseconds);
         var page = await lease.NewPageAsync();
         // StreetMerchant's low-bandwidth mode skips images and fonts. A stock check only needs the document and its
         // scripts/styles, so avoid downloading these large assets on checks (checkout pages keep their full resources).
@@ -101,17 +104,25 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSe
             else
                 await route.ContinueAsync();
         });
+        log.LogInformation("Browser check for {Site} navigating to the product page", site.Name);
         var response = await page.GotoAsync(url.ToString(), new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = settings.RequestTimeoutSeconds * 1000 });
+        log.LogInformation("Browser check for {Site} navigation finished with HTTP {Status} in {ElapsedMs} ms",
+            site.Name, response?.Status, watch.ElapsedMilliseconds);
         try
         {
             await page.WaitForLoadStateAsync(Microsoft.Playwright.LoadState.NetworkIdle, new() { Timeout = 8000 });
+            log.LogInformation("Browser check for {Site} reached network idle after {ElapsedMs} ms", site.Name, watch.ElapsedMilliseconds);
         }
         catch (TimeoutException)
         {
             // Pages that keep polling never go idle; what's there by now is enough.
+            log.LogInformation("Browser check for {Site} continued after the network-idle wait timed out", site.Name);
         }
         var retryAfter = response?.Headers.TryGetValue("retry-after", out var value) == true ? ParseRetryAfter(value) : null;
-        return (await page.ContentAsync(), lease.Engine, response?.Status, retryAfter);
+        var html = await page.ContentAsync();
+        log.LogInformation("Browser check for {Site} read {Length} characters of page content in {ElapsedMs} ms",
+            site.Name, html.Length, watch.ElapsedMilliseconds);
+        return (html, lease.Engine, response?.Status, retryAfter);
     }
 
     private static TimeSpan? RetryAfter(System.Net.Http.Headers.RetryConditionHeaderValue? header) =>
