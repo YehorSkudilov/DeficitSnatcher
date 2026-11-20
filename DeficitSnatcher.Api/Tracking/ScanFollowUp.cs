@@ -127,16 +127,16 @@ public sealed class ScanFollowUp(IServiceScopeFactory scopes, BrowserPool browse
                 }
                 catch (Exception e)
                 {
-                    await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning, $"The AI couldn't look at {site.Name}: {e.Message.Split('\n')[0]}", site.Id, site.Url);
+                    await notifier.NotifyAsync(NotifyKind.AiProblem, EventLevel.Warning, $"The AI couldn't look at {site.Name}: {e.Message.Split('\n')[0]}", site.Id, site.Url);
                     return;
                 }
 
                 if (s.RightProduct == false)
-                    await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning,
+                    await notifier.NotifyAsync(NotifyKind.AiProblem, EventLevel.Warning,
                         $"The AI thinks {site.Name} isn't the {site.Product.Name} page any more: {s.Notes}", site.Id, site.Url);
                 if (!s.Works)
                 {
-                    await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning,
+                    await notifier.NotifyAsync(NotifyKind.AiProblem, EventLevel.Warning,
                         $"The AI couldn't find a way to read {site.Name}: {s.Error ?? string.Join(", ", s.Result?.Notes ?? [])}. {s.Notes}", site.Id, site.Url);
                     return;
                 }

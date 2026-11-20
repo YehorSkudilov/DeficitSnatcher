@@ -219,7 +219,7 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
                     if (IsConnected(key.Id))
                         return;
                     var left = ConnectedIds.Count;
-                    await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning,
+                    await notifier.NotifyAsync(NotifyKind.HelperDisconnected, EventLevel.Warning,
                         $"{live.Name} disconnected. {(left > 0 ? $"{left} other helper{(left == 1 ? " is" : "s are")} still connected." : "Pages are checked from the server until a helper is back.")}");
                 });
             }

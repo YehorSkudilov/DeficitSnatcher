@@ -446,6 +446,12 @@ export type Settings = {
   notifyPriceDrop: boolean;
   notifyPurchase: boolean;
   notifyErrors: boolean;
+  notifyPageFailing: boolean | null;
+  notifyPageRecovered: boolean | null;
+  notifyAiProblems: boolean | null;
+  notifyHelperDisconnected: boolean | null;
+  notifySignedOut: boolean;
+  notifyHumanCheck: boolean;
   errorThreshold: number;
 };
 

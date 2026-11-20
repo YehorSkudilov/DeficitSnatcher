@@ -18,10 +18,18 @@ public enum NotifyKind
     NotBought,
     /// <summary>A dry run finished.</summary>
     DryRun,
-    /// <summary>A page keeps failing, the PC helper went away, the AI couldn't fix something.</summary>
-    Error,
-    /// <summary>The owner has to do something now (a store's human check on the PC): always sent.</summary>
-    ActionNeeded,
+    /// <summary>A page failed this many checks in a row.</summary>
+    PageFailing,
+    /// <summary>A failing page works again.</summary>
+    PageRecovered,
+    /// <summary>The AI couldn't look at, read or fix a page (or thinks it's the wrong page now).</summary>
+    AiProblem,
+    /// <summary>A PC helper went away (and stayed away).</summary>
+    HelperDisconnected,
+    /// <summary>A PC helper isn't signed in to a store.</summary>
+    SignedOut,
+    /// <summary>A store wants the owner to prove they're human on a PC helper.</summary>
+    HumanCheck,
     Test,
 }
 
@@ -67,7 +75,12 @@ public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settings
             NotifyKind.Purchase => s.NotifyPurchase,
             NotifyKind.NotBought => s.NotifyNotBought,
             NotifyKind.DryRun => s.NotifyDryRun,
-            NotifyKind.Error => s.NotifyErrors,
+            NotifyKind.PageFailing => s.NotifyPageFailing ?? s.NotifyErrors,
+            NotifyKind.PageRecovered => s.NotifyPageRecovered ?? s.NotifyErrors,
+            NotifyKind.AiProblem => s.NotifyAiProblems ?? s.NotifyErrors,
+            NotifyKind.HelperDisconnected => s.NotifyHelperDisconnected ?? s.NotifyErrors,
+            NotifyKind.SignedOut => s.NotifySignedOut,
+            NotifyKind.HumanCheck => s.NotifyHumanCheck,
             _ => true,
         };
         if (wanted)

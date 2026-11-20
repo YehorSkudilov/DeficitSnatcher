@@ -66,14 +66,14 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             if (site.ConsecutiveErrors >= 3 && !message.Contains("404") && e is not (BlockedException or PcHelperException))
                 await followUp.MaybeRelearnAsync(site.Id, $"{site.ConsecutiveErrors} checks in a row failed ({message})");
             if (site.ConsecutiveErrors == settings.ErrorThreshold)
-                await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning,
+                await notifier.NotifyAsync(NotifyKind.PageFailing, EventLevel.Warning,
                     $"{site.Name} failed {site.ConsecutiveErrors} checks in a row: {message}", site.Id, site.Url);
             return new(null, null, message, null, failed.Id);
         }
         var duration = (int)watch.ElapsedMilliseconds;
 
         if (site.ConsecutiveErrors >= settings.ErrorThreshold)
-            await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Info, $"{site.Name} is working again.", site.Id);
+            await notifier.NotifyAsync(NotifyKind.PageRecovered, EventLevel.Info, $"{site.Name} is working again.", site.Id);
 
         var before = BuyRules.Evaluate(product, site, new PageResult { Price = site.LastPrice, InStock = site.LastInStock, Title = site.LastTitle });
         var verdict = BuyRules.Evaluate(product, site, result);

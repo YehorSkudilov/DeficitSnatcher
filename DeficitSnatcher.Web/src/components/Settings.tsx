@@ -197,8 +197,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
         </div>
         <h3 style={{ marginTop: 6 }}>Tell me when</h3>
         <p className="muted small" style={{ marginTop: -6 }}>
-          Sent to every channel set above. Never for going out of stock. When a store wants you to prove you&apos;re human on your PC, you&apos;re
-          always told.
+          Sent to every channel set above. Never for going out of stock. Everything is in the activity log either way.
         </p>
         <div className="stack" style={{ gap: 8 }}>
           <Check label={<><b>In stock in my price range</b> (a match: it&apos;s bought if auto-buy is on)</>} checked={s.notifyInStock} onChange={(notifyInStock) => set({ notifyInStock })} />
@@ -207,7 +206,12 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <Check label={<><b>Bought</b></>} checked={s.notifyPurchase} onChange={(notifyPurchase) => set({ notifyPurchase })} />
           <Check label={<><b>Not bought</b>: a real checkout failed or was cut off (with what went wrong)</>} checked={s.notifyNotBought} onChange={(notifyNotBought) => set({ notifyNotBought })} />
           <Check label={<><b>Dry runs</b> finished (off: while armed in dry run they&apos;d come every few minutes)</>} checked={s.notifyDryRun} onChange={(notifyDryRun) => set({ notifyDryRun })} />
-          <Check label={<><b>Problems</b>: a page keeps failing, the PC helper disconnected, the AI couldn&apos;t fix a page</>} checked={s.notifyErrors} onChange={(notifyErrors) => set({ notifyErrors })} />
+          <Check label={<><b>A page keeps failing</b> (see below for how many checks)</>} checked={s.notifyPageFailing ?? s.notifyErrors} onChange={(notifyPageFailing) => set({ notifyPageFailing })} />
+          <Check label={<><b>A failing page works again</b></>} checked={s.notifyPageRecovered ?? s.notifyErrors} onChange={(notifyPageRecovered) => set({ notifyPageRecovered })} />
+          <Check label={<><b>AI problems</b>: it couldn&apos;t read or fix a page, or thinks a page isn&apos;t the product any more</>} checked={s.notifyAiProblems ?? s.notifyErrors} onChange={(notifyAiProblems) => set({ notifyAiProblems })} />
+          <Check label={<><b>A PC helper disconnected</b> (and stayed away 90 seconds)</>} checked={s.notifyHelperDisconnected ?? s.notifyErrors} onChange={(notifyHelperDisconnected) => set({ notifyHelperDisconnected })} />
+          <Check label={<><b>A PC helper is signed out</b> of a store</>} checked={s.notifySignedOut} onChange={(notifySignedOut) => set({ notifySignedOut })} />
+          <Check label={<><b>Prove you&apos;re human</b>: a store shows a captcha on a PC helper (the bot waits for you)</>} checked={s.notifyHumanCheck} onChange={(notifyHumanCheck) => set({ notifyHumanCheck })} />
         </div>
         <Field label="A page is failing after (checks in a row)">
           <NumberInput value={s.errorThreshold} min={1} onChange={(v) => set({ errorThreshold: v ?? 5 })} />

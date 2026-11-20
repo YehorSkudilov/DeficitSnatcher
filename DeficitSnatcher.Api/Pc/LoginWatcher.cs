@@ -308,11 +308,11 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         var name = hub.NameOf(runnerId);
         var link = notifier.Link("helpers");
         if (status == "signedOut")
-            await notifier.NotifyAsync(NotifyKind.ActionNeeded, EventLevel.Warning,
+            await notifier.NotifyAsync(NotifyKind.SignedOut, EventLevel.Warning,
                 $"{name} isn't signed in to {domain}. Sign in so it can check out: on the site's Helpers tab, press Log in next to {domain} "
                 + $"and the store opens in that computer's Chrome.", siteId, AccountUrl(domain, pageUrl), link);
         else if (status == "humanCheck")
-            await notifier.NotifyAsync(NotifyKind.ActionNeeded, EventLevel.Warning,
+            await notifier.NotifyAsync(NotifyKind.HumanCheck, EventLevel.Warning,
                 $"{domain} wants you to prove you're human in {name}'s Chrome. On the Helpers tab press Log in next to {domain} "
                 + "to bring it up and do it there.", siteId, AccountUrl(domain, pageUrl), link);
         else if (status == "signedIn" && before is "signedOut" or "humanCheck")

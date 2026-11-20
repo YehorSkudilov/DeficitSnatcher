@@ -36,7 +36,7 @@ public sealed class HumanCheck(Notifier notifier, RunnerHub hub, BrowserPool bro
         {
             var shown = await hub.ShowAsync(runnerId, page.Url);
             if (Throttle(siteId))
-                await notifier.NotifyAsync(NotifyKind.ActionNeeded, Data.EventLevel.Warning, shown
+                await notifier.NotifyAsync(NotifyKind.HumanCheck, Data.EventLevel.Warning, shown
                     ? $"{siteName}: the store wants you to prove you're human ({vendor}). Chrome on {hub.NameOf(runnerId)} came up with the page: "
                       + "do it there, and the next check carries on."
                     : $"{siteName}: the store wants you to prove you're human ({vendor}), but {hub.NameOf(runnerId)} runs Chrome without a window. "
@@ -50,7 +50,7 @@ public sealed class HumanCheck(Notifier notifier, RunnerHub hub, BrowserPool bro
         var now = DateTimeOffset.UtcNow;
         if (Throttle(siteId))
         {
-            await notifier.NotifyAsync(NotifyKind.ActionNeeded, Data.EventLevel.Warning,
+            await notifier.NotifyAsync(NotifyKind.HumanCheck, Data.EventLevel.Warning,
                 $"{siteName}: the store wants you to prove you're human ({vendor}). Do it in the Chrome window of the PC helper on your computer; "
                 + $"the bot waits {Wait.TotalMinutes:0} minutes.", siteId);
         }

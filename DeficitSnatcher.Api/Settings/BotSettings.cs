@@ -108,7 +108,16 @@ public sealed record BotSettings
     public bool NotifyDryRun { get; init; }
     public bool NotifyPriceDrop { get; init; } = true;
     public bool NotifyPurchase { get; init; } = true;
+    /// <summary>The old single "problems" switch: what the four below follow until each is set on its own.</summary>
     public bool NotifyErrors { get; init; } = true;
+    public bool? NotifyPageFailing { get; init; }
+    public bool? NotifyPageRecovered { get; init; }
+    public bool? NotifyAiProblems { get; init; }
+    public bool? NotifyHelperDisconnected { get; init; }
+    /// <summary>A PC helper isn't signed in to a store.</summary>
+    public bool NotifySignedOut { get; init; } = true;
+    /// <summary>A store wants you to prove you're human on a PC helper.</summary>
+    public bool NotifyHumanCheck { get; init; } = true;
     /// <summary>A site is reported as failing once this many checks in a row failed (and again when it recovers).</summary>
     public int ErrorThreshold { get; init; } = 5;
 
