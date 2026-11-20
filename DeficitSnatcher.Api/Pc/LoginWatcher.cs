@@ -152,7 +152,7 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
             {
                 if (onlyDomain != null && domain != onlyDomain)
                     continue;
-                if (!hub.IsConnected(runnerId))
+                if (!hub.IsConnected(runnerId) || hub.IsSigningIn(runnerId))
                     return;
                 var (status, detail) = await CheckOneAsync(runnerId, AccountUrl(domain, site.Url), ct);
                 await SaveAsync(runnerId, domain, status, detail, site.SiteId, site.Url);

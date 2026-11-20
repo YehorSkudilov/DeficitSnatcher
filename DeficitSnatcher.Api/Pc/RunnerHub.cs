@@ -30,6 +30,8 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
         /// <summary>The helper updates itself when asked (newer helpers).</summary>
         public bool CanUpdate { get; } = canUpdate;
         public string? Version { get; } = version;
+        /// <summary>The owner is signing in (or proving they're human) in a window of this helper's: it gets no work meanwhile.</summary>
+        public volatile bool SigningIn;
         /// <summary>The helper can bring Chrome out of headless and open a page in front (newer helpers).</summary>
         public bool CanShow { get; } = canShow;
         public int Id { get; } = id;
@@ -92,6 +94,9 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
 
     public bool Connected => ConnectedIds.Count > 0;
     public bool IsConnected(int id) => _live.TryGetValue(id, out var r) && r.Control.State == WebSocketState.Open;
+
+    /// <summary>Is the owner using a window of this helper's Chrome (sign in, prove you're human)? It's left alone then.</summary>
+    public bool IsSigningIn(int id) => _live.TryGetValue(id, out var r) && r.SigningIn;
     public string NameOf(int id) => _live.TryGetValue(id, out var r) ? r.Name : $"PC helper {id}";
 
     /// <summary>Raised with the helper's id when it connects or goes away (the browser pool drops its connection).</summary>
@@ -186,12 +191,12 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
 
     /// <summary>A helper's control socket: kept until it closes. The same helper connecting again replaces itself.</summary>
     public async Task RunControlAsync(WebSocket ws, RunnerKey key, string? machine, string? browser, CancellationToken ct, bool canShow = false,
-        bool canUpdate = false, string? version = null)
+        bool canUpdate = false, string? version = null, bool signingIn = false)
     {
         if (_live.TryRemove(key.Id, out var old))
             await CloseAsync(old.Control, "The same helper connected again.");
         _prefs[key.Id] = PrefsOf(key);
-        var live = new Live(key.Id, key.Name, ws, machine, browser, canShow, canUpdate, version);
+        var live = new Live(key.Id, key.Name, ws, machine, browser, canShow, canUpdate, version) { SigningIn = signingIn };
         _live[key.Id] = live;
         Changed?.Invoke(key.Id);
         await SeenAsync(key.Id, machine, browser);
@@ -206,6 +211,16 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
                 if (r.MessageType == WebSocketMessageType.Close)
                     break;
                 live.LastSeen = DateTimeOffset.UtcNow;
+                if (r.MessageType == WebSocketMessageType.Text && r.EndOfMessage)
+                    try
+                    {
+                        using var msg = JsonDocument.Parse(buffer.AsMemory(0, r.Count));
+                        if (msg.RootElement.TryGetProperty("signin", out var si) && si.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                            live.SigningIn = si.GetBoolean();
+                    }
+                    catch (JsonException)
+                    {
+                    }
             }
         }
         catch (Exception e) when (e is WebSocketException or OperationCanceledException)
@@ -269,7 +284,7 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
     public bool CanShow(int runnerId) => _live.TryGetValue(runnerId, out var live) && live.CanShow;
 
     public async Task<bool> ShowAsync(int runnerId, string url) =>
-        _live.TryGetValue(runnerId, out var live) && live.CanShow && await SendAsync(live, new { show = url });
+        _live.TryGetValue(runnerId, out var live) && live.CanShow && (live.SigningIn = true) && await SendAsync(live, new { show = url });
 
     /// <summary>Asks the helper to install a new version now, if there is one. False: not connected, or too old to.</summary>
     public async Task<bool> UpdateAsync(int runnerId) =>

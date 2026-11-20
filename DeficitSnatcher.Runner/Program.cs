@@ -538,9 +538,18 @@ static partial class Helper
         {
             while (!stop.IsCancellationRequested)
             {
-                await Task.Delay(15000);
-                // Back to headless when the sign-in windows are closed (a minute's grace), or after 20 minutes anyway.
-                var done = DateTime.UtcNow > visibleUntil || Chrome.OpenSignIns == 0 && DateTime.UtcNow - lastShow > TimeSpan.FromMinutes(1);
+                await Task.Delay(5000);
+                // Back to headless when the sign-in windows are closed (30 seconds' grace), or after 20 minutes anyway.
+                var open = Chrome.OpenSignIns;
+                // The site leaves this helper alone while you're signing in (nothing opens behind your window), and, when it
+                // runs headless, until Chrome is headless again.
+                var busy = open > 0 || c.Headless && !runningHeadless && browser != null;
+                if (busy != BusyNow)
+                {
+                    BusyNow = busy;
+                    await TellSiteAsync(new { signin = busy });
+                }
+                var done = DateTime.UtcNow > visibleUntil || open == 0 && DateTime.UtcNow - lastShow > TimeSpan.FromSeconds(30);
                 if (c.Headless && !runningHeadless && browser != null && !restartNow && done)
                 {
                     Log("Back to running Chrome without a window.");
@@ -615,8 +624,10 @@ static partial class Helper
             try
             {
                 using var control = Socket(c.Key!);
-                var query = $"?machine={Uri.EscapeDataString(Environment.MachineName)}&browser={Uri.EscapeDataString(browserName)}&can=show,update&version={MyVersion}";
+                var query = $"?machine={Uri.EscapeDataString(Environment.MachineName)}&browser={Uri.EscapeDataString(browserName)}&can=show,update"
+                            + $"&version={MyVersion}&signin={(BusyNow || Chrome.OpenSignIns > 0 ? 1 : 0)}";
                 await control.ConnectAsync(new Uri(wsBase, "/api/runner/connect" + query), ct);
+                Control = control;
                 Log("Connected to the site.");
                 update(s => s with { Connected = true, Since = DateTimeOffset.Now, LastError = null });
                 delay = TimeSpan.FromSeconds(2);
@@ -962,7 +973,8 @@ static partial class Helper
             return (context, cdpUrl, full);
         }
 
-        /// <summary>The windows opened for the owner (sign in, prove you're human), one per store.</summary>
+        /// <summary>The windows opened for the owner (sign in, prove you're human), one per store. While any is open the site
+        /// gives this helper no work, so nothing opens behind it.</summary>
         static readonly List<(IPage Page, string Store)> SignIns = [];
 
         public static int OpenSignIns
@@ -1009,6 +1021,7 @@ static partial class Helper
                     lock (SignIns)
                         SignIns.Add((page, Store(url)));
                     Log($"Opened {Store(url)} in a window for you.");
+                    await TellSiteAsync(new { signin = true });
                 }
                 var c2 = await context.NewCDPSessionAsync(page);
                 var window = await c2.SendAsync("Browser.getWindowForTarget");
@@ -1279,6 +1292,33 @@ static partial class Helper
             {
             }
             return 1;
+        }
+    }
+}
+
+static partial class Helper
+{
+    /// <summary>The connection to the site (for telling it things: "signing in").</summary>
+    static ClientWebSocket? Control;
+    /// <summary>What the site was last told: leave this helper alone (signing in, or Chrome has a window for it).</summary>
+    static volatile bool BusyNow;
+    static readonly SemaphoreSlim ControlSend = new(1, 1);
+
+    static async Task TellSiteAsync(object message)
+    {
+        if (Control is not { State: WebSocketState.Open } ws)
+            return;
+        await ControlSend.WaitAsync();
+        try
+        {
+            await ws.SendAsync(JsonSerializer.SerializeToUtf8Bytes(message), WebSocketMessageType.Text, true, CancellationToken.None);
+        }
+        catch (Exception)
+        {
+        }
+        finally
+        {
+            ControlSend.Release();
         }
     }
 }

@@ -32,7 +32,7 @@ public sealed class WorkerPool(RunnerHub hub)
     public string Best(Site? site, string? preferred = null)
     {
         var domain = site == null ? null : LoginWatcher.Domain(site.Url);
-        bool ok(int id) => domain == null || hub.Allowed(id, domain);
+        bool ok(int id) => !hub.IsSigningIn(id) && (domain == null || hub.Allowed(id, domain));
         if (PcId(preferred) is { } p && hub.IsConnected(p) && ok(p))
             return preferred!;
         if (preferred == Server && site?.RunOnPc != true)
@@ -51,7 +51,7 @@ public sealed class WorkerPool(RunnerHub hub)
     private List<string> Order(Site site)
     {
         var domain = LoginWatcher.Domain(site.Url);
-        var helpers = hub.ConnectedIds.Where(id => hub.Allowed(id, domain)).Select(Pc).ToList();
+        var helpers = hub.ConnectedIds.Where(id => !hub.IsSigningIn(id) && hub.Allowed(id, domain)).Select(Pc).ToList();
         var order = new List<string>();
         order.AddRange(helpers);
         if (!(site.RunOnPc && helpers.Count > 0))

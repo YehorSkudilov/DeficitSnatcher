@@ -33,7 +33,8 @@ public static class RunnerEndpoints
             using var ws = await http.WebSockets.AcceptWebSocketAsync();
             var can = http.Request.Query["can"].ToString().Split(',');
             await hub.RunControlAsync(ws, key, http.Request.Query["machine"], http.Request.Query["browser"], http.RequestAborted,
-                canShow: can.Contains("show"), canUpdate: can.Contains("update"), version: http.Request.Query["version"].ToString() is { Length: > 0 and < 40 } v ? v : null);
+                canShow: can.Contains("show"), canUpdate: can.Contains("update"), version: http.Request.Query["version"].ToString() is { Length: > 0 and < 40 } v ? v : null,
+                signingIn: http.Request.Query["signin"] == "1");
             return Results.Empty;
         }).AllowAnonymous().DisableRateLimiting();
 
