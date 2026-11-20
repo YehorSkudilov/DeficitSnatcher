@@ -8,7 +8,7 @@ namespace DeficitSnatcher.Api.Tracking;
 /// <summary>
 /// One Chromium, started the first time a page needs it (a Browser-kind site's check, or a checkout), and a fresh
 /// context (its own cookies) for every use. It always runs with a window, like the PC helper's Chrome: headless is the
-/// easiest thing for a store's bot check to spot. In Docker the window is on a virtual screen (Xvfb, see Dockerfile);
+/// easiest thing for a store's bot check to spot. On Linux with no screen (Docker) it starts a virtual one (Xvfb) for it;
 /// run locally, <c>dotnet run -- install-browser</c> installs it once.
 /// </summary>
 public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, IServer server, ILogger<BrowserPool> log) : IAsyncDisposable
@@ -222,15 +222,19 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
             if (_browser is { IsConnected: true })
                 return _browser;
             _playwright ??= await Playwright.CreateAsync();
-            log.LogInformation("Starting Chromium (with a window, on {Display})", Environment.GetEnvironmentVariable("DISPLAY") ?? "the desktop");
+            var display = await DisplayAsync(ct);
+            log.LogInformation("Starting Chromium (with a window, on {Display})", display ?? "the desktop");
             // The full browser with a window, set up like the PC helper's Chrome: no headless mode, no automation flag, and
             // its own user agent (a headed Chrome's, so nothing to fake).
-            _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            var options = new BrowserTypeLaunchOptions
             {
                 Headless = false,
                 Channel = "chromium",
                 Args = ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=1366,900"],
-            });
+            };
+            if (display != null)
+                options.Env = new Dictionary<string, string> { ["DISPLAY"] = display };
+            _browser = await _playwright.Chromium.LaunchAsync(options);
             return _browser;
         }
         finally
@@ -239,11 +243,78 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
         }
     }
 
+    private System.Diagnostics.Process? _xvfb;
+    private string? _xvfbDisplay;
+
+    /// <summary>
+    /// The screen Chromium's window goes on: the desktop's (DISPLAY, or not Linux), else a virtual one (Xvfb) started
+    /// here and kept while the app runs (started again if it died). Xvfb picks a free display number itself.
+    /// </summary>
+    private async Task<string?> DisplayAsync(CancellationToken ct)
+    {
+        if (!OperatingSystem.IsLinux() || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY")))
+            return null;
+        if (_xvfb is { HasExited: false } && _xvfbDisplay != null)
+            return _xvfbDisplay;
+        var start = new System.Diagnostics.ProcessStartInfo("Xvfb")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var a in new[] { "-displayfd", "1", "-screen", "0", "1920x1080x24", "-nolisten", "tcp" })
+            start.ArgumentList.Add(a);
+        System.Diagnostics.Process xvfb;
+        try
+        {
+            xvfb = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("Xvfb didn't start.");
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            throw new InvalidOperationException("No screen for Chromium's window: install Xvfb (apt-get install xvfb) or run with a desktop.");
+        }
+        // Its warnings (keyboard maps) are noise: read and dropped so it never blocks on a full pipe.
+        _ = xvfb.StandardError.ReadToEndAsync(CancellationToken.None);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        string? number;
+        try
+        {
+            number = (await xvfb.StandardOutput.ReadLineAsync(timeout.Token))?.Trim();
+        }
+        catch (OperationCanceledException)
+        {
+            number = null;
+        }
+        if (string.IsNullOrEmpty(number) || !int.TryParse(number, out _))
+        {
+            try
+            {
+                xvfb.Kill();
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            throw new InvalidOperationException("The virtual screen (Xvfb) for Chromium's window didn't start.");
+        }
+        _xvfb = xvfb;
+        _xvfbDisplay = ":" + number;
+        log.LogInformation("Started a virtual screen (Xvfb) on {Display}", _xvfbDisplay);
+        return _xvfbDisplay;
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_browser != null)
             await _browser.CloseAsync();
         _playwright?.Dispose();
+        try
+        {
+            _xvfb?.Kill();
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
 }
 
