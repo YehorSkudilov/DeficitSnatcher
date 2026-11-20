@@ -28,7 +28,8 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
         {
             try
             {
-                f = ((await forecaster.ForecastAsync(siteId, ct))?.NextAt, now);
+                // A general guess (nothing known about the store) doesn't speed checks up.
+                f = (await forecaster.ForecastAsync(siteId, ct) is { Basis: not "typical" } forecast ? forecast.NextAt : null, now);
             }
             catch (Exception e) when (e is not OperationCanceledException)
             {

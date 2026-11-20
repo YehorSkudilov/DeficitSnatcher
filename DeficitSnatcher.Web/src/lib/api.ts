@@ -451,7 +451,7 @@ export type RestockForecast = {
   nextAt: string | null;
   when: string | null;
   confidence: "low" | "medium" | "high";
-  basis: "history" | "online" | "both" | "none";
+  basis: "history" | "online" | "both" | "others" | "typical" | "none";
   explanation: string;
   inStockNow: boolean;
   restocks: string[];

@@ -652,7 +652,7 @@ function RestockCard({ siteId, aiOn }: { siteId: number; aiOn: boolean }) {
         <div style={{ fontSize: 22, fontWeight: 700 }}>{f.inStockNow ? "In stock now" : (f.when ?? "Not enough to go on yet")}</div>
         {!f.inStockNow && f.when && (
           <span className={`badge ${{ low: "", medium: "info", high: "good" }[f.confidence]}`}>
-            {f.confidence} confidence · from {f.basis === "both" ? "history and online" : f.basis}
+            {f.confidence} confidence · from {{ both: "history and online", others: "other stores", typical: "a general guess" }[f.basis as string] ?? f.basis}
           </span>
         )}
       </div>
