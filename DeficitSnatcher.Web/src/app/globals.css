@@ -32,7 +32,8 @@ body {
   margin: 0;
   padding: 0;
   max-width: 100%;
-  overflow-x: hidden;
+  /* clip, not hidden: hidden makes body a scroll container of its own, and the sidebar (sticky) would scroll away. */
+  overflow-x: clip;
 }
 
 body {

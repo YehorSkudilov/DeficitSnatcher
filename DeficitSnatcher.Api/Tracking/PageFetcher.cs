@@ -5,7 +5,7 @@ using DeficitSnatcher.Api.Settings;
 namespace DeficitSnatcher.Api.Tracking;
 
 /// <summary>Fetches a site's product page and reads it (see PageParser), the way the site's kind says.</summary>
-public sealed class PageFetcher(HttpClient http, BrowserPool browsers, ILogger<PageFetcher> log)
+public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsStore settingsStore, ILogger<PageFetcher> log)
 {
     public static SocketsHttpHandler CreateHandler() => new()
     {
@@ -39,10 +39,10 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, ILogger<P
             || site.Kind == SiteKind.Auto && NeedsBrowser.TryGetValue(site.Id, out var since) && DateTimeOffset.UtcNow - since < TimeSpan.FromDays(1);
         if (useBrowser)
         {
-            var (rendered, engine, status, retryAfter) = await RenderAsync(url, cookies, settings, ct, site);
+            var (rendered, engine, status, retryAfter, extra) = await RenderAsync(url, cookies, settings, ct, site);
             if (BlockDetector.Detect(rendered, status ?? 200) is { } vendor)
                 throw new BlockedException($"In {BrowserPool.EngineName(engine)}: " + BlockDetector.Message(vendor, browser: true), retryAfter);
-            return PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" };
+            return WithExtra(PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" }, url, extra);
         }
 
         var (code, html, httpRetryAfter) = await GetAsync(url, cookies, settings, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", ct);
@@ -52,10 +52,10 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, ILogger<P
             // challenges), and the page's next checks go there too.
             log.LogInformation("Plain request to {Site} blocked by {Vendor}; checking in the browser instead", site.Name, blockedBy);
             NeedsBrowser[site.Id] = DateTimeOffset.UtcNow;
-            var (rendered, engine, status, retryAfter) = await RenderAsync(url, cookies, settings, ct, site);
+            var (rendered, engine, status, retryAfter, extra) = await RenderAsync(url, cookies, settings, ct, site);
             if (BlockDetector.Detect(rendered, status ?? 200) is { } vendor)
                 throw new BlockedException($"In {BrowserPool.EngineName(engine)}: " + BlockDetector.Message(vendor, browser: true), retryAfter);
-            return PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" };
+            return WithExtra(PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" }, url, extra);
         }
         if (BlockDetector.Detect(html, (int)code) is { } blockedBy2)
             throw new BlockedException($"The site answered {(int)code}: " + BlockDetector.Message(blockedBy2, browser: false)
@@ -84,7 +84,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, ILogger<P
         return (response.StatusCode, body, RetryAfter(response.Headers.RetryAfter));
     }
 
-    private async Task<(string Html, string Engine, int? Status, TimeSpan? RetryAfter)> RenderAsync(Uri url,
+    private async Task<(string Html, string Engine, int? Status, TimeSpan? RetryAfter, string? Extra)> RenderAsync(Uri url,
         List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site site)
     {
         try
@@ -98,7 +98,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, ILogger<P
         }
     }
 
-    private async Task<(string Html, string Engine, int? Status, TimeSpan? RetryAfter)> RenderOnceAsync(Uri url,
+    private async Task<(string Html, string Engine, int? Status, TimeSpan? RetryAfter, string? Extra)> RenderOnceAsync(Uri url,
         List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site site)
     {
         var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -167,8 +167,22 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, ILogger<P
         }
         log.LogInformation("Browser check for {Site} read {Length} characters of page content in {ElapsedMs} ms",
             site.Name, html.Length, watch.ElapsedMilliseconds);
-        return (html, lease.Engine, status, retryAfter);
+        // Best Buy: online and pickup, from its own stock lookup (asked from this tab, past the same bot check).
+        string? extra = null;
+        if (BestBuyAvailability.Applies(url) && BestBuyAvailability.Sku(url) is { } sku && BlockDetector.Detect(html, status ?? 200) == null)
+        {
+            var profile = await settingsStore.GetProfileAsync(ct);
+            extra = await BestBuyAvailability.FetchAsync(page, sku, profile.PostalCode, log);
+            log.LogInformation("Browser check for {Site}: Best Buy availability lookup {Outcome}", site.Name, extra == null ? "failed" : "answered");
+        }
+        return (html, lease.Engine, status, retryAfter, extra);
     }
+
+    /// <summary>A store's own stock lookup, when there was one (Best Buy), over what the page itself said.</summary>
+    private static PageResult WithExtra(PageResult result, Uri url, string? extra) =>
+        extra != null && BestBuyAvailability.Applies(url) ? BestBuyAvailability.Apply(result, extra)
+        : BestBuyAvailability.Applies(url) ? result with { Notes = [.. result.Notes, "best buy lookup: not answered; stock from the page"] }
+        : result;
 
     private static TimeSpan? RetryAfter(System.Net.Http.Headers.RetryConditionHeaderValue? header) =>
         header?.Delta is { } delta ? delta : header?.Date is { } date ? date - DateTimeOffset.UtcNow : null;
