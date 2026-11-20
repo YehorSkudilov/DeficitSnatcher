@@ -128,6 +128,8 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
     /// </summary>
     public void SignInSoon(string domain)
     {
+        if (settingsStore.AlertsOnly)
+            return;
         foreach (var key in _autoTried.Keys.Where(k => k.Item2 == domain).ToList())
             _autoTried.TryRemove(key, out _);
         foreach (var id in hub.ConnectedIds)
@@ -165,6 +167,19 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         }
         while (!stop.IsCancellationRequested)
         {
+            // Alerts only: the helpers are left alone (no sign-in checks).
+            if (settingsStore.AlertsOnly)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(1), stop);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                continue;
+            }
             // Stores a helper sits out (signed out): signed in again by itself as soon as the cooldown since its last try is over.
             try
             {

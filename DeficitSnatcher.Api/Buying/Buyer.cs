@@ -56,6 +56,8 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
 
             if (!manual)
             {
+                if (settings.AlertsOnly)
+                    return new(false, "Alerts only: nothing is bought.");
                 if (!settings.AutoBuyArmed)
                     return new(false, "Auto-buy isn't armed.");
                 if (!site.AutoBuy)

@@ -35,11 +35,18 @@ export function Helpers() {
   const versions = useData(() => api.get<{ latest: string | null; error: string | null }>("/api/runners/latest-version"), [], 600000);
   const helpers = list.data?.filter((w) => w.id != null) ?? [];
   const server = list.data?.find((w) => w.id == null);
+  const dash = useData(() => api.get<{ alertsOnly: boolean }>("/api/dashboard"), [], 10000);
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="page-head">
         <h1>Helpers</h1>
       </div>
+      {dash.data?.alertsOnly && (
+        <div className="notice warn small">
+          <b>Alerts only</b> is on (Dashboard): the helpers are left alone and the server checks every page. Turn it off there to put
+          them back to work.
+        </div>
+      )}
       <p className="muted small" style={{ margin: 0 }}>
         Computers that lend the bot their Chrome and home internet, for stores that block the server. Store sign-ins are on each
         product&apos;s page.

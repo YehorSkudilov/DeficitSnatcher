@@ -387,6 +387,7 @@ export type EventLevel = "Info" | "Good" | "Warning" | "Error";
 export type BotEvent = { id: number; at: string; level: EventLevel; siteId: number | null; siteName: string | null; message: string };
 
 export type Dashboard = {
+  alertsOnly: boolean;
   autoBuyArmed: boolean;
   dryRun: boolean;
   trackingEnabled: boolean;
@@ -403,6 +404,7 @@ export type Dashboard = {
 };
 
 export type Settings = {
+  alertsOnly: boolean;
   autoBuyArmed: boolean;
   dryRun: boolean;
   totalBudget: number;

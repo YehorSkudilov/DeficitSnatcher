@@ -6,6 +6,10 @@ public sealed record BotSettings
     /// <summary>The master switch: nothing is bought, on any site, while it's off.</summary>
     public bool AutoBuyArmed { get; init; }
 
+    /// <summary>Alerts only: the PC helpers are left alone (no checks, buys or sign-ins; they stay connected), the server
+    /// checks every page and you're alerted, and nothing is bought.</summary>
+    public bool AlertsOnly { get; init; }
+
     /// <summary>Checkouts run every step except the final ones (the "Place order" click), then stop.</summary>
     public bool DryRun { get; init; } = true;
 

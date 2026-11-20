@@ -46,6 +46,7 @@ public sealed record PurchaseDetailDto(
 public sealed record EventDto(long Id, DateTimeOffset At, EventLevel Level, int? SiteId, string? SiteName, string Message);
 
 public sealed record DashboardDto(
+    bool AlertsOnly,
     bool AutoBuyArmed,
     bool DryRun,
     bool TrackingEnabled,
@@ -75,6 +76,7 @@ public sealed class ActivityController(AppDbContext db, SettingsStore settingsSt
             .Sum(p => p.Price * p.Quantity);
         var hourAgo = DateTimeOffset.UtcNow.AddHours(-1);
         return new DashboardDto(
+            s.AlertsOnly,
             s.AutoBuyArmed,
             s.DryRun,
             s.TrackingEnabled,

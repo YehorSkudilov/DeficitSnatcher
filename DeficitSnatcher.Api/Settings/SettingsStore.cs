@@ -15,6 +15,9 @@ public sealed class SettingsStore(IServiceScopeFactory scopes, SecretBox box)
     private BotSettings? _settings;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
+    /// <summary>Alerts only is on (from the settings in memory; false until they're first read).</summary>
+    public bool AlertsOnly => _settings?.AlertsOnly == true;
+
     public async Task<BotSettings> GetAsync(CancellationToken ct = default) =>
         _settings ??= (await ReadAsync<BotSettings>(SettingsKey, ct) ?? new BotSettings()).Normalized();
 

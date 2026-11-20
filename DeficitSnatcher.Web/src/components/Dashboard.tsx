@@ -23,6 +23,11 @@ export function Dashboard() {
     if (s) void dash.reload();
   };
 
+  const setAlertsOnly = async (on: boolean) => {
+    const s = await arm.run(() => api.post<Settings>("/api/settings/alerts-only", { on }));
+    if (s) void dash.reload();
+  };
+
   const refresh = () => {
     void sites.reload();
     void dash.reload();
@@ -40,6 +45,20 @@ export function Dashboard() {
       <ErrorNote error={dash.error || arm.error} />
 
       {d && (
+        <div className="card row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+          <div className="stack" style={{ gap: 4 }}>
+            <h2>{d.alertsOnly ? "Alerts only: on" : "Alerts only"}</h2>
+            <div className="muted small">
+              {d.alertsOnly
+                ? "The PC helpers are left alone (they stay connected). The server checks every page and you're alerted; nothing is bought."
+                : "Turn on to leave the PC helpers alone and only get alerts: the server checks every page, nothing is bought."}
+            </div>
+          </div>
+          <button className={`toggle ${d.alertsOnly ? "on" : ""}`} aria-label="Alerts only" disabled={arm.busy} onClick={() => setAlertsOnly(!d.alertsOnly)} />
+        </div>
+      )}
+
+      {d && !d.alertsOnly && (
         <div className={`arm ${d.autoBuyArmed ? "on" : ""} ${d.dryRun ? "dry" : ""}`}>
           <div className="stack" style={{ gap: 4 }}>
             <h2>{d.autoBuyArmed ? (d.dryRun ? "Auto-buy armed: dry run" : "Auto-buy ARMED") : "Auto-buy off"}</h2>

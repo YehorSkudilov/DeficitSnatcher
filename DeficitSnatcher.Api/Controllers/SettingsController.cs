@@ -30,6 +30,8 @@ public sealed record ProfileDto(
     bool HasCvv,
     bool ClearCard);
 
+public sealed record AlertsOnlyRequest(bool On);
+
 [ApiController]
 [Route("api/settings")]
 public sealed class SettingsController(SettingsStore store, Notifier notifier) : ControllerBase
@@ -45,6 +47,17 @@ public sealed class SettingsController(SettingsStore store, Notifier notifier) :
         var before = await store.GetAsync(ct);
         var saved = await store.SaveAsync(settings, ct);
         await LogArmChange(before, saved);
+        return saved;
+    }
+
+    /// <summary>Alerts only on or off (the dashboard's switch).</summary>
+    [HttpPost("alerts-only")]
+    public async Task<BotSettings> AlertsOnly(AlertsOnlyRequest request, CancellationToken ct)
+    {
+        var saved = await store.UpdateAsync(s => s with { AlertsOnly = request.On }, ct);
+        await notifier.LogAsync(EventLevel.Info, request.On
+            ? "Alerts only: the PC helpers are left alone, the server checks every page, and nothing is bought."
+            : "Alerts only is off: the helpers are back to work.");
         return saved;
     }
 

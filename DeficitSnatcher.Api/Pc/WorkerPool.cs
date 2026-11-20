@@ -10,7 +10,7 @@ namespace DeficitSnatcher.Api.Pc;
 /// sign-in for sits that store out until it's signed in again.
 /// Workers are named "server" or "pc:{helper id}".
 /// </summary>
-public sealed class WorkerPool(RunnerHub hub)
+public sealed class WorkerPool(RunnerHub hub, Settings.SettingsStore settingsStore)
 {
     public const string Server = "server";
     private readonly ConcurrentDictionary<int, int> _turn = new();
@@ -56,7 +56,7 @@ public sealed class WorkerPool(RunnerHub hub)
         if (rests.Count > 0)
             return $"Resting: {domain} blocked the last checks, so it isn't asked again until {rests.Min():HH:mm} UTC (blocks wear off with "
                 + "time; checking again right away keeps them on). Check now still checks.";
-        var helpers = hub.ConnectedIds.Where(id => hub.Allowed(id, domain)).ToList();
+        var helpers = settingsStore.AlertsOnly ? [] : hub.ConnectedIds.Where(id => hub.Allowed(id, domain)).ToList();
         if (helpers.Count > 0 && hub.IsPaused(helpers[0], domain))
             return $"Waiting for {hub.NameOf(helpers[0])} to sign back in to {domain} (it signs in by itself; or Log in on this product's page).";
         return helpers.Count > 0 ? $"Waiting for {hub.NameOf(helpers[0])}: a sign-in window is open on it (a few minutes at most)." : null;
@@ -77,6 +77,9 @@ public sealed class WorkerPool(RunnerHub hub)
     /// (the first, or <paramref name="preferred"/> if it still is), else the server.</summary>
     public string Best(Site? site, string? preferred = null)
     {
+        // Alerts only: the helpers are left alone.
+        if (settingsStore.AlertsOnly)
+            return Server;
         var domain = site == null ? null : LoginWatcher.Domain(site.Url);
         bool ok(int id) => !hub.IsSigningIn(id) && (domain == null || hub.Allowed(id, domain) && !hub.IsPaused(id, domain));
         if (PcId(preferred) is { } p && hub.IsConnected(p) && ok(p))
@@ -97,7 +100,8 @@ public sealed class WorkerPool(RunnerHub hub)
     private List<string> Order(Site site, bool ignoreRest = false)
     {
         var domain = LoginWatcher.Domain(site.Url);
-        var connected = hub.ConnectedIds.Where(id => hub.Allowed(id, domain)).ToList();
+        // Alerts only: no helpers, the server checks every page.
+        var connected = settingsStore.AlertsOnly ? [] : hub.ConnectedIds.Where(id => hub.Allowed(id, domain)).ToList();
         var helpers = connected.Where(id => !hub.IsSigningIn(id) && !hub.IsPaused(id, domain)).Select(Pc)
             .Where(w => ignoreRest || !Resting(site.Id, w)).ToList();
         var order = new List<string>();
