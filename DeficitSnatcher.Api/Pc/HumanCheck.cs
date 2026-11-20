@@ -10,7 +10,7 @@ namespace DeficitSnatcher.Api.Pc;
 /// On the owner's PC, a store's "are you human" check (Walmart's Press &amp; Hold) is for the owner to do: the window is
 /// brought to the front, they get an alert, and the job waits until the page is the store again. Nothing here solves it.
 /// </summary>
-public sealed class HumanCheck(Notifier notifier)
+public sealed class HumanCheck(Notifier notifier, RunnerHub hub, BrowserPool browsers)
 {
     public static readonly TimeSpan Wait = TimeSpan.FromMinutes(2);
     private readonly ConcurrentDictionary<int, DateTimeOffset> _lastAlert = new();
@@ -30,11 +30,26 @@ public sealed class HumanCheck(Notifier notifier)
         if (vendor == null)
             return;
 
+        // A helper running Chrome without a window: it starts one, on this page, for the owner to do the check in. This job
+        // can't wait for that (the Chrome it's using goes away), so it stops; the next check carries on once it's done.
+        if (browsers.RunnerOf(page.Context) is { } runnerId && await BrowserPool.IsHeadlessAsync(page.Context))
+        {
+            var shown = await hub.ShowAsync(runnerId, page.Url);
+            if (Throttle(siteId))
+                await notifier.NotifyAsync(NotifyKind.ActionNeeded, Data.EventLevel.Warning, shown
+                    ? $"{siteName}: the store wants you to prove you're human ({vendor}). Chrome on {hub.NameOf(runnerId)} came up with the page: "
+                      + "do it there, and the next check carries on."
+                    : $"{siteName}: the store wants you to prove you're human ({vendor}), but {hub.NameOf(runnerId)} runs Chrome without a window. "
+                      + "Update the helper (download it again from the Helpers tab and open it) so it can bring one up, or run: deficitsnatcher headless off",
+                    siteId);
+            throw new BlockedException($"Blocked by {vendor} on {hub.NameOf(runnerId)}: "
+                + (shown ? "Chrome came up with the page for you to prove you're human." : "it runs without a window, so nobody could do the check."));
+        }
+
         await ShowAsync(page);
         var now = DateTimeOffset.UtcNow;
-        if (!_lastAlert.TryGetValue(siteId, out var last) || now - last > TimeSpan.FromMinutes(10))
+        if (Throttle(siteId))
         {
-            _lastAlert[siteId] = now;
             await notifier.NotifyAsync(NotifyKind.ActionNeeded, Data.EventLevel.Warning,
                 $"{siteName}: the store wants you to prove you're human ({vendor}). Do it in the Chrome window of the PC helper on your computer; "
                 + $"the bot waits {Wait.TotalMinutes:0} minutes.", siteId);
@@ -65,6 +80,16 @@ public sealed class HumanCheck(Notifier notifier)
             }
         }
         throw new BlockedException($"Blocked by {vendor} on your PC: the human check wasn't done within {Wait.TotalMinutes:0} minutes.");
+    }
+
+    /// <summary>One alert per page per 10 minutes.</summary>
+    private bool Throttle(int siteId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (_lastAlert.TryGetValue(siteId, out var last) && now - last < TimeSpan.FromMinutes(10))
+            return false;
+        _lastAlert[siteId] = now;
+        return true;
     }
 
     /// <summary>Brings the helper's Chrome window up (un-minimised) and in front, on this page's tab.</summary>

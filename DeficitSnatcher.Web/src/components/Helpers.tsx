@@ -132,13 +132,35 @@ function HelperCard({ h, reload }: { h: WorkerInfo; reload: () => Promise<void> 
     });
     setChecking(ok);
   };
+  const setChecks = async (on: boolean, domain?: string) => {
+    await act.run(() => api.put(`/api/runners/${id}/checks`, { on, domain: domain ?? null }));
+    await reload();
+  };
+  const storeOn = (domain: string) => !h.disabledDomains.includes(domain);
 
   return (
     <div className="card stack">
       <div className="card-head" style={{ marginBottom: 0 }}>
-        <h2>{h.name}</h2>
-        {h.connected ? <span className="badge good">Connected</span> : <span className="badge warn">Not connected</span>}
+        <div className="row">
+          <h2>{h.name}</h2>
+          {h.connected ? <span className="badge good">Connected</span> : <span className="badge warn">Not connected</span>}
+          {!h.checksEnabled && <span className="badge">Checks off</span>}
+        </div>
+        <label className="row small" style={{ gap: 8 }} title="Off: this helper gets no checks or buys (it stays connected, and sign-ins are still watched)">
+          Checks
+          <button
+            className={`toggle small go ${h.checksEnabled ? "on" : ""}`}
+            aria-label={`Checks on ${h.name}`}
+            disabled={act.busy}
+            onClick={() => setChecks(!h.checksEnabled)}
+          />
+        </label>
       </div>
+      {!h.checksEnabled && (
+        <div className="notice small">
+          Checks are off for this helper: the other helpers and the server check its pages, and nothing is bought on it. It stays connected.
+        </div>
+      )}
       <div className="small muted">
         {[h.machine, h.browser].filter(Boolean).join(" · ") || "Hasn't connected yet"}
         {h.connected && h.since && <> · connected {dateTime(h.since)}</>}
@@ -148,7 +170,7 @@ function HelperCard({ h, reload }: { h: WorkerInfo; reload: () => Promise<void> 
 
       <div className="stack" style={{ gap: 8 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
-          <b className="small">Store sign-ins</b>
+          <b className="small">Stores</b>
           <button className="btn small ghost" disabled={!h.connected || act.busy} onClick={checkNow}>
             Check now
           </button>
@@ -172,12 +194,13 @@ function HelperCard({ h, reload }: { h: WorkerInfo; reload: () => Promise<void> 
                   <th>Store</th>
                   <th>Status</th>
                   <th>Checked</th>
+                  <th title="Check and buy this store on this helper">Checks</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
                 {h.logins.map((l) => {
-                  const [cls, text] = loginBadge[l.status] ?? loginBadge.unknown;
+                  const [cls, text] = l.status === "unknown" && l.checkedAt ? ["warn", "Can't tell"] : (loginBadge[l.status] ?? loginBadge.unknown);
                   return (
                     <tr key={l.domain}>
                       <td>
@@ -189,8 +212,18 @@ function HelperCard({ h, reload }: { h: WorkerInfo; reload: () => Promise<void> 
                         <span className={`badge ${cls}`} title={l.detail ?? undefined}>
                           {text}
                         </span>
+                        {l.detail && <div className="faint small" style={{ marginTop: 4, maxWidth: 360 }}>{l.detail}</div>}
                       </td>
                       <td className="small faint">{l.checkedAt ? dateTime(l.checkedAt) : ""}</td>
+                      <td>
+                        <button
+                          className={`toggle small go ${storeOn(l.domain) && h.checksEnabled ? "on" : ""}`}
+                          aria-label={`Check ${l.domain} on ${h.name}`}
+                          title={!h.checksEnabled ? "Checks are off for this helper" : storeOn(l.domain) ? "Checked here: click to stop" : "Not checked here: click to start"}
+                          disabled={act.busy || !h.checksEnabled}
+                          onClick={() => setChecks(!storeOn(l.domain), l.domain)}
+                        />
+                      </td>
                       <td style={{ textAlign: "right" }}>
                         <button
                           className={`btn small ${l.status === "signedOut" || l.status === "humanCheck" ? "primary" : ""}`}

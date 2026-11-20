@@ -55,6 +55,92 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
         }
     }
 
+    /// <summary>
+    /// A new tab in a helper's Chrome that doesn't get in the owner's way: in the background (it never comes to the front
+    /// while they're typing somewhere), or in a window of its own (Log in). Falls back to a plain new tab.
+    /// </summary>
+    public static async Task<IPage> OpenPcPageAsync(IBrowserContext context, bool newWindow)
+    {
+        if (context.Browser is not { } browser)
+            return await context.NewPageAsync();
+        string? targetId = null;
+        try
+        {
+            var cdp = await browser.NewBrowserCDPSessionAsync();
+            var args = new Dictionary<string, object> { ["url"] = "about:blank" };
+            if (newWindow)
+                args["newWindow"] = true;
+            else
+                args["background"] = true;
+            var r = await cdp.SendAsync("Target.createTarget", args);
+            targetId = r?.GetProperty("targetId").GetString();
+            await cdp.DetachAsync();
+        }
+        catch (PlaywrightException)
+        {
+        }
+        if (targetId == null)
+            return await context.NewPageAsync();
+        var until = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < until)
+        {
+            foreach (var p in context.Pages.Reverse())
+                if (await TargetIdAsync(p) == targetId)
+                    return p;
+            await Task.Delay(100);
+        }
+        throw new PcHelperException("Chrome on the helper didn't open the tab.");
+    }
+
+    /// <summary>Which helper this context is the Chrome of (null: the server's own).</summary>
+    public int? RunnerOf(IBrowserContext context)
+    {
+        foreach (var (id, b) in _pcBrowsers)
+            if (b.Contexts.Contains(context))
+                return id;
+        return null;
+    }
+
+    /// <summary>Does this helper's Chrome run without a window (deficitsnatcher headless on)?</summary>
+    public static async Task<bool> IsHeadlessAsync(IBrowserContext context)
+    {
+        if (context.Browser is not { } browser)
+            return false;
+        try
+        {
+            var cdp = await browser.NewBrowserCDPSessionAsync();
+            var v = await cdp.SendAsync("Browser.getVersion");
+            await cdp.DetachAsync();
+            return v?.GetProperty("userAgent").GetString()?.Contains("HeadlessChrome", StringComparison.Ordinal) == true;
+        }
+        catch (PlaywrightException)
+        {
+            return false;
+        }
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IPage, string> TargetIds = new();
+
+    private static async Task<string?> TargetIdAsync(IPage page)
+    {
+        if (TargetIds.TryGetValue(page, out var known))
+            return known;
+        try
+        {
+            var s = await page.Context.NewCDPSessionAsync(page);
+            var r = await s.SendAsync("Target.getTargetInfo");
+            await s.DetachAsync();
+            var id = r?.GetProperty("targetInfo").GetProperty("targetId").GetString();
+            if (id != null)
+                TargetIds.AddOrUpdate(page, id);
+            return id;
+        }
+        catch (PlaywrightException)
+        {
+            return null;
+        }
+    }
+
     private readonly SemaphoreSlim _lock = new(1, 1);
     private IPlaywright? _playwright;
     private IBrowser? _browser;
@@ -165,7 +251,8 @@ public sealed class BrowserLease(IBrowserContext context, bool owned, string wor
 
     public async Task<IPage> NewPageAsync()
     {
-        var page = await context.NewPageAsync();
+        // On a helper: a background tab, so it never jumps in front of what the owner is doing there.
+        var page = owned ? await context.NewPageAsync() : await BrowserPool.OpenPcPageAsync(context, newWindow: false);
         lock (_pages)
             _pages.Add(page);
         return page;

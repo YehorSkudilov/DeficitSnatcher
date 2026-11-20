@@ -10,8 +10,9 @@ public sealed record NewHelperRequest(string? Name);
 public sealed record NewHelperResponse(int Id, string Key);
 public sealed record RenameRequest(string Name);
 public sealed record OpenLoginRequest(string Domain);
+public sealed record ChecksRequest(bool On, string? Domain);
 public sealed record WorkerDto(string Worker, int? Id, string Name, bool Connected, string? Machine, string? Browser, DateTimeOffset? Since,
-    DateTimeOffset? LastSeen, DateTimeOffset? CreatedAt, int ChecksLastHour, int ChecksToday, int PagesLastHour, DateTimeOffset? LastCheck,
+    DateTimeOffset? LastSeen, DateTimeOffset? CreatedAt, bool ChecksEnabled, List<string> DisabledDomains, int ChecksLastHour, int ChecksToday, int PagesLastHour, DateTimeOffset? LastCheck,
     int ErrorsLastHour, List<StoreLoginDto> Logins);
 
 /// <summary>The PC helpers' endpoints, and the site's view of them (the Helpers tab).</summary>
@@ -29,7 +30,8 @@ public static class RunnerEndpoints
             if (await hub.FindAsync(Key(http)) is not { } key)
                 return Results.Unauthorized();
             using var ws = await http.WebSockets.AcceptWebSocketAsync();
-            await hub.RunControlAsync(ws, key, http.Request.Query["machine"], http.Request.Query["browser"], http.RequestAborted);
+            await hub.RunControlAsync(ws, key, http.Request.Query["machine"], http.Request.Query["browser"], http.RequestAborted,
+                canShow: http.Request.Query["can"].ToString().Split(',').Contains("show"));
             return Results.Empty;
         }).AllowAnonymous().DisableRateLimiting();
 
@@ -85,19 +87,21 @@ public static class RunnerEndpoints
                 })
                 .ToDictionaryAsync(x => x.Worker);
             WorkerDto Row(string worker, int? id, string name, bool connected, string? machine, string? browser, DateTimeOffset? since,
-                DateTimeOffset? lastSeen, DateTimeOffset? created, List<StoreLoginDto> l)
+                DateTimeOffset? lastSeen, DateTimeOffset? created, bool enabled, List<string> off, List<StoreLoginDto> l)
             {
                 stats.TryGetValue(worker, out var st);
-                return new WorkerDto(worker, id, name, connected, machine, browser, since, lastSeen, created, st?.Hour ?? 0, st?.Day ?? 0,
+                return new WorkerDto(worker, id, name, connected, machine, browser, since, lastSeen, created, enabled, off, st?.Hour ?? 0, st?.Day ?? 0,
                     st?.Pages ?? 0, st?.Last, st?.Errors ?? 0, l);
             }
             var rows = new List<WorkerDto>();
             foreach (var r in all)
                 rows.Add(Row(WorkerPool.Pc(r.Id), r.Id, r.Name, r.Connected, r.Machine, r.Browser, r.Since, r.LastSeen, r.CreatedAt,
-                    await logins.ListAsync(r.Id)));
-            rows.Add(Row(WorkerPool.Server, null, "Server", true, Environment.MachineName, "Chromium (headless)", null, null, null, []));
+                    r.ChecksEnabled, r.DisabledDomains, await logins.ListAsync(r.Id)));
+            rows.Add(Row(WorkerPool.Server, null, "Server", true, Environment.MachineName, "Chromium (headless)", null, null, null, true, [], []));
             return rows;
         });
+        app.MapPut("/api/runners/{id:int}/checks", async (int id, ChecksRequest request) =>
+            await hub.SetChecksAsync(id, request.On, request.Domain) ? Results.NoContent() : Results.NotFound());
         app.MapPost("/api/runners/{id:int}/logins/check", (int id, LoginWatcher logins) =>
         {
             if (!hub.IsConnected(id))

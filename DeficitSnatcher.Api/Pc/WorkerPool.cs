@@ -31,11 +31,13 @@ public sealed class WorkerPool(RunnerHub hub)
     /// (the first, or <paramref name="preferred"/> if it still is), else the server.</summary>
     public string Best(Site? site, string? preferred = null)
     {
-        if (PcId(preferred) is { } p && hub.IsConnected(p))
+        var domain = site == null ? null : LoginWatcher.Domain(site.Url);
+        bool ok(int id) => domain == null || hub.Allowed(id, domain);
+        if (PcId(preferred) is { } p && hub.IsConnected(p) && ok(p))
             return preferred!;
         if (preferred == Server && site?.RunOnPc != true)
             return Server;
-        var connected = hub.ConnectedIds;
+        var connected = hub.ConnectedIds.Where(ok).ToList();
         return connected.Count > 0 ? Pc(connected[0]) : Server;
     }
 
@@ -44,10 +46,12 @@ public sealed class WorkerPool(RunnerHub hub)
 
     public string Label(string? worker) => PcId(worker) is { } id ? hub.NameOf(id) : "Server";
 
-    /// <summary>One round of turns: each helper twice (spread out), then the server once.</summary>
+    /// <summary>One round of turns: each helper twice (spread out), then the server once. Helpers switched off (for
+    /// everything or for this store) sit it out; with none left, the server does them all.</summary>
     private List<string> Order(Site site)
     {
-        var helpers = hub.ConnectedIds.Select(Pc).ToList();
+        var domain = LoginWatcher.Domain(site.Url);
+        var helpers = hub.ConnectedIds.Where(id => hub.Allowed(id, domain)).Select(Pc).ToList();
         var order = new List<string>();
         order.AddRange(helpers);
         if (!(site.RunOnPc && helpers.Count > 0))

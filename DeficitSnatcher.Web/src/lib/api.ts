@@ -170,6 +170,8 @@ export type WorkerInfo = {
   since: string | null;
   lastSeen: string | null;
   createdAt: string | null;
+  checksEnabled: boolean;
+  disabledDomains: string[];
   checksLastHour: number;
   checksToday: number;
   pagesLastHour: number;

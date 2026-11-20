@@ -170,16 +170,17 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         try
         {
             var context = await browsers.GetPcContextAsync(runnerId, ct);
-            page = await context.NewPageAsync();
-            try
+            page = await BrowserPool.OpenPcPageAsync(context, newWindow: false);
+            var (status, detail) = await VisitAsync(page, url, ct);
+            // The account page didn't settle it (not found, or nothing to tell by): the store's home page, whose header
+            // usually says who's signed in.
+            if (status == "unknown" && Uri.TryCreate(url, UriKind.Absolute, out var u))
             {
-                await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });
+                var (homeStatus, homeDetail) = await VisitAsync(page, u.GetLeftPart(UriPartial.Authority) + "/", ct);
+                if (homeStatus != "unknown")
+                    return (homeStatus, homeDetail);
             }
-            catch (TimeoutException)
-            {
-            }
-            await Task.Delay(TimeSpan.FromSeconds(4), ct); // redirects to sign in, scripts drawing the page
-            return await ReadAsync(page);
+            return (status, detail);
         }
         catch (PcHelperException e)
         {
@@ -202,7 +203,41 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         }
     }
 
-    /// <summary>What an open store page says about signing in.</summary>
+    private static async Task<(string Status, string? Detail)> VisitAsync(IPage page, string url, CancellationToken ct)
+    {
+        IResponse? response = null;
+        try
+        {
+            response = await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });
+        }
+        catch (TimeoutException)
+        {
+        }
+        await Task.Delay(TimeSpan.FromSeconds(4), ct); // redirects to sign in, scripts drawing the header
+        var read = await ReadAsync(page);
+        if (read.Status == "unknown" && response is { Status: >= 400 } r)
+            return ("unknown", $"The account page answered {r.Status}.");
+        return read;
+    }
+
+    /// <summary>What the page's links say about signing in, gathered in the page.</summary>
+    private const string EvidenceScript = """
+        () => {
+          const text = e => (e.innerText || e.textContent || '').replace(/\s+/g, ' ').trim();
+          const els = [...document.querySelectorAll('a, button, [role=button], [role=menuitem]')];
+          const out = els.find(e => /^(sign|log)\s?out\b/i.test(text(e)) || /(sign|log)[-_]?out/i.test(e.getAttribute('href') || ''));
+          const signIn = els.find(e => /^(hello,?\s*)?(sign|log)\s?in\b/i.test(text(e)) || /^(sign|log)\s?in\s*(\/|or)\s*(register|create)/i.test(text(e)));
+          const amazon = document.querySelector('#nav-link-accountList-nav-line-1');
+          return { out: out ? (text(out) || out.getAttribute('href')) : null, signIn: signIn ? text(signIn) : null, greeting: amazon ? text(amazon) : null };
+        }
+        """;
+
+    private sealed record Evidence(string? Out, string? SignIn, string? Greeting);
+
+    /// <summary>
+    /// What an open store page says about signing in. "Signed in" needs proof (a way to sign out, or Amazon's "Hello, name");
+    /// a page that says neither way is "unknown", never taken as signed in.
+    /// </summary>
     private static async Task<(string Status, string? Detail)> ReadAsync(IPage page)
     {
         var html = await page.ContentAsync();
@@ -220,16 +255,30 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         }
         if (passwordShown || SignInUrlSigns.Any(s => path.Contains(s, StringComparison.OrdinalIgnoreCase)))
             return ("signedOut", "The store asked to sign in.");
-        string title = "";
+
+        Evidence? e = null;
         try
         {
-            title = (await page.TitleAsync()).Trim();
+            var j = await page.EvaluateAsync<System.Text.Json.JsonElement>(EvidenceScript);
+            static string? Get(System.Text.Json.JsonElement j, string name) =>
+                j.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+            e = new Evidence(Get(j, "out"), Get(j, "signIn"), Get(j, "greeting"));
         }
-        catch (PlaywrightException)
+        catch (Exception x) when (x is PlaywrightException or InvalidOperationException or System.Text.Json.JsonException)
         {
         }
-        return ("signedIn", title.Length > 0 ? title[..Math.Min(title.Length, 200)] : null);
+        if (e?.Greeting is { Length: > 0 } g)
+            return g.Contains("sign in", StringComparison.OrdinalIgnoreCase)
+                ? ("signedOut", $"The page says \"{Cut(g)}\".")
+                : ("signedIn", $"The page says \"{Cut(g)}\".");
+        if (e?.Out != null)
+            return ("signedIn", $"The page offers \"{Cut(e.Out)}\".");
+        if (e?.SignIn != null)
+            return ("signedOut", $"The page offers \"{Cut(e.SignIn)}\".");
+        return ("unknown", "Couldn't tell from the page: press Log in to look.");
     }
+
+    private static string Cut(string s) => s.Length > 80 ? s[..80] + "…" : s;
 
     private async Task SaveAsync(int runnerId, string domain, string status, string? detail, int siteId, string? pageUrl)
     {
@@ -279,25 +328,50 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         var stores = await StoresAsync();
         var url = AccountUrl(domain, stores.TryGetValue(domain, out var s) ? s.Url : null);
         var context = await browsers.GetPcContextAsync(runnerId, ct);
-        var page = await context.NewPageAsync();
-        await HumanCheck.ShowAsync(page);
-        try
+        if (await BrowserPool.IsHeadlessAsync(context))
         {
-            await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });
+            // No window to sign in on: the helper starts Chrome with one for a while, on this page.
+            if (!await hub.ShowAsync(runnerId, url))
+                throw new PcHelperException($"{hub.NameOf(runnerId)} runs Chrome without a window, and this version of the helper can't "
+                    + "bring one up. Update it: download it again from this tab and open it (your setup is kept). "
+                    + "Or on that computer run: deficitsnatcher headless off");
         }
-        catch (TimeoutException)
+        else
         {
-        }
-        await HumanCheck.ShowAsync(page);
-        var siteId = s.SiteId;
-        _ = Task.Run(async () =>
-        {
-            var until = DateTimeOffset.UtcNow.AddMinutes(10);
-            while (DateTimeOffset.UtcNow < until && !page.IsClosed && hub.IsConnected(runnerId))
+            // A window of its own, in front: the bot's tabs open in the background and never take it over while you sign in.
+            var page = await BrowserPool.OpenPcPageAsync(context, newWindow: true);
+            await HumanCheck.ShowAsync(page);
+            try
             {
-                await Task.Delay(TimeSpan.FromSeconds(5));
-                try
+                await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });
+            }
+            catch (TimeoutException)
+            {
+            }
+            await HumanCheck.ShowAsync(page);
+        }
+        _ = WatchSignInAsync(runnerId, domain, s.SiteId, url);
+    }
+
+    /// <summary>
+    /// For ten minutes after Log in, looks at the helper's tabs on that store (whichever Chrome is up: it may have restarted
+    /// with a window) and notes as soon as one proves you're signed in.
+    /// </summary>
+    private async Task WatchSignInAsync(int runnerId, string domain, int siteId, string url)
+    {
+        var until = DateTimeOffset.UtcNow.AddMinutes(10);
+        while (DateTimeOffset.UtcNow < until)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5));
+            if (!hub.IsConnected(runnerId))
+                continue;
+            try
+            {
+                var context = await browsers.GetPcContextAsync(runnerId, CancellationToken.None);
+                foreach (var page in context.Pages.ToList())
                 {
+                    if (page.IsClosed || Domain(page.Url) != domain)
+                        continue;
                     var (status, detail) = await ReadAsync(page);
                     if (status == "signedIn")
                     {
@@ -305,11 +379,11 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
                         return;
                     }
                 }
-                catch (Exception)
-                {
-                    // Mid-navigation, or the tab was closed: look again.
-                }
             }
-        });
+            catch (Exception)
+            {
+                // Mid-navigation, a tab closing, Chrome restarting: look again.
+            }
+        }
     }
 }

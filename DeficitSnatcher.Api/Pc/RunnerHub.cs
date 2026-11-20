@@ -25,8 +25,10 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
     /// <summary>The loopback endpoint's secret path part, new each start: only this process knows it.</summary>
     public string Secret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 
-    private sealed class Live(int id, string name, WebSocket control, string? machine, string? browser)
+    private sealed class Live(int id, string name, WebSocket control, string? machine, string? browser, bool canShow)
     {
+        /// <summary>The helper can bring Chrome out of headless and open a page in front (newer helpers).</summary>
+        public bool CanShow { get; } = canShow;
         public int Id { get; } = id;
         public string Name { get; set; } = name;
         public WebSocket Control { get; } = control;
@@ -42,7 +44,43 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
     private readonly ConcurrentDictionary<WebSocket, TaskCompletionSource> _pipeDone = new();
 
     public sealed record Info(int Id, string Name, bool Connected, string? Machine, string? Browser, DateTimeOffset? Since,
-        DateTimeOffset? LastSeen, DateTimeOffset CreatedAt);
+        DateTimeOffset? LastSeen, DateTimeOffset CreatedAt, bool ChecksEnabled, List<string> DisabledDomains);
+
+    /// <summary>What each helper is allowed to do (its switches on the Helpers tab), kept here so turns are quick to work out.</summary>
+    private sealed record Prefs(bool ChecksEnabled, HashSet<string> Off);
+    private readonly ConcurrentDictionary<int, Prefs> _prefs = new();
+
+    private static Prefs PrefsOf(RunnerKey k) =>
+        new(k.ChecksEnabled, k.DisabledDomains.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>May this helper check and buy at this store (domain, e.g. walmart.ca)?</summary>
+    public bool Allowed(int id, string domain) =>
+        !_prefs.TryGetValue(id, out var p) || p.ChecksEnabled && !p.Off.Contains(domain);
+
+    /// <summary>Turns a helper's checks on or off, all of them or one store's.</summary>
+    public async Task<bool> SetChecksAsync(int id, bool on, string? domain)
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var row = await db.RunnerKeys.FirstOrDefaultAsync(r => r.Id == id);
+        if (row == null)
+            return false;
+        if (string.IsNullOrWhiteSpace(domain))
+            row.ChecksEnabled = on;
+        else
+        {
+            var off = PrefsOf(row).Off;
+            if (on)
+                off.Remove(domain.Trim());
+            else
+                off.Add(domain.Trim().ToLowerInvariant());
+            row.DisabledDomains = string.Join(",", off.Order());
+        }
+        await db.SaveChangesAsync();
+        _prefs[id] = PrefsOf(row);
+        return true;
+    }
 
     /// <summary>The helpers connected now, oldest key first.</summary>
     public IReadOnlyList<int> ConnectedIds =>
@@ -93,8 +131,8 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
         using var scope = scopes.CreateScope();
         var rows = await scope.ServiceProvider.GetRequiredService<AppDbContext>().RunnerKeys.AsNoTracking().OrderBy(r => r.Id).ToListAsync();
         return rows.Select(r => _live.TryGetValue(r.Id, out var l) && l.Control.State == WebSocketState.Open
-                ? new Info(r.Id, r.Name, true, l.Machine, l.Browser, l.Since, l.LastSeen, r.CreatedAt)
-                : new Info(r.Id, r.Name, false, r.Machine, r.Browser, null, r.LastSeenAt, r.CreatedAt))
+                ? new Info(r.Id, r.Name, true, l.Machine, l.Browser, l.Since, l.LastSeen, r.CreatedAt, r.ChecksEnabled, [.. PrefsOf(r).Off])
+                : new Info(r.Id, r.Name, false, r.Machine, r.Browser, null, r.LastSeenAt, r.CreatedAt, r.ChecksEnabled, [.. PrefsOf(r).Off]))
             .ToList();
     }
 
@@ -143,11 +181,12 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
     // ---- Sockets ----
 
     /// <summary>A helper's control socket: kept until it closes. The same helper connecting again replaces itself.</summary>
-    public async Task RunControlAsync(WebSocket ws, RunnerKey key, string? machine, string? browser, CancellationToken ct)
+    public async Task RunControlAsync(WebSocket ws, RunnerKey key, string? machine, string? browser, CancellationToken ct, bool canShow = false)
     {
         if (_live.TryRemove(key.Id, out var old))
             await CloseAsync(old.Control, "The same helper connected again.");
-        var live = new Live(key.Id, key.Name, ws, machine, browser);
+        _prefs[key.Id] = PrefsOf(key);
+        var live = new Live(key.Id, key.Name, ws, machine, browser, canShow);
         _live[key.Id] = live;
         Changed?.Invoke(key.Id);
         await SeenAsync(key.Id, machine, browser);
@@ -173,9 +212,16 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
                 _live.TryRemove(key.Id, out _);
                 Changed?.Invoke(key.Id);
                 await SeenAsync(key.Id, machine, browser);
-                var left = ConnectedIds.Count;
-                await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning,
-                    $"{live.Name} disconnected. {(left > 0 ? $"{left} other helper{(left == 1 ? " is" : "s are")} still connected." : "Pages are checked from the server until a helper is back.")}");
+                // Only if it stays away: a helper restarting Chrome (to show or hide its window) is back within seconds.
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(90));
+                    if (IsConnected(key.Id))
+                        return;
+                    var left = ConnectedIds.Count;
+                    await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning,
+                        $"{live.Name} disconnected. {(left > 0 ? $"{left} other helper{(left == 1 ? " is" : "s are")} still connected." : "Pages are checked from the server until a helper is back.")}");
+                });
             }
         }
     }
@@ -210,6 +256,30 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
     }
 
     /// <summary>Playwright connected to the loopback endpoint for one helper: get a pipe from it and join the two.</summary>
+    /// <summary>
+    /// Asks the helper to show this page in a Chrome window, in front, starting Chrome with a window if it runs headless.
+    /// False when it isn't connected or is too old to (it needs updating).
+    /// </summary>
+    public async Task<bool> ShowAsync(int runnerId, string url)
+    {
+        if (!_live.TryGetValue(runnerId, out var live) || live.Control.State != WebSocketState.Open || !live.CanShow)
+            return false;
+        await live.Send.WaitAsync();
+        try
+        {
+            await live.Control.SendAsync(JsonSerializer.SerializeToUtf8Bytes(new { show = url }), WebSocketMessageType.Text, true, CancellationToken.None);
+            return true;
+        }
+        catch (Exception e) when (e is WebSocketException or ObjectDisposedException)
+        {
+            return false;
+        }
+        finally
+        {
+            live.Send.Release();
+        }
+    }
+
     public async Task RunCdpAsync(int runnerId, WebSocket playwright, CancellationToken ct)
     {
         if (!_live.TryGetValue(runnerId, out var live) || live.Control.State != WebSocketState.Open)

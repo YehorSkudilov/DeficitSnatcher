@@ -89,6 +89,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.KeyHash).HasMaxLength(100);
             e.Property(x => x.Machine).HasMaxLength(200);
             e.Property(x => x.Browser).HasMaxLength(200);
+            e.Property(x => x.DisabledDomains).HasMaxLength(4000);
         });
         b.Entity<RunnerLogin>(e =>
         {

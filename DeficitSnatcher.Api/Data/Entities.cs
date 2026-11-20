@@ -213,6 +213,10 @@ public class RunnerKey
     public DateTimeOffset? LastSeenAt { get; set; }
     public string? Machine { get; set; }
     public string? Browser { get; set; }
+    /// <summary>Off: this helper isn't given checks or buys at all (it stays connected).</summary>
+    public bool ChecksEnabled { get; set; } = true;
+    /// <summary>Stores this helper leaves alone (comma-separated domains, e.g. "walmart.ca,amazon.ca").</summary>
+    public string DisabledDomains { get; set; } = "";
 }
 
 /// <summary>Whether a PC helper's Chrome is signed in to a store.</summary>

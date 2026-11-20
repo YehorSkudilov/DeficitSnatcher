@@ -845,3 +845,24 @@ details > summary {
 .chevron.open {
   transform: rotate(90deg);
 }
+
+.toggle.small {
+  width: 40px;
+  height: 22px;
+}
+.toggle.small::after {
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+}
+.toggle.small.on::after {
+  transform: translateX(18px);
+}
+.toggle.go.on {
+  background: var(--success);
+}
+.toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

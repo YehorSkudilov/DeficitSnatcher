@@ -105,6 +105,10 @@ static partial class Helper
         var c = LoadConfig();
         if (c.Site == null || c.Key == null)
             return Setup(null);
+        // A newer download, opened: it replaces the installed copy (same setup).
+        if (!string.Equals(Path.GetFullPath(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)), Path.GetFullPath(AppDir),
+                StringComparison.OrdinalIgnoreCase))
+            return Install(c);
         // Set up already: make sure it's running, and say how it is.
         if (!IsRunning())
             StartBackground();
@@ -117,7 +121,7 @@ static partial class Helper
         Console.WriteLine();
         if (string.IsNullOrWhiteSpace(code))
         {
-            Console.WriteLine("Paste the setup code from your site (Settings → PC helper → Make a key), then press Enter:");
+            Console.WriteLine("Paste the setup code from your site (Helpers tab → Make a setup code), then press Enter:");
             Console.Write("> ");
             code = Console.ReadLine();
         }
@@ -417,6 +421,26 @@ static partial class Helper
 
         // Commands from the terminal (stop, window show/hide), through a file.
         IBrowserContext? browser = null;
+        // Headless, but the site needs you (sign in, prove you're human): Chrome runs with a window until this time, then
+        // goes back to headless. The page to open once it's up.
+        var visibleUntil = DateTime.MinValue;
+        string? pendingUrl = null;
+        var runningHeadless = false;
+        CancellationTokenSource? restartChrome = null;
+        var restartNow = false;
+        Func<string, Task> show = async url =>
+        {
+            visibleUntil = DateTime.UtcNow.AddMinutes(20);
+            if (runningHeadless || browser == null)
+            {
+                Log("The site needs you: starting Chrome with a window.");
+                pendingUrl = url;
+                restartNow = true;
+                restartChrome?.Cancel();
+                return;
+            }
+            await Chrome.OpenWindowAsync(browser, url);
+        };
         _ = Task.Run(async () =>
         {
             while (!stop.IsCancellationRequested)
@@ -441,20 +465,44 @@ static partial class Helper
                     await Chrome.SetWindowAsync(browser, cmd == "show" ? "normal" : "minimized");
             }
         });
+        // Back to headless once the window's time is up.
+        _ = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                await Task.Delay(30000);
+                if (c.Headless && !runningHeadless && browser != null && DateTime.UtcNow > visibleUntil)
+                {
+                    Log("Back to running Chrome without a window.");
+                    restartNow = true;
+                    restartChrome?.Cancel();
+                }
+            }
+        });
 
         // Chrome, started again if it's closed (until told to stop).
         while (!stop.IsCancellationRequested)
         {
             try
             {
-                var (context, cdpUrl, name) = await Chrome.StartAsync(c.Headless, Log);
+                c = LoadConfig();
+                restartNow = false;
+                var headless = c.Headless && DateTime.UtcNow > visibleUntil;
+                var (context, cdpUrl, name) = await Chrome.StartAsync(headless, Log);
                 browser = context;
+                runningHeadless = headless;
                 state = state with { Browser = name };
                 WriteState(state);
                 using var chromeClosed = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
+                restartChrome = chromeClosed;
                 context.Close += (_, _) => chromeClosed.Cancel();
-                await ConnectLoopAsync(c, cdpUrl, name, change => WriteState(state = change(state)), chromeClosed.Token);
-                if (!stop.IsCancellationRequested)
+                if (pendingUrl is { } url)
+                {
+                    pendingUrl = null;
+                    await Chrome.OpenWindowAsync(context, url);
+                }
+                await ConnectLoopAsync(c, cdpUrl, name, change => WriteState(state = change(state)), show, chromeClosed.Token);
+                if (!stop.IsCancellationRequested && !restartNow)
                     Log("Chrome was closed: starting it again in 5 s (deficitsnatcher stop to stop the helper).");
                 try
                 {
@@ -472,7 +520,9 @@ static partial class Helper
             }
             try
             {
-                await Task.Delay(5000, stop.Token);
+                // Restarting to show or hide the window: straight away.
+                if (!restartNow)
+                    await Task.Delay(5000, stop.Token);
             }
             catch (OperationCanceledException)
             {
@@ -484,7 +534,8 @@ static partial class Helper
     }
 
     /// <summary>Stays connected to the site (reconnecting when it drops), lending Chrome when the site asks.</summary>
-    static async Task ConnectLoopAsync(Config c, string cdpUrl, string browserName, Action<Func<State, State>> update, CancellationToken ct)
+    static async Task ConnectLoopAsync(Config c, string cdpUrl, string browserName, Action<Func<State, State>> update, Func<string, Task> show,
+        CancellationToken ct)
     {
         var wsBase = new Uri(c.Site!.Replace("https://", "wss://").Replace("http://", "ws://").TrimEnd('/'));
         var delay = TimeSpan.FromSeconds(2);
@@ -493,7 +544,7 @@ static partial class Helper
             try
             {
                 using var control = Socket(c.Key!);
-                var query = $"?machine={Uri.EscapeDataString(Environment.MachineName)}&browser={Uri.EscapeDataString(browserName)}";
+                var query = $"?machine={Uri.EscapeDataString(Environment.MachineName)}&browser={Uri.EscapeDataString(browserName)}&can=show";
                 await control.ConnectAsync(new Uri(wsBase, "/api/runner/connect" + query), ct);
                 Log("Connected to the site.");
                 update(s => s with { Connected = true, Since = DateTimeOffset.Now, LastError = null });
@@ -511,6 +562,13 @@ static partial class Helper
                     // Read the id now: the message is gone by the time the task runs.
                     if (msg.RootElement.TryGetProperty("open", out var open) && open.GetString() is { } pipeId)
                         _ = Task.Run(() => PipeAsync(wsBase, c.Key!, cdpUrl, pipeId, ct));
+                    // The site needs you here (sign in, prove you're human): a window in front, on that page.
+                    else if (msg.RootElement.TryGetProperty("show", out var shown) && shown.GetString() is { } showUrl
+                             && Uri.TryCreate(showUrl, UriKind.Absolute, out var su) && su.Scheme is "https" or "http")
+                    {
+                        Log($"The site needs you on {su.Host}: bringing Chrome up.");
+                        _ = Task.Run(() => show(showUrl));
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -814,6 +872,34 @@ static partial class Helper
                 await SetWindowAsync(context, "minimized");
             File.WriteAllText(marker, DateTime.Now.ToString("O"));
             return (context, cdpUrl, full);
+        }
+
+        /// <summary>The page in a window of its own, in front (the bot's tabs open in the background elsewhere).</summary>
+        public static async Task OpenWindowAsync(IBrowserContext context, string url)
+        {
+            try
+            {
+                var first = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+                var cdp = await context.NewCDPSessionAsync(first);
+                await cdp.SendAsync("Target.createTarget", new Dictionary<string, object> { ["url"] = url, ["newWindow"] = true });
+                await cdp.DetachAsync();
+                await Task.Delay(1500);
+                var page = context.Pages.LastOrDefault(p => p.Url.StartsWith(url[..Math.Min(url.Length, 30)], StringComparison.OrdinalIgnoreCase))
+                           ?? context.Pages.Last();
+                var c2 = await context.NewCDPSessionAsync(page);
+                var window = await c2.SendAsync("Browser.getWindowForTarget");
+                await c2.SendAsync("Browser.setWindowBounds", new Dictionary<string, object>
+                {
+                    ["windowId"] = window!.Value.GetProperty("windowId").GetInt32(),
+                    ["bounds"] = new Dictionary<string, object> { ["windowState"] = "normal" },
+                });
+                await c2.DetachAsync();
+                await page.BringToFrontAsync();
+            }
+            catch (Exception e)
+            {
+                Log("Couldn't open the window: " + e.Message.Split('\n')[0]);
+            }
         }
 
         public static async Task SetWindowAsync(IBrowserContext context, string state)
