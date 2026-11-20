@@ -303,7 +303,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
           <Check
             label={
               <>
-                <b>Auto-buy</b> when it&apos;s a match
+                <b>Auto-buy</b> when it&apos;s a match (off: alerts only; the alert&apos;s store link opens in your own browser to buy it yourself)
               </>
             }
             checked={form.autoBuy}

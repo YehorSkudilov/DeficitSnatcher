@@ -411,6 +411,7 @@ export type Settings = {
   jitterPercent: number;
   slowDownFailingPages: boolean;
   minSecondsPerHost: number;
+  storeIntervals: { domain: string; minutes: number }[];
   maxConcurrentChecks: number;
   requestTimeoutSeconds: number;
   proxyUrl: string;

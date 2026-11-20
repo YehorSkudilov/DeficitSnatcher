@@ -96,6 +96,40 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <Field label="Same store at most every (seconds)" hint="Spaces out checks of one host, so it doesn't block you.">
             <NumberInput value={s.minSecondsPerHost} min={0} onChange={(v) => set({ minSecondsPerHost: v ?? 0 })} />
           </Field>
+          <Field
+            label="Stricter stores"
+            hint="Pages of these stores are checked at most every so many minutes, whatever their own interval. For stores that keep blocking you."
+          >
+            <div className="stack" style={{ gap: 6 }}>
+              {s.storeIntervals.map((x, i) => (
+                <div className="row" key={i} style={{ gap: 6, flexWrap: "nowrap" }}>
+                  <input
+                    type="text"
+                    placeholder="walmart.ca"
+                    value={x.domain}
+                    onChange={(e) => set({ storeIntervals: s.storeIntervals.map((y, j) => (j === i ? { ...y, domain: e.target.value } : y)) })}
+                  />
+                  <span className="small faint" style={{ whiteSpace: "nowrap" }}>every</span>
+                  <NumberInput
+                    value={x.minutes}
+                    min={1}
+                    onChange={(v) => set({ storeIntervals: s.storeIntervals.map((y, j) => (j === i ? { ...y, minutes: v ?? 10 } : y)) })}
+                  />
+                  <span className="small faint">min</span>
+                  <button className="btn small ghost" onClick={() => set({ storeIntervals: s.storeIntervals.filter((_, j) => j !== i) })}>
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button
+                className="btn small"
+                style={{ alignSelf: "flex-start" }}
+                onClick={() => set({ storeIntervals: [...s.storeIntervals, { domain: "", minutes: 10 }] })}
+              >
+                Add a store
+              </button>
+            </div>
+          </Field>
           <Field label="Checks at once">
             <NumberInput value={s.maxConcurrentChecks} min={1} onChange={(v) => set({ maxConcurrentChecks: v ?? 1 })} />
           </Field>

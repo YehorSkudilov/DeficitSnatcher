@@ -31,6 +31,8 @@ public sealed record BotSettings
     public bool SlowDownFailingPages { get; init; }
     /// <summary>Two checks of the same host are at least this far apart.</summary>
     public int MinSecondsPerHost { get; init; } = 10;
+    /// <summary>Stricter stores: their pages are checked at most every so many minutes, whatever their own interval says.</summary>
+    public List<StoreInterval> StoreIntervals { get; init; } = [];
     public int MaxConcurrentChecks { get; init; } = 4;
     public int RequestTimeoutSeconds { get; init; } = 20;
     /// <summary>Stores are reached through this proxy (checks and checkouts; not ChatGPT): http://user:pass@host:port.
@@ -130,6 +132,9 @@ public sealed record BotSettings
         DefaultIntervalSeconds = Math.Clamp(DefaultIntervalSeconds, 5, 24 * 3600),
         JitterPercent = Math.Clamp(JitterPercent, 0, 90),
         MinSecondsPerHost = Math.Clamp(MinSecondsPerHost, 0, 3600),
+        StoreIntervals = (StoreIntervals ?? [])
+            .Select(x => new StoreInterval(StoreInterval.Clean(x.Domain), Math.Clamp(x.Minutes, 1, 24 * 60)))
+            .Where(x => x.Domain.Length > 0).DistinctBy(x => x.Domain).ToList(),
         MaxConcurrentChecks = Math.Clamp(MaxConcurrentChecks, 1, 32),
         RequestTimeoutSeconds = Math.Clamp(RequestTimeoutSeconds, 3, 120),
         UserAgent = string.IsNullOrWhiteSpace(UserAgent) ? new BotSettings().UserAgent : UserAgent.Trim(),
@@ -199,4 +204,19 @@ public sealed record CheckoutProfile
         ["card.expiry"] = $"{CardExpiryMonth}/{(CardExpiryYear.Length >= 2 ? CardExpiryYear[^2..] : CardExpiryYear)}",
         ["card.cvv"] = CardCvv,
     };
+}
+
+/// <summary>A store (domain, e.g. walmart.ca) whose pages are checked at most every <see cref="Minutes"/>.</summary>
+public sealed record StoreInterval(string Domain, int Minutes)
+{
+    public static string Clean(string? domain)
+    {
+        var d = (domain ?? "").Trim().ToLowerInvariant();
+        if (Uri.TryCreate(d.Contains("://") ? d : "https://" + d, UriKind.Absolute, out var u))
+            d = u.Host;
+        return d.StartsWith("www.") ? d[4..] : d;
+    }
+
+    public bool Matches(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) && (Clean(u.Host) == Domain || u.Host.EndsWith("." + Domain, StringComparison.OrdinalIgnoreCase));
 }

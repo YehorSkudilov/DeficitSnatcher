@@ -99,6 +99,8 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
             if (_running.ContainsKey(site.Id))
                 continue;
             var interval = site.IntervalSeconds ?? settings.DefaultIntervalSeconds;
+            if (settings.StoreIntervals.FirstOrDefault(x => x.Matches(site.Url)) is { } strict)
+                interval = Math.Max(interval, strict.Minutes * 60);
             var due = _nextDue.GetOrAdd(site.Id, _ => site.LastCheckedAt?.AddSeconds(interval) ?? now);
             if (due > now)
                 continue;
