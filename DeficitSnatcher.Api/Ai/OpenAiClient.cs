@@ -130,7 +130,7 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
     /// finding a product's pages at stores; logged like every other call.
     /// </summary>
     public async Task<JsonElement> SearchWebJsonAsync(string purpose, string instructions, string question, CancellationToken ct,
-        SearchLocation? near = null)
+        SearchLocation? near = null, bool deep = false)
     {
         if (!HasKey)
             throw new AiException("The AI is off: set the OPENAI_API_KEY secret.");
@@ -149,11 +149,12 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
             ["tools"] = new object[]
             {
                 near == null
-                    ? new { type = "web_search" }
-                    : new
+                    ? new Dictionary<string, object> { ["type"] = "web_search", ["search_context_size"] = deep ? "high" : "medium" }
+                    : new Dictionary<string, object>
                     {
-                        type = "web_search",
-                        user_location = new Dictionary<string, string?>
+                        ["type"] = "web_search",
+                        ["search_context_size"] = deep ? "high" : "medium",
+                        ["user_location"] = new Dictionary<string, string?>
                         {
                             ["type"] = "approximate",
                             ["country"] = near.Country,
@@ -164,8 +165,10 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
                     },
             },
         };
-        // Web search doesn't take "minimal".
-        if (settings.AiReasoningEffort.Length > 0)
+        // Web search doesn't take "minimal". A deep search thinks harder (more searches, more pages read).
+        if (deep)
+            body["reasoning"] = new { effort = "high" };
+        else if (settings.AiReasoningEffort.Length > 0)
             body["reasoning"] = new { effort = settings.AiReasoningEffort == "minimal" ? "low" : settings.AiReasoningEffort };
 
         var watch = Stopwatch.StartNew();

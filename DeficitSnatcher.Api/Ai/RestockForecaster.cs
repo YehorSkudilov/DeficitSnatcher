@@ -70,6 +70,8 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         for (var i = 1; i < otherPoints.Count; i++)
             if (otherPoints[i].SiteId == otherPoints[i - 1].SiteId && otherPoints[i].InStock && !otherPoints[i - 1].InStock)
                 otherRestocks.Add(otherPoints[i].At);
+        foreach (var other in insights.Where(x => x.Domain != domain))
+            otherRestocks.AddRange(Events(other));
         otherRestocks.Sort();
         var now = DateTimeOffset.UtcNow;
         var otherOnline = insights.Where(x => x.Domain != domain && x.NextLikely > now).OrderBy(x => x.NextLikely)
@@ -99,32 +101,37 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         var now = DateTimeOffset.UtcNow;
         var sources = online == null ? [] : JsonSerializer.Deserialize<List<RestockSource>>(online.Sources, Buying.Buyer.JsonOptions) ?? [];
 
-        // History: the usual weekday and hour, and the usual gap.
+        // History: the usual weekday and hour, and the usual gap, from the restocks seen here and the dated ones reported
+        // online for this store (trackers' logs, posts), the same restock counted once.
+        var reported = online == null ? [] : Events(online);
+        var seen = restocks.Concat(reported.Where(e => !restocks.Any(r => Math.Abs((r - e).TotalHours) < 3)))
+            .OrderBy(x => x).ToList();
+        var sourceNote = reported.Count == 0 ? "" : restocks.Count == 0 ? ", reported online" : $": {restocks.Count} seen here, {seen.Count - restocks.Count} reported online";
         DateTimeOffset? historyNext = null;
         string? historyPattern = null;
         var historyConfidence = "low";
-        if (restocks.Count >= 2)
+        if (seen.Count >= 2)
         {
-            var local = restocks.Select(r => TimeZoneInfo.ConvertTime(r, zone)).ToList();
+            var local = seen.Select(r => TimeZoneInfo.ConvertTime(r, zone)).ToList();
             var byDay = local.GroupBy(l => l.DayOfWeek).OrderByDescending(g => g.Count()).First();
             var share = (double)byDay.Count() / local.Count;
             // To the quarter hour: a forecast, not a timestamp.
             var hour = Math.Round(Median(byDay.Select(l => l.Hour + l.Minute / 60.0).ToList()) * 4) / 4;
-            var gaps = restocks.Zip(restocks.Skip(1), (a, b) => (b - a).TotalDays).ToList();
+            var gaps = seen.Zip(seen.Skip(1), (a, b) => (b - a).TotalDays).ToList();
             var gap = Median(gaps);
             if (share >= 0.5 && local.Count >= 3)
             {
                 historyNext = NextWeekday(byDay.Key, hour, zone, now);
-                historyPattern = $"{(share >= 0.8 ? "almost always" : "mostly")} {byDay.Key}s, around {Clock(hour)} ({byDay.Count()} of {local.Count} restocks)";
+                historyPattern = $"{(share >= 0.8 ? "almost always" : "mostly")} {byDay.Key}s, around {Clock(hour)} ({byDay.Count()} of {local.Count} restocks{sourceNote})";
                 historyConfidence = local.Count >= 5 && share >= 0.6 ? "high" : "medium";
             }
             else
             {
-                var next = restocks[^1].AddDays(gap);
+                var next = seen[^1].AddDays(gap);
                 while (next < now)
                     next = next.AddDays(Math.Max(gap, 1));
                 historyNext = next;
-                historyPattern = $"every {Days(gap)} or so ({local.Count} restocks, no favourite day)";
+                historyPattern = $"every {Days(gap)} or so ({local.Count} restocks{sourceNote}, no favourite day)";
                 historyConfidence = "low";
             }
         }
@@ -150,7 +157,7 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
             confidence = historyFirst ? historyConfidence : onlineConfidence;
             var zoneNow = now;
             explanation = historyFirst
-                ? $"From the restocks seen here: {historyPattern}. Online reports point later: {online!.Pattern ?? Format(TimeZoneInfo.ConvertTime(onlineNext.Value, zone), zoneNow, zone)}."
+                ? $"From this store's restocks: {historyPattern}. Online reports point later: {online!.Pattern ?? Format(TimeZoneInfo.ConvertTime(onlineNext.Value, zone), zoneNow, zone)}."
                 : $"From reports online: {online!.Pattern}. Its own history points later ({historyPattern}).";
         }
         else if (onlineNext != null)
@@ -165,7 +172,7 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
             nextAt = historyNext;
             basis = "history";
             confidence = historyConfidence;
-            explanation = $"From the restocks seen here: {historyPattern}.";
+            explanation = $"From this store's restocks: {historyPattern}.";
         }
         else if (online?.NextLikely is { } past && Math.Max(1, Math.Ceiling((now - past).TotalDays / 7)) is var weeks && weeks <= 8)
         {
@@ -176,14 +183,14 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
             explanation = $"Online reports pointed to {Format(TimeZoneInfo.ConvertTime(past, zone), now, zone)}{(online.Pattern is { Length: > 0 } p ? $" ({p})" : "")}: "
                 + "the same time a week on.";
         }
-        else if (restocks.Count == 1)
+        else if (seen.Count == 1)
         {
-            var last = TimeZoneInfo.ConvertTime(restocks[0], zone);
+            var last = TimeZoneInfo.ConvertTime(seen[0], zone);
             var hour = Math.Round((last.Hour + last.Minute / 60.0) * 4) / 4;
             nextAt = NextWeekday(last.DayOfWeek, hour, zone, now);
             basis = "history";
             confidence = "low";
-            explanation = $"Only one restock seen here so far ({last.DayOfWeek}, around {Clock(hour)}): the same day and time again.";
+            explanation = $"Only one restock known for this store so far ({last.DayOfWeek}, around {Clock(hour)}): the same day and time again.";
         }
         else if (otherOnline != null || otherRestocks.Count >= 2)
         {
@@ -244,6 +251,8 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
           "confidence": "low | medium | high (high only when several independent sources agree)",
           "summary": "two or three sentences: what the recent reports say, which kinds of source, and how sure that is",
           "nearYou": "one or two sentences about stores near the owner's area (in-store or pickup restocks), or null if nothing found",
+          "restocks": [ "ISO 8601 date and time (with its UTC offset) of each past restock of this product at this store that you
+                        found a dated report of (a tracker's log entry, a dated post), last 6 months, oldest first; up to 40; [] if none" ],
           "sources": [ { "title": "…", "url": "https://…" } ]
         }
         Only real reports you found, with their links (up to 10, from as many different kinds of source as you can). If
@@ -284,18 +293,65 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         row.FetchedAt = DateTimeOffset.UtcNow;
         try
         {
-            var a = await ai.SearchWebJsonAsync("restock-forecast", Instructions, question, ct, near);
-            row.Pattern = Str(a, "pattern");
-            row.NextLikely = Str(a, "nextLikely") is { } next && DateTimeOffset.TryParse(next, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var d) ? d.ToUniversalTime() : null;
-            row.Confidence = Str(a, "confidence") is "medium" or "high" ? Str(a, "confidence")! : "low";
-            row.Summary = Str(a, "summary") ?? "";
-            if (Str(a, "nearYou") is { } local)
+            // First a deep, broad search; then, when it comes back thin (no date, low confidence or few dated restocks), a
+            // second one that digs into specific places for dated restocks of this store.
+            var a = await ai.SearchWebJsonAsync("restock-forecast", Instructions, question, ct, near, deep: true);
+            var pattern = Str(a, "pattern");
+            var nextLikely = Date(Str(a, "nextLikely"));
+            var confidence = Str(a, "confidence") is "medium" or "high" ? Str(a, "confidence")! : "low";
+            var summary = Str(a, "summary") ?? "";
+            var nearYou = Str(a, "nearYou");
+            var events = Dates(a, "restocks");
+            var sources = Sources(a);
+
+            if (nextLikely == null || confidence == "low" || events.Count < 3)
+            {
+                var dig = $"""
+                    {question}
+                    A first search found: pattern {pattern ?? "(none)"}; {events.Count} dated restock(s); confidence {confidence}.
+                    Summary: {(summary.Length > 0 ? summary : "(nothing)")}
+                    Sources already seen: {(sources.Count > 0 ? string.Join(", ", sources.Select(x => x.Url)) : "(none)")}
+                    Dig deeper for DATED restocks of this product at {FindPagesController.NameFor(url)}, beyond those sources. Search specifically:
+                    NowInStock's page for this product (its history/log table for {domain}); StockTrack and other trackers' pages for it;
+                    "{FindPagesController.NameFor(url)} {product.Name} restock" and "in stock" on Reddit, RedFlagDeals/Slickdeals and X/Twitter
+                    restock accounts, sorted by recent; YouTube/Twitch restock streams naming {FindPagesController.NameFor(url)}. If this
+                    exact product has nothing dated, use the closest variants (other editions/bundles of it) at this store, and say so in
+                    the summary. Then give the next restock after Now from all of it (a usual weekday and time, or the usual gap since the
+                    last one), with low confidence rather than null whenever there is anything to go on.
+                    """;
+                try
+                {
+                    var b = await ai.SearchWebJsonAsync("restock-forecast-dig", Instructions, dig, ct, near, deep: true);
+                    var moreEvents = Dates(b, "restocks");
+                    events = events.Concat(moreEvents.Where(e => !events.Any(x => Math.Abs((x - e).TotalHours) < 3))).OrderBy(x => x).ToList();
+                    var bConfidence = Str(b, "confidence") is "medium" or "high" ? Str(b, "confidence")! : "low";
+                    // The dig's answer wins when it has a date and the first didn't, or it's at least as sure.
+                    if (Date(Str(b, "nextLikely")) is { } bNext && (nextLikely == null || Array.IndexOf(Levels, bConfidence) >= Array.IndexOf(Levels, confidence)))
+                    {
+                        nextLikely = bNext;
+                        confidence = bConfidence;
+                        pattern = Str(b, "pattern") ?? pattern;
+                    }
+                    else
+                        pattern ??= Str(b, "pattern");
+                    if (Str(b, "summary") is { } more && more != summary)
+                        summary = (summary + " " + more).Trim();
+                    nearYou ??= Str(b, "nearYou");
+                    sources = sources.Concat(Sources(b)).DistinctBy(x => x.Url).Take(16).ToList();
+                }
+                catch (OpenAiClient.AiException e)
+                {
+                    log.LogInformation("The deeper restock search for {Store} failed: {Error}", domain, e.Message);
+                }
+            }
+
+            row.Pattern = pattern;
+            row.NextLikely = nextLikely;
+            row.Confidence = confidence;
+            row.Summary = summary;
+            if (nearYou is { } local)
                 row.Summary = (row.Summary + $" Near you{(city.Length > 0 ? $" ({city})" : "")}: {local}").Trim();
-            var sources = new List<RestockSource>();
-            if (a.TryGetProperty("sources", out var src) && src.ValueKind == JsonValueKind.Array)
-                foreach (var s in src.EnumerateArray().Take(10))
-                    if (Str(s, "url") is { } u && Uri.TryCreate(u, UriKind.Absolute, out _))
-                        sources.Add(new RestockSource(Str(s, "title") ?? u, u));
+            row.Events = JsonSerializer.Serialize(events.Where(e => e <= DateTimeOffset.UtcNow).TakeLast(60).ToList(), Buying.Buyer.JsonOptions);
             row.Sources = JsonSerializer.Serialize(sources, Buying.Buyer.JsonOptions);
             row.Error = null;
         }
@@ -308,7 +364,8 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
     }
 
     /// <summary>The background part, one store per call (every few minutes): one never looked up first, then one whose
-    /// predicted restock has passed (looked up again after 6 hours), then one a week old.</summary>
+    /// predicted restock has passed (looked up again after 6 hours), then one with no date (again after a day), then one
+    /// a week old.</summary>
     public async Task RefreshOneStaleAsync(CancellationToken ct)
     {
         var settings = await settingsStore.GetAsync(ct);
@@ -323,6 +380,7 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
             rows.Any(r => r.ProductId == productId && r.Domain == FindPagesController.Domain(url) && ok(r.FetchedAt, r.NextLikely));
         var stale = sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (_, _) => true))
             ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, next) => !(next < now && now - at > TimeSpan.FromHours(6))))
+            ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, next) => !(next == null && now - at > TimeSpan.FromDays(1))))
             ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, _) => now - at < TimeSpan.FromDays(7)));
         if (stale == null)
             return;
@@ -331,6 +389,42 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
     }
 
     // ---- Helpers ----
+
+    private static DateTimeOffset? Date(string? s) =>
+        s != null && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var d) ? d.ToUniversalTime() : null;
+
+    private static List<DateTimeOffset> Dates(JsonElement e, string name)
+    {
+        var list = new List<DateTimeOffset>();
+        if (e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var a) && a.ValueKind == JsonValueKind.Array)
+            foreach (var x in a.EnumerateArray().Take(60))
+                if (x.ValueKind == JsonValueKind.String && Date(x.GetString()) is { } d && d > DateTimeOffset.UtcNow.AddYears(-1))
+                    list.Add(d);
+        return list.OrderBy(x => x).ToList();
+    }
+
+    private static List<RestockSource> Sources(JsonElement a)
+    {
+        var sources = new List<RestockSource>();
+        if (a.ValueKind == JsonValueKind.Object && a.TryGetProperty("sources", out var src) && src.ValueKind == JsonValueKind.Array)
+            foreach (var s in src.EnumerateArray().Take(10))
+                if (Str(s, "url") is { } u && Uri.TryCreate(u, UriKind.Absolute, out _))
+                    sources.Add(new RestockSource(Str(s, "title") ?? u, u));
+        return sources;
+    }
+
+    /// <summary>The past restocks reported online for a store, oldest first.</summary>
+    private static List<DateTimeOffset> Events(RestockInsight row)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<DateTimeOffset>>(row.Events, Buying.Buyer.JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
 
     /// <summary>The area part of a postal code: Canada's first three characters (M5V), the UK's outward code (SW1A), a US
     /// ZIP's first three digits. Null when there's none.</summary>

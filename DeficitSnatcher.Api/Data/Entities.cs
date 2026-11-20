@@ -237,6 +237,8 @@ public class RestockInsight
     public string Summary { get; set; } = "";
     /// <summary>JSON array of { title, url }.</summary>
     public string Sources { get; set; } = "[]";
+    /// <summary>JSON array of past restocks found online for this product at this store (ISO dates), oldest first.</summary>
+    public string Events { get; set; } = "[]";
     public string? Error { get; set; }
 }
 

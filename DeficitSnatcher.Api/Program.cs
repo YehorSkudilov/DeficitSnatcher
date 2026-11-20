@@ -82,7 +82,7 @@ builder.Services.AddHttpClient<PageFetcher>(c => c.Timeout = Timeout.InfiniteTim
     .ConfigurePrimaryHttpMessageHandler(PageFetcher.CreateHandler)
     .SetHandlerLifetime(Timeout.InfiniteTimeSpan);
 // The AI (ChatGPT), off while OpenAI__ApiKey is unset: sets pages up, goes through checkouts, fixes broken ones.
-builder.Services.AddHttpClient<DeficitSnatcher.Api.Ai.OpenAiClient>(c => c.Timeout = TimeSpan.FromMinutes(3));
+builder.Services.AddHttpClient<DeficitSnatcher.Api.Ai.OpenAiClient>(c => c.Timeout = TimeSpan.FromMinutes(8));
 builder.Services.AddSingleton<DeficitSnatcher.Api.Ai.CheckoutAgent>();
 builder.Services.AddSingleton<DeficitSnatcher.Api.Ai.PageSetup>();
 builder.Services.AddSingleton<ScanFollowUp>();
