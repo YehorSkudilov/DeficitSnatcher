@@ -62,8 +62,7 @@ public sealed class AiController(AppDbContext db, OpenAiClient ai, PageSetup set
         if (site == null)
             return NotFound();
         var settings = await settingsStore.GetAsync(ct);
-        var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, RestockForecaster.Zone(settings.TimeZone));
-        var trigger = $"Record checkout with AI, started from the site at {localNow:yyyy-MM-dd HH:mm:ss} ({settings.TimeZone}): the AI goes through the "
+        var trigger = $"Record checkout with AI, started from the site at {Times.At(DateTimeOffset.UtcNow)}: the AI goes through the "
             + "checkout as a dry run and the steps it takes are saved.";
         return await buyer.BuyAsync(siteId, (site.LastPrice ?? 0) + site.ShippingCost, manual: true, forceDryRun: true, trigger, ct, aiRecord: true);
     }

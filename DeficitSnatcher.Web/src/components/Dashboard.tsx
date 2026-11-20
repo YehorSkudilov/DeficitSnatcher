@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, type RestockForecast, type CheckAllItem, type Dashboard as DashboardData, type ProbeResponse, type Product, type Site } from "@/lib/api";
+import { api, restockWhen, type RestockForecast, type CheckAllItem, type Dashboard as DashboardData, type ProbeResponse, type Product, type Site } from "@/lib/api";
 import { ago, dateTime, host, money, storeIconSources, until } from "@/lib/format";
 import { Check, ErrorNote, LevelDot, PurchaseBadge, StockBadge, useAction, useCollapsed, useData, useNow, CollapseButton, PagesSummary } from "./ui";
 import { go } from "./App";
@@ -308,7 +308,7 @@ export function RestockCell({ f }: { f?: RestockForecast }) {
   const cls = { low: "", medium: "info", high: "good" }[f.confidence];
   return (
     <span title={f.explanation}>
-      {f.when}
+      {restockWhen(f)}
       <div>
         <span className={`badge ${cls}`}>{f.confidence === "high" ? "likely" : f.confidence === "medium" ? "maybe" : "guess"}</span>
       </div>

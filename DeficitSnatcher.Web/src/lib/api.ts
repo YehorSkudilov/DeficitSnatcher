@@ -35,6 +35,51 @@ export class ApiError extends Error {
 let onSignedOut: () => void = () => {};
 export const setSignedOutHandler = (f: () => void) => (onSignedOut = f);
 
+// ---- Times: the server sends UTC; they're shown in this device's time zone ----
+
+const clock = (d: Date) => d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+/** A UTC time in this device's zone. Styles match the server's markers (Settings/Times.cs). */
+export function localTime(at: Date, style = ""): string {
+  if (style === "time") return clock(at);
+  if (style === "weekly") return `${at.toLocaleDateString(undefined, { weekday: "long" })}s, around ${clock(at)}`;
+  if (style === "when") {
+    const today = new Date();
+    const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    const day =
+      at.toDateString() === today.toDateString()
+        ? "Today"
+        : at.toDateString() === tomorrow.toDateString()
+          ? "Tomorrow"
+          : at.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }).replace(",", "");
+    return `${day}, around ${clock(at)}`;
+  }
+  return at.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+const marker = /\{\{t:([0-9T:.\-]+Z)(?:\|(\w+))?\}\}/g;
+
+/** Text from the server with its time markers ({{t:2026-11-20T15:00:00Z|when}}) in this device's time. */
+export function localizeText(text: string): string {
+  if (!text.includes("{{t:")) return text;
+  return text.replace(marker, (whole, iso: string, style?: string) => {
+    const at = new Date(iso);
+    return isNaN(at.getTime()) ? whole : localTime(at, style ?? "");
+  });
+}
+
+/** Every string in an API answer with its time markers made local. */
+function localizeTimes<T>(value: T): T {
+  if (typeof value === "string") return localizeText(value) as T;
+  if (Array.isArray(value)) return value.map(localizeTimes) as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = localizeTimes(v);
+    return out as T;
+  }
+  return value;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   const token = getToken();
@@ -55,7 +100,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     let message = `${response.status} ${response.statusText}`;
     try {
       const problem = await response.json();
-      message = problem.error || problem.detail || problem.title || message;
+      message = localizeText(problem.error || problem.detail || problem.title || message);
     } catch {
       // Not JSON.
     }
@@ -63,7 +108,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   if (response.status === 204) return undefined as T;
   const type = response.headers.get("content-type") || "";
-  return (type.includes("json") ? await response.json() : await response.blob()) as T;
+  return (type.includes("json") ? localizeTimes(await response.json()) : await response.blob()) as T;
 }
 
 export const api = {
@@ -369,7 +414,6 @@ export type Settings = {
   totalBudget: number;
   buyRetryMinutes: number;
   currency: string;
-  timeZone: string;
   aiRestockForecast: boolean;
   defaultIntervalSeconds: number;
   jitterPercent: number;
@@ -446,6 +490,13 @@ export type Profile = {
   hasCvv: boolean;
   clearCard: boolean;
 };
+
+/** A forecast's time on this device: "Today, around 7:00 AM", "Fri Nov 27, around 7:00 AM". */
+export function restockWhen(f: { nextAt: string | null; when: string | null }): string | null {
+  if (!f.nextAt) return f.when;
+  const at = new Date(f.nextAt);
+  return isNaN(at.getTime()) ? f.when : localTime(at, "when");
+}
 
 export type RestockForecast = {
   nextAt: string | null;

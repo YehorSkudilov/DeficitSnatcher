@@ -78,6 +78,8 @@ public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settings
     /// <summary>Emails it when email is set up; returns what went wrong (empty: all fine).</summary>
     public async Task<List<string>> SendAsync(BotSettings s, string message, string? url = null, string? detailsUrl = null)
     {
+        // Leaves the site: its time markers as plain UTC.
+        message = Times.Plain(message);
         // The store link on its own line (tap to buy), then the details here.
         var text = message + (url == null ? "" : $"\nBuy: {url}") + (detailsUrl == null ? "" : $"\nDetails: {detailsUrl}");
         var problems = new List<string>();

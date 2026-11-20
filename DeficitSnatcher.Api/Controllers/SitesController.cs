@@ -196,12 +196,9 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
             return Problem("No price seen yet: check the site first.", statusCode: StatusCodes.Status400BadRequest);
         var price = (site.LastPrice ?? 0) + site.ShippingCost;
         var settings = await settingsStore.GetAsync(ct);
-        var zone = RestockForecaster.Zone(settings.TimeZone);
-        var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone);
-        var lastChecked = site.LastCheckedAt is { } checkedAt ? TimeZoneInfo.ConvertTime(checkedAt, zone) : (DateTimeOffset?)null;
-        var trigger = $"Started by hand from the web ({(request.DryRun ? "Dry-run checkout" : "Buy now")}) at {localNow:yyyy-MM-dd HH:mm:ss} ({settings.TimeZone})"
+        var trigger = $"Started by hand from the web ({(request.DryRun ? "Dry-run checkout" : "Buy now")}) at {Times.At(DateTimeOffset.UtcNow)}"
             + $"\nLast seen: {site.LastTitle ?? "—"} · price {site.LastPrice:0.00}{(site.ShippingCost > 0 ? $" + {site.ShippingCost:0.00} shipping" : "")}"
-            + $" · {(site.LastInStock == true ? "in stock" : site.LastInStock == false ? "out of stock" : "stock unknown")}, checked {(lastChecked is { } at ? at.ToString("yyyy-MM-dd HH:mm:ss") : "never")} ({settings.TimeZone})";
+            + $" · {(site.LastInStock == true ? "in stock" : site.LastInStock == false ? "out of stock" : "stock unknown")}, checked {Times.At(site.LastCheckedAt)}";
         return await buyer.BuyAsync(id, price, manual: true, forceDryRun: request.DryRun, trigger, ct);
     }
 

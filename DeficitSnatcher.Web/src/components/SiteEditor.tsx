@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  restockWhen,
   api,
   SiteKinds,
   StepActions,
@@ -649,7 +650,7 @@ function RestockCard({ siteId, aiOn }: { siteId: number; aiOn: boolean }) {
         </button>
       </div>
       <div className="row" style={{ gap: 12 }}>
-        <div style={{ fontSize: 22, fontWeight: 700 }}>{f.inStockNow ? "In stock now" : (f.when ?? "Not enough to go on yet")}</div>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>{f.inStockNow ? "In stock now" : (restockWhen(f) ?? "Not enough to go on yet")}</div>
         {!f.inStockNow && f.when && (
           <span className={`badge ${{ low: "", medium: "info", high: "good" }[f.confidence]}`}>
             {f.confidence} confidence · from {{ both: "history and online", others: "other stores", typical: "a general guess" }[f.basis as string] ?? f.basis}
@@ -694,7 +695,7 @@ function RestockCard({ siteId, aiOn }: { siteId: number; aiOn: boolean }) {
           </>
         )}
       </dl>
-      <div className="faint small">A guess from patterns, never a promise: stores restock when they choose. Times in {f.timeZone}.</div>
+      <div className="faint small">A guess from patterns, never a promise: stores restock when they choose. Times in your time zone.</div>
     </div>
   );
 }

@@ -40,7 +40,7 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
         if (!settings.AiEnabled)
             throw new AiException("The AI is turned off in Settings.");
         if (settings.AiDailyTokenLimit > 0 && await TokensTodayAsync(ct) >= settings.AiDailyTokenLimit)
-            throw new AiException($"Today's AI limit of {settings.AiDailyTokenLimit:N0} tokens is used up; it starts again at {NextTokenReset(settings)} ({settings.TimeZone}) "
+            throw new AiException($"Today's AI limit of {settings.AiDailyTokenLimit:N0} tokens is used up; it starts again at {NextTokenReset()} "
                 + "(Settings → AI). Checks and saved steps carry on without it.");
 
         var body = new Dictionary<string, object>
@@ -138,7 +138,7 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
         if (!settings.AiEnabled)
             throw new AiException("The AI is turned off in Settings.");
         if (settings.AiDailyTokenLimit > 0 && await TokensTodayAsync(ct) >= settings.AiDailyTokenLimit)
-            throw new AiException($"Today's AI limit of {settings.AiDailyTokenLimit:N0} tokens is used up; it starts again at {NextTokenReset(settings)} ({settings.TimeZone}).");
+            throw new AiException($"Today's AI limit of {settings.AiDailyTokenLimit:N0} tokens is used up; it starts again at {NextTokenReset()}.");
 
         var body = new Dictionary<string, object>
         {
@@ -239,11 +239,8 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
         }
     }
 
-    private static string NextTokenReset(BotSettings settings)
-    {
-        var nextUtcMidnight = new DateTimeOffset(DateTimeOffset.UtcNow.UtcDateTime.Date.AddDays(1), TimeSpan.Zero);
-        return TimeZoneInfo.ConvertTime(nextUtcMidnight, RestockForecaster.Zone(settings.TimeZone)).ToString("yyyy-MM-dd HH:mm");
-    }
+    private static string NextTokenReset() =>
+        Times.At(new DateTimeOffset(DateTimeOffset.UtcNow.UtcDateTime.Date.AddDays(1), TimeSpan.Zero));
 
     /// <summary>Tokens used since midnight UTC.</summary>
     public async Task<int> TokensTodayAsync(CancellationToken ct = default)

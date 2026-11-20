@@ -25,8 +25,6 @@ public sealed record BotSettings
 
     // Kept as saved, not on the page.
     public string Currency { get; init; } = "CAD";
-    /// <summary>For restock days and times (IANA, e.g. America/Toronto).</summary>
-    public string TimeZone { get; init; } = "America/Toronto";
 
     // ---- Fixed ----
 
@@ -96,7 +94,6 @@ public sealed record BotSettings
     {
         DefaultIntervalSeconds = Math.Clamp(DefaultIntervalSeconds, 60, 24 * 3600),
         Currency = string.IsNullOrWhiteSpace(Currency) ? "CAD" : Currency.Trim().ToUpperInvariant(),
-        TimeZone = string.IsNullOrWhiteSpace(TimeZone) ? "America/Toronto" : TimeZone.Trim(),
         EmailTo = EmailTo?.Trim() ?? "",
         SmtpHost = string.IsNullOrWhiteSpace(SmtpHost) ? "smtp.ionos.com" : SmtpHost.Trim(),
         SmtpPort = SmtpPort is > 0 and < 65536 ? SmtpPort : 587,

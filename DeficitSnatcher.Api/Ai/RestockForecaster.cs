@@ -12,7 +12,7 @@ public sealed record RestockSource(string Title, string Url);
 public sealed record RestockForecast(
     /// <summary>When the next restock looks likely; null when there's nothing to go on.</summary>
     DateTimeOffset? NextAt,
-    /// <summary>"Thu Nov 21, around 11:00" in the owner's time zone.</summary>
+    /// <summary>A time marker (see Times) the site shows as "Thu Nov 21, around 11:00 AM" in the viewer's time.</summary>
     string? When,
     /// <summary>low, medium, high.</summary>
     string Confidence,
@@ -53,7 +53,8 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         if (site == null)
             return null;
         var settings = await settingsStore.GetAsync(ct);
-        var zone = Zone(settings.TimeZone);
+        // All in UTC: the site shows times in the viewer's own zone.
+        var zone = TimeZoneInfo.Utc;
         var points = await db.PricePoints.AsNoTracking().Where(p => p.SiteId == siteId).OrderBy(p => p.At)
             .Select(p => new { p.At, p.InStock }).ToListAsync(ct);
         var restocks = new List<DateTimeOffset>();
@@ -80,7 +81,7 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         var otherOnline = insights.Where(x => x.Domain != domain && x.NextLikely > now).OrderBy(x => x.NextLikely)
             .Select(x => (x.Domain, x.NextLikely!.Value)).FirstOrDefault();
 
-        return Combine(restocks, insight, site.LastInStock == true, zone, settings.TimeZone,
+        return Combine(restocks, insight, site.LastInStock == true, zone, "UTC",
             settings.AiRestockForecast && settings.AiEnabled && ai.HasKey, otherRestocks,
             otherOnline.Domain == null ? null : otherOnline);
     }
@@ -125,7 +126,7 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
             if (share >= 0.5 && local.Count >= 3)
             {
                 historyNext = NextWeekday(byDay.Key, hour, zone, now);
-                historyPattern = $"{(share >= 0.8 ? "almost always" : "mostly")} {byDay.Key}s, around {Clock(hour)} ({byDay.Count()} of {local.Count} restocks{sourceNote})";
+                historyPattern = $"{(share >= 0.8 ? "almost always" : "mostly")} {Times.At(historyNext.Value, "weekly")} ({byDay.Count()} of {local.Count} restocks{sourceNote})";
                 historyConfidence = local.Count >= 5 && share >= 0.6 ? "high" : "medium";
             }
             else
@@ -196,7 +197,7 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
             nextAt = NextWeekday(last.DayOfWeek, hour, zone, now);
             basis = "history";
             confidence = "low";
-            explanation = $"Only one restock known for this store so far ({last.DayOfWeek}, around {Clock(hour)}): the same day and time again.";
+            explanation = $"Only one restock known for this store so far ({Times.At(seen[0], "weekly")}): the same day and time again.";
         }
         else if (otherOnline != null || otherRestocks.Count >= 2)
         {
@@ -246,18 +247,21 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
           how it releases stock (online drops, queues, time of day).
         - Near the owner: stores of this chain near the owner's area (given below) and whether they restock in store or for
           local pickup, and regional patterns (e.g. a province's stores getting stock on another day).
-        Prefer recent reports (the last few months) over old ones, and dated tracker logs over hearsay. Convert times to the
-        owner's time zone. Answer with JSON only:
+        Prefer recent reports (the last few months) over old ones, and dated tracker logs over hearsay. Give every time in UTC:
+        timestamps as ISO 8601 ending in Z. In "pattern", "summary" and "nearYou", write each clock time as a marker the app
+        shows in the reader's own time: {{t:<ISO 8601 UTC>|weekly}} for a usual weekday and time (any one occurrence of it,
+        e.g. "{{t:2026-11-19T16:00:00Z|weekly}}" for Thursdays at 16:00 UTC), {{t:<ISO 8601 UTC>|time}} for a time of day,
+        {{t:<ISO 8601 UTC>}} for a date and time. Never write a clock time any other way. Answer with JSON only:
         {
-          "pattern": "the usual pattern in a few words, e.g. 'Thursdays around 11 am ET, every 1–2 weeks', or null if none is known",
-          "nextLikely": "ISO 8601 date and time (with its UTC offset) of the next likely restock AFTER the given 'Now'. When there's any
+          "pattern": "the usual pattern in a few words, e.g. '{{t:2026-11-19T16:00:00Z|weekly}}, every 1–2 weeks', or null if none is known",
+          "nextLikely": "ISO 8601 date and time in UTC (ending in Z) of the next likely restock AFTER the given 'Now'. When there's any
                          pattern at all, even a rough one (a usual weekday and time, a usual gap since the last drop), give its next
                          occurrence after Now with low confidence rather than null; never a time that's already past. null only
                          when nothing at all is known",
           "confidence": "low | medium | high (high only when several independent sources agree)",
           "summary": "two or three sentences: what the recent reports say, which kinds of source, and how sure that is",
           "nearYou": "one or two sentences about stores near the owner's area (in-store or pickup restocks), or null if nothing found",
-          "restocks": [ "ISO 8601 date and time (with its UTC offset) of each past restock of this product at this store that you
+          "restocks": [ "ISO 8601 date and time in UTC (ending in Z) of each past restock of this product at this store that you
                         found a dated report of (a tracker's log entry, a dated post), last 6 months, oldest first; up to 40; [] if none" ],
           "sources": [ { "title": "…", "url": "https://…" } ]
         }
@@ -275,7 +279,7 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         var profile = await settingsStore.GetProfileAsync(ct);
         var home = StoreRegion.For(profile.Country, settings.Currency);
         var domain = FindPagesController.Domain(url);
-        var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, Zone(settings.TimeZone));
+        var now = DateTimeOffset.UtcNow;
         // Where the owner is: the city, province and the start of the postal code (its area), never the street.
         var city = profile.City.Trim();
         var province = profile.Province.Trim();
@@ -285,11 +289,11 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         var question = $"""
             Store: {FindPagesController.NameFor(url)} ({domain}){(home != null ? $", in {home.Name}" : "")}. Product: {product.Name} (the product page: {url}).
             The owner is in: {(area.Length > 0 ? area : "(not set)")}.
-            Now: {now:dddd yyyy-MM-dd HH:mm} ({settings.TimeZone}). When does this store usually restock it, and when is the next restock likely,
+            Now: {now:dddd yyyy-MM-dd HH:mm} UTC. When does this store usually restock it, and when is the next restock likely,
             online and at its stores near the owner?
             """;
         var near = new SearchLocation(home?.Code switch { null => null, "uk" => "GB", var c => c.ToUpperInvariant() },
-            province.Length > 0 ? province : null, city.Length > 0 ? city : null, settings.TimeZone);
+            province.Length > 0 ? province : null, city.Length > 0 ? city : null, null);
         var row = await db.RestockInsights.FirstOrDefaultAsync(x => x.ProductId == productId && x.Domain == domain, ct);
         if (row == null)
         {
@@ -449,9 +453,6 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         };
     }
 
-    public static TimeZoneInfo Zone(string id) =>
-        TimeZoneInfo.TryFindSystemTimeZoneById(id, out var z) ? z : TimeZoneInfo.TryFindSystemTimeZoneById("America/Toronto", out var t) ? t : TimeZoneInfo.Utc;
-
     private static DateTimeOffset NextWeekday(DayOfWeek day, double hour, TimeZoneInfo zone, DateTimeOffset now)
     {
         var local = TimeZoneInfo.ConvertTime(now, zone);
@@ -481,7 +482,10 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         var share = (double)byDay.Count() / local.Count;
         var hour = Math.Round(Median(byDay.Select(l => l.Hour + l.Minute / 60.0).ToList()) * 4) / 4;
         if (share >= 0.5 && local.Count >= 3)
-            return (NextWeekday(byDay.Key, hour, zone, now), $"mostly {byDay.Key}s, around {Clock(hour)}");
+        {
+            var weekly = NextWeekday(byDay.Key, hour, zone, now);
+            return (weekly, $"mostly {Times.At(weekly, "weekly")}");
+        }
         var gap = Math.Max(Median(restocks.Zip(restocks.Skip(1), (a, b) => (b - a).TotalDays).ToList()), 1);
         var next = restocks[^1].AddDays(gap);
         while (next < now)
@@ -512,23 +516,10 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         return s.Count % 2 == 1 ? s[s.Count / 2] : (s[s.Count / 2 - 1] + s[s.Count / 2]) / 2;
     }
 
-    private static string Clock(double hour)
-    {
-        var h = (int)Math.Floor(hour);
-        var m = (int)Math.Round((hour - h) * 60 / 15) * 15;
-        if (m == 60)
-            (h, m) = (h + 1, 0);
-        return $"{h % 24:00}:{m:00}";
-    }
-
     private static string Days(double d) => d < 1.5 ? "day" : d < 10 ? $"{d:0} days" : $"{d / 7:0.#} weeks";
 
-    private static string Format(DateTimeOffset local, DateTimeOffset now, TimeZoneInfo zone)
-    {
-        var today = TimeZoneInfo.ConvertTime(now, zone).Date;
-        var day = local.Date == today ? "Today" : local.Date == today.AddDays(1) ? "Tomorrow" : local.ToString("ddd MMM d", CultureInfo.InvariantCulture);
-        return $"{day}, around {local:HH:mm}";
-    }
+    /// <summary>When, as a marker the site shows as "Today, around 7:00 AM" in the viewer's time.</summary>
+    private static string Format(DateTimeOffset at, DateTimeOffset now, TimeZoneInfo zone) => Times.At(at, "when");
 
     private static string? Str(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && v.GetString() is { Length: > 0 } s ? s.Trim() : null;
