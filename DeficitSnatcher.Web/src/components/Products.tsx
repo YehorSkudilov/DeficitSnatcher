@@ -18,18 +18,29 @@ const blank: ProductInput = {
   quantityPerOrder: 1,
   requiredKeywords: "",
   excludedKeywords: "",
+  autoBuyEnabled: false,
 };
 
 /** Every product, each with its range and pages: #products. */
 export function Products() {
-  const products = useData(() => api.get<Product[]>("/api/products"), []);
+  const products = useData(() => api.get<Product[]>("/api/products"), [], 5000);
   const sites = useData(() => api.get<Site[]>("/api/sites"), [], 5000);
   const settings = useData(() => api.get<Settings>("/api/settings"), []);
   const now = useNow();
   const fold = useCollapsed();
+  const pauseAction = useAction();
+  const [cooldowns, setCooldowns] = useState<Record<number, number>>({});
   const currency = settings.data?.currency ?? "CAD";
   const [checked, setChecked] = useState<Record<number, { ok: boolean; text: string }>>({});
   const forecasts = useData(() => api.get<Record<number, RestockForecast>>("/api/restock/product/0"), [], 60000);
+  const setCheckingPaused = async (id: number, paused: boolean, cooldownMinutes?: number) => {
+    const updated = await pauseAction.run(() => api.post<Product>(`/api/products/${id}/checking`, { paused, cooldownMinutes }));
+    if (updated) await products.reload();
+  };
+  const setAutoBuy = async (id: number, enabled: boolean) => {
+    const updated = await pauseAction.run(() => api.post<Product>(`/api/products/${id}/auto-buy`, { enabled }));
+    if (updated) await products.reload();
+  };
 
   return (
     <div className="stack" style={{ gap: 16 }}>
@@ -47,16 +58,20 @@ export function Products() {
       {products.data?.length === 0 && <div className="card muted">No products yet.</div>}
       {(products.data?.length ?? 0) > 1 && (
         <div className="row" style={{ justifyContent: "flex-end" }}>
-          <button className="btn small ghost" onClick={() => fold.setAll((products.data ?? []).map((p) => p.id), !fold.any)}>
-            {fold.any ? "Expand all" : "Collapse all"}
+          <button className="btn small ghost" onClick={() => {
+            const ids = (products.data ?? []).map((p) => p.id);
+            fold.setAll(ids, fold.allExpanded(ids));
+          }}>
+            {fold.allExpanded((products.data ?? []).map((p) => p.id)) ? "Collapse all" : "Expand all"}
           </button>
         </div>
       )}
       {products.data?.map((p) => (
-        <div className="card" key={p.id}>
+        <div className="card" key={p.id} onClick={fold.isCollapsed(p.id) ? () => go(`product/${p.id}`) : undefined} style={fold.isCollapsed(p.id) ? { cursor: "pointer" } : undefined}>
           <div className="card-head" style={fold.isCollapsed(p.id) ? { marginBottom: 0 } : undefined}>
-            <a className="row" href={`#product/${p.id}`} style={{ color: "inherit", textDecoration: "none" }}>
+            <div className="row" style={{ gap: 8 }}>
               <CollapseButton collapsed={fold.isCollapsed(p.id)} onClick={() => fold.toggle(p.id)} />
+              <a className="row" href={`#product/${p.id}`} style={{ color: "inherit", textDecoration: "none" }}>
               <h2>{p.name}</h2>
               {!p.enabled && <span className="badge">Off</span>}
               <span className="badge info">
@@ -65,8 +80,10 @@ export function Products() {
               <span className="badge">
                 Bought {p.bought}/{p.maxQuantity}
               </span>
-            </a>
-            <div className="row">
+              {p.autoBuyEnabled && <span className="badge bad">Auto-buy</span>}
+              </a>
+            </div>
+            <div className="row" onClick={(e) => e.stopPropagation()}>
               <CheckAllButton
                 productId={p.id}
                 count={(sites.data ?? []).filter((s) => s.productId === p.id).length}
@@ -81,8 +98,21 @@ export function Products() {
               </a>
             </div>
           </div>
+          <div className="product-controls" onClick={(e) => e.stopPropagation()}>
+            <Check label="Scheduled checks" checked={!p.checkingPaused} disabled={pauseAction.busy} onChange={(enabled) => void setCheckingPaused(p.id, !enabled)} />
+            <Check label="Auto-buy this product" checked={p.autoBuyEnabled} disabled={pauseAction.busy || !p.enabled} onChange={(enabled) => void setAutoBuy(p.id, enabled)} />
+            <div className="row product-pause-controls">
+              <span className="small muted">Pause for</span>
+              <NumberInput value={cooldowns[p.id] ?? 30} min={1} onChange={(v) => setCooldowns((old) => ({ ...old, [p.id]: Math.max(1, Math.min(10080, v ?? 30)) }))} />
+              <span className="small muted">minutes</span>
+              <button className="btn small" disabled={pauseAction.busy} onClick={() => void setCheckingPaused(p.id, true, cooldowns[p.id] ?? 30)}>Pause</button>
+              <button className="btn small ghost" disabled={pauseAction.busy || p.checkingPaused && !p.checkingResumeAt} onClick={() => void setCheckingPaused(p.id, true)}>Turn off indefinitely</button>
+              {p.checkingPaused && <span className="small muted">{p.checkingResumeAt ? `Paused until ${new Date(p.checkingResumeAt).toLocaleString()}` : "Paused indefinitely"}</span>}
+            </div>
+          </div>
+          <ErrorNote error={pauseAction.error} />
           {fold.isCollapsed(p.id) ? (
-            <PagesSummary sites={(sites.data ?? []).filter((s) => s.productId === p.id)} />
+            <a className="product-summary-link" href={`#product/${p.id}`}><PagesSummary sites={(sites.data ?? []).filter((s) => s.productId === p.id)} /></a>
           ) : (
             <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={currency} now={now} onChanged={() => void sites.reload()} results={checked} forecasts={forecasts.data ?? undefined} />
           )}
@@ -207,6 +237,7 @@ function ProductForm({
     quantityPerOrder: initial.quantityPerOrder,
     requiredKeywords: initial.requiredKeywords,
     excludedKeywords: initial.excludedKeywords,
+    autoBuyEnabled: initial.autoBuyEnabled,
   });
   const [saved, setSaved] = useState(false);
   const save = useAction();
@@ -238,7 +269,9 @@ function ProductForm({
           )}
         </div>
         <Check label="Enabled" checked={p.enabled} onChange={(enabled) => set({ enabled })} />
+        <Check label="Auto-buy this product" checked={p.autoBuyEnabled} onChange={(autoBuyEnabled) => set({ autoBuyEnabled })} />
       </div>
+      <p className="small muted">When this product matches, checkout starts automatically. The phone alarm still rings at the same time; dismissing it opens the store or cart.</p>
 
       <div className="fields">
         <Field label="Name">

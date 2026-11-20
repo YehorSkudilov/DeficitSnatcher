@@ -162,12 +162,13 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             await followUp.MaybeRelearnAsync(site.Id, $"{site.UnreadableCount} checks in a row found {(result.Price == null ? "no price" : "no stock")}");
 
         var money = $"{settings.Currency}";
+        Task? stockAlert = null;
         if (verdict.Match && !before.Match)
         {
             var text = $"{product.Name} is IN STOCK at {site.Name} for {verdict.TotalPrice:0.00} {money} (your range {product.MinPrice:0.00}–{product.MaxPrice:0.00}).";
             // The phone rings first: every second counts.
+            stockAlert = notifier.NotifyAsync(NotifyKind.InStock, EventLevel.Good, text, site.Id, site.Url);
             await alarms.RaiseAsync(product.Name, site.Name, verdict.TotalPrice, site.Url, text, site.Id);
-            await notifier.NotifyAsync(NotifyKind.InStock, EventLevel.Good, text, site.Id, site.Url);
         }
         // Came into stock, but not in the range: worth knowing (e.g. the price went up). Never for going out of stock.
         else if (inStock && previousInStock != true && !firstScan)
@@ -183,9 +184,9 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
 
         string? buyMessage = null;
         int? purchaseId = null;
-        if (verdict.Match && !site.AutoBuy)
-            scan.Action = "Auto-buy is off for this site: only notified.";
-        else if (verdict.Match && site.AutoBuy && product.Enabled)
+        if (verdict.Match && !product.AutoBuyEnabled)
+            scan.Action = "Auto-buy is off for this product: only notified.";
+        else if (verdict.Match && product.AutoBuyEnabled && product.Enabled)
         {
             var trigger = $"{(manual ? "Check now" : "Scheduled check")} #{scan.Id} at {now:yyyy-MM-dd HH:mm:ss} UTC: {verdict.Reason}"
                 + $"\nListing: {result.Title} · price {result.Price:0.00}{(site.ShippingCost > 0 ? $" + {site.ShippingCost:0.00} shipping" : "")}"
@@ -199,6 +200,8 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             if (!outcome.Started && !before.Match)
                 await notifier.LogAsync(EventLevel.Warning, $"Not buying at {site.Name}: {outcome.Message}", site.Id);
         }
+        if (stockAlert != null)
+            await stockAlert;
         if (scan.Action != null)
             await db.SaveChangesAsync(CancellationToken.None);
         return new(result, verdict, null, buyMessage, scan.Id, purchaseId);

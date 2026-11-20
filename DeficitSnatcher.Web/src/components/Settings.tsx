@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api, type Profile, type Settings } from "@/lib/api";
-import { Check, ErrorNote, Field, NumberInput, useAction, useData } from "./ui";
+import { ErrorNote, Field, NumberInput, useAction, useData } from "./ui";
 
 export function SettingsPage() {
   const loaded = useData(() => api.get<Settings>("/api/settings"), []);
@@ -13,41 +13,8 @@ export function SettingsPage() {
       </div>
       <ErrorNote error={loaded.error} />
       <AndroidApp />
-      {loaded.data && <AutomaticChecking />}
       {loaded.data && <SettingsForm initial={loaded.data} />}
       <ProfileForm />
-    </div>
-  );
-}
-
-function AutomaticChecking() {
-  const loaded = useData(() => api.get<Settings>("/api/settings"), [], 5000);
-  const action = useAction();
-  const [cooldown, setCooldown] = useState(30);
-  const s = loaded.data;
-
-  const setEnabled = async (enabled: boolean) => {
-    const result = await action.run(() => api.post<Settings>("/api/settings/tracking", { enabled, cooldownMinutes: cooldown }));
-    if (result) loaded.setData(result);
-  };
-
-  return (
-    <div className="card stack">
-      <h2>Automatic checking</h2>
-      <Check
-        label="Check pages on schedule"
-        checked={s?.trackingEnabled ?? true}
-        onChange={(enabled) => void setEnabled(enabled)}
-      />
-      <Field label="Pause for (minutes)" hint="When switched off, automatic checking resumes after this cooldown. Manual Check now remains available.">
-        <NumberInput value={cooldown} min={1} onChange={(v) => setCooldown(Math.max(1, Math.min(10080, v ?? 30)))} />
-      </Field>
-      {s && !s.trackingEnabled && (
-        <div className="small muted">
-          Paused{s.trackingResumeAt ? ` until ${new Date(s.trackingResumeAt).toLocaleString()}; it will resume automatically.` : "."}
-        </div>
-      )}
-      <ErrorNote error={action.error || loaded.error} />
     </div>
   );
 }
@@ -87,7 +54,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
         >
           <NumberInput value={Math.round(s.defaultIntervalSeconds / 60)} min={1} onChange={(v) => set({ defaultIntervalSeconds: Math.max(1, v ?? 3) * 60 })} />
         </Field>
-        <div className="small muted">Auto-buy is the switch on the Dashboard. The Android app rings for every match.</div>
+        <div className="small muted">Pause or resume scheduled checks on each product card. Auto-buy is also set per product; the phone alarm still rings for in-range matches.</div>
       </div>
 
       <div className="card stack">
@@ -99,7 +66,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
         </div>
         {testResult && <pre className="log">{testResult}</pre>}
         <p className="muted small" style={{ margin: 0 }}>
-          Emailed: matches (in stock in your range), purchases, failed checkouts and pages that keep failing. Set up for IONOS mail by default:
+          Emailed: products in stock in your price range and completed checkouts. Set up for IONOS mail by default:
           the mailbox&apos;s full address as the username and its password.
         </p>
         <div className="fields">

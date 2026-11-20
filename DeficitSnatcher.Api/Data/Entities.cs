@@ -9,6 +9,12 @@ public class Product
     public int Id { get; set; }
     public string Name { get; set; } = "";
     public bool Enabled { get; set; } = true;
+    /// <summary>Pause scheduled checks for this product, independently of whether it is enabled for matching/buying.</summary>
+    public bool CheckingPaused { get; set; }
+    /// <summary>When a timed pause ends. Null means the pause is indefinite.</summary>
+    public DateTimeOffset? CheckingResumeAt { get; set; }
+    /// <summary>Try the configured checkout when this product matches; the phone alarm still rings.</summary>
+    public bool AutoBuyEnabled { get; set; }
 
     /// <summary>Lowest price that's believable: anything under it is taken as a wrong listing (accessory, scam, parse
     /// error) and never bought.</summary>

@@ -1,31 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { api, type RestockForecast, type CheckAllItem, type Dashboard as DashboardData, type ProbeResponse, type Product, type Settings, type Site } from "@/lib/api";
+import { api, type RestockForecast, type CheckAllItem, type Dashboard as DashboardData, type ProbeResponse, type Product, type Site } from "@/lib/api";
 import { ago, dateTime, host, money, until } from "@/lib/format";
-import { ErrorNote, LevelDot, PurchaseBadge, StockBadge, useAction, useCollapsed, useData, useNow, CollapseButton, PagesSummary } from "./ui";
+import { Check, ErrorNote, LevelDot, StockBadge, useAction, useCollapsed, useData, useNow, CollapseButton, PagesSummary } from "./ui";
 import { go } from "./App";
 
 export function Dashboard() {
   const dash = useData(() => api.get<DashboardData>("/api/dashboard"), [], 5000);
   const sites = useData(() => api.get<Site[]>("/api/sites"), [], 5000);
   const products = useData(() => api.get<Product[]>("/api/products"), [], 15000);
-  const arm = useAction();
   const now = useNow();
   const fold = useCollapsed();
+  const autoBuyAction = useAction();
   const d = dash.data;
   const [checked, setChecked] = useState<Record<number, RowResult>>({});
   const forecasts = useData(() => api.get<Record<number, RestockForecast>>("/api/restock/product/0"), [], 60000);
 
-  const setArmed = async (armed: boolean) => {
-    if (armed && !confirm("Turn auto-buy on? Matches in your price range will be ordered and paid for.")) return;
-    const s = await arm.run(() => api.post<Settings>("/api/settings/arm", { armed }));
-    if (s) void dash.reload();
-  };
-
   const refresh = () => {
     void sites.reload();
     void dash.reload();
+  };
+  const setAutoBuy = async (id: number, enabled: boolean) => {
+    const updated = await autoBuyAction.run(() => api.post<Product>(`/api/products/${id}/auto-buy`, { enabled }));
+    if (updated) await products.reload();
   };
 
   return (
@@ -36,25 +34,10 @@ export function Dashboard() {
           <CheckAllButton count={sites.data?.length ?? 0} currency={d?.currency} onDone={(items) => (setChecked(rowResults(items, d?.currency)), refresh())} />
         </div>
       </div>
-      <ErrorNote error={dash.error || arm.error} />
-
-      {d && (
-        <div className={`arm ${d.autoBuyArmed ? "on" : ""}`}>
-          <div className="stack" style={{ gap: 4 }}>
-            <h2>{d.autoBuyArmed ? "Auto-buy on" : "Auto-buy off"}</h2>
-            <div className="muted small">
-              {d.autoBuyArmed
-                ? "A page in stock in your price range is bought right away (pages with auto-buy on); if it can't, you're alerted."
-                : "Pages are watched and the app rings for matches, but nothing is bought."}
-            </div>
-          </div>
-          <button className={`toggle ${d.autoBuyArmed ? "on" : ""}`} aria-label="Arm auto-buy" disabled={arm.busy} onClick={() => setArmed(!d.autoBuyArmed)} />
-        </div>
-      )}
+      <ErrorNote error={dash.error || autoBuyAction.error} />
 
       {d && (
         <div className="grid stats">
-          <Stat label="Sites watched" value={`${d.sitesEnabled}/${d.sites}`} />
           <Stat label="In stock now" value={d.sitesInStock} tone={d.sitesInStock > 0 ? "good" : undefined} />
           <Stat label="Failing" value={d.sitesFailing} tone={d.sitesFailing > 0 ? "bad" : undefined} />
           <Stat label="Checks, last hour" value={d.checksLastHour} />
@@ -63,10 +46,11 @@ export function Dashboard() {
       )}
 
       {products.data?.map((p) => (
-        <div className="card" key={p.id}>
+        <div className="card" key={p.id} onClick={fold.isCollapsed(p.id) ? () => go(`product/${p.id}`) : undefined} style={fold.isCollapsed(p.id) ? { cursor: "pointer" } : undefined}>
           <div className="card-head" style={fold.isCollapsed(p.id) ? { marginBottom: 0 } : undefined}>
-            <div className="row" style={{ cursor: "pointer" }} onClick={() => fold.toggle(p.id)}>
+            <div className="row" style={{ gap: 8 }}>
               <CollapseButton collapsed={fold.isCollapsed(p.id)} onClick={() => fold.toggle(p.id)} />
+              <a className="row product-card-title" href={`#product/${p.id}`}>
               <h2>{p.name}</h2>
               {!p.enabled && <span className="badge">Off</span>}
               <span className="badge info">
@@ -75,33 +59,37 @@ export function Dashboard() {
               <span className="badge">
                 Bought {p.bought}/{p.maxQuantity}
               </span>
-            </div>
-            <div className="row">
-              <a className="btn small" href={`#product/${p.id}`}>
-                Edit range
+              {p.autoBuyEnabled && <span className="badge bad">Auto-buy</span>}
+              {p.checkingPaused && <span className="badge warn">Checks paused</span>}
               </a>
+            </div>
+            <div className="row" onClick={(e) => e.stopPropagation()}>
+              <Check label="Auto-buy" checked={p.autoBuyEnabled} disabled={autoBuyAction.busy || !p.enabled} onChange={(enabled) => void setAutoBuy(p.id, enabled)} />
               <a className="btn small primary" href={`#site/new?product=${p.id}`}>
                 Add page
               </a>
             </div>
           </div>
           {fold.isCollapsed(p.id) ? (
-            <PagesSummary sites={(sites.data ?? []).filter((s) => s.productId === p.id)} />
+            <a className="product-summary-link" href={`#product/${p.id}`}><PagesSummary sites={(sites.data ?? []).filter((s) => s.productId === p.id)} /></a>
           ) : (
             <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={d?.currency} now={now} onChanged={refresh} results={checked} forecasts={forecasts.data ?? undefined} />
           )}
         </div>
       ))}
 
-      <div className="grid two">
-        <div className="card">
+      <div className="card">
           <div className="card-head">
-            <h2>Recent activity</h2>
+            <h2>Alerts</h2>
           </div>
           <div className="events">
             {d?.recentEvents.length === 0 && <p className="muted">Nothing yet.</p>}
             {d?.recentEvents.map((e) => (
-              <div className="event" key={e.id}>
+              <div className="event clickable" key={e.id} onClick={() => {
+                const checkoutId = Number(e.message.match(/checkout #(\d+)/i)?.[1]);
+                if (checkoutId) go(`purchase/${checkoutId}`);
+                else if (e.siteId) go(`site/${e.siteId}`);
+              }} title="Open alert details and screenshots">
                 <LevelDot level={e.level} />
                 <span>{e.message}</span>
                 <span className="faint small" title={dateTime(e.at)}>
@@ -110,24 +98,6 @@ export function Dashboard() {
               </div>
             ))}
           </div>
-        </div>
-        <div className="card">
-          <div className="card-head">
-            <h2>Checkouts</h2>
-          </div>
-          {d?.recentPurchases.length === 0 && <p className="muted">No checkouts yet.</p>}
-          <div className="events">
-            {d?.recentPurchases.map((p) => (
-              <div className="event clickable" key={p.id} style={{ gridTemplateColumns: "auto 1fr auto", cursor: "pointer" }} onClick={() => go(`purchase/${p.id}`)}>
-                <PurchaseBadge status={p.status} />
-                <span className="ellipsis">
-                  {p.productName} at {p.siteName}, {money(p.price, d.currency)}
-                </span>
-                <span className="faint small">{ago(p.startedAt, now)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -250,10 +220,10 @@ export function SiteTable({
             <tr key={s.id} className="clickable" onClick={() => go(`site/${s.id}`)}>
               <td>
                 <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                  <StoreIcon name={s.name} url={s.url} />
                   <b className="ellipsis" style={{ maxWidth: 200 }}>
                     {s.name}
                   </b>
-                  {s.autoBuy && <span className="badge bad">Auto-buy</span>}
                   {!s.enabled && <span className="badge">Off</span>}
                 </div>
                 <div className="faint small">{host(s.url)}</div>
@@ -307,6 +277,21 @@ export function SiteTable({
 /** Check all's results by page, for the rows. */
 export function rowResults(items: CheckAllItem[], currency?: string): Record<number, RowResult> {
   return Object.fromEntries(items.map((i) => [i.siteId, describe(i, currency)]));
+}
+
+function StoreIcon({ name, url }: { name: string; url: string }) {
+  const [failed, setFailed] = useState(false);
+  let favicon = "";
+  try {
+    favicon = `${new URL(url).origin}/favicon.ico`;
+  } catch {
+    // A malformed URL can still use the initials fallback.
+  }
+  return (
+    <span className="store-icon" aria-label={`${name} store`}>
+      {favicon && !failed ? <img src={favicon} alt="" onError={() => setFailed(true)} /> : <span>{name.trim().slice(0, 1).toUpperCase()}</span>}
+    </span>
+  );
 }
 
 /** A page's next restock in a word: when, and how sure (details on its page). */

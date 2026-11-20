@@ -10,7 +10,7 @@ namespace DeficitSnatcher.Api.Tracking;
 /// never two of the same host closer than the settings allow, and backing off a site that keeps failing.
 /// </summary>
 public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsStore, CheckService checks, Ai.RestockForecaster forecaster,
-    ILogger<Tracker> log)
+    Backoff backoff, ILogger<Tracker> log)
     : BackgroundService
 {
     /// <summary>The most one check may take in all (page, reading it, saving): past it, the check is given up.</summary>
@@ -49,8 +49,13 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
     private readonly ConcurrentDictionary<string, byte> _hostRunning = new(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset _lastCleanup = DateTimeOffset.MinValue;
 
-    /// <summary>When each site is checked next (the dashboard shows it).</summary>
-    public DateTimeOffset? NextCheck(int siteId) => _nextDue.TryGetValue(siteId, out var at) ? at : null;
+    /// <summary>When each site is checked next (including a store's block cooldown).</summary>
+    public DateTimeOffset? NextCheck(int siteId)
+    {
+        var due = _nextDue.TryGetValue(siteId, out var at) ? at : (DateTimeOffset?)null;
+        var restingUntil = backoff.RestingUntil(siteId);
+        return due is null ? restingUntil : restingUntil is null ? due : due > restingUntil ? due : restingUntil;
+    }
 
     public bool IsChecking(int siteId) => _running.ContainsKey(siteId);
 
@@ -119,20 +124,17 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
             }
         }
 
-        if (!settings.TrackingEnabled)
-        {
-            if (settings.TrackingResumeAt is { } resumeAt && resumeAt <= DateTimeOffset.UtcNow)
-            {
-                settings = await settingsStore.UpdateAsync(s => s with { TrackingEnabled = true, TrackingResumeAt = null }, ct);
-                log.LogInformation("Scheduled checking resumed after its cooldown");
-            }
-            else
-                return;
-        }
+        var resumed = await db.Products
+            .Where(p => p.CheckingPaused && p.CheckingResumeAt != null && p.CheckingResumeAt <= DateTimeOffset.UtcNow)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(p => p.CheckingPaused, false)
+                .SetProperty(p => p.CheckingResumeAt, (DateTimeOffset?)null), ct);
+        if (resumed > 0)
+            log.LogInformation("Scheduled checking resumed for {ProductCount} product(s) after their cooldown", resumed);
 
         var sites = await db.Sites.AsNoTracking()
             .Where(s => s.Enabled && s.Product!.Enabled)
-            .Select(s => new { s.Id, s.Url, s.IntervalSeconds, s.LastCheckedAt, s.ConsecutiveErrors })
+            .Select(s => new { s.Id, s.Url, s.IntervalSeconds, s.LastCheckedAt, s.ConsecutiveErrors, s.Product!.CheckingPaused, s.Product.CheckingResumeAt })
             .ToListAsync(ct);
 
         var now = DateTimeOffset.UtcNow;
@@ -140,6 +142,22 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
         {
             if (_running.ContainsKey(site.Id))
                 continue;
+            if (site.CheckingPaused)
+            {
+                if (site.CheckingResumeAt is { } resumeAt)
+                    _nextDue[site.Id] = resumeAt;
+                else
+                    _nextDue.TryRemove(site.Id, out _);
+                continue;
+            }
+            // Don't wake the check service repeatedly just to have it skip a page during its block cooldown.
+            // Keep the displayed time aligned with the actual earliest scheduled retry.
+            if (backoff.RestingUntil(site.Id) is { } restingUntil)
+            {
+                var scheduled = _nextDue.GetValueOrDefault(site.Id, restingUntil);
+                _nextDue[site.Id] = scheduled > restingUntil ? scheduled : restingUntil;
+                continue;
+            }
             var interval = site.IntervalSeconds ?? settings.DefaultIntervalSeconds;
             // Around a likely restock (its forecast): every minute, so a drop isn't missed; the rest of the time, the usual pace.
             if (await RestockLikelyAsync(site.Id, now, ct))
@@ -187,7 +205,11 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
                 }
                 finally
                 {
-                    _nextDue[id] = DateTimeOffset.UtcNow + NextWait(interval, settings.JitterPercent, settings.SlowDownFailingPages ? errors : 0);
+                    var nextDue = DateTimeOffset.UtcNow + NextWait(interval, settings.JitterPercent, settings.SlowDownFailingPages ? errors : 0);
+                    // A block cooldown is the earliest retry time; retain a longer normal interval if one was configured.
+                    if (backoff.RestingUntil(id) is { } restingUntil && restingUntil > nextDue)
+                        nextDue = restingUntil;
+                    _nextDue[id] = nextDue;
                     _running.TryRemove(id, out _);
                     _hostRunning.TryRemove(host, out _);
                 }

@@ -103,10 +103,10 @@ export function Field({ label, hint, children }: { label: string; hint?: React.R
   );
 }
 
-export function Check({ label, checked, onChange }: { label: React.ReactNode; checked: boolean; onChange: (v: boolean) => void }) {
+export function Check({ label, checked, onChange, disabled }: { label: React.ReactNode; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
     <label className="check">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span>{label}</span>
     </label>
   );
@@ -192,13 +192,13 @@ export async function download(path: string, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const CollapsedKey = "ds.collapsedProducts";
+const ExpandedKey = "ds.expandedProducts.v2";
 
-/** Which products are folded up (remembered in this browser, shared by the Dashboard and Products). */
+/** Which products are expanded (remembered in this browser, shared by the Dashboard and Products). */
 export function useCollapsed() {
   const [ids, setIds] = useState<number[]>(() => {
     try {
-      return typeof localStorage === "undefined" ? [] : (JSON.parse(localStorage.getItem(CollapsedKey) ?? "[]") as number[]);
+      return typeof localStorage === "undefined" ? [] : (JSON.parse(localStorage.getItem(ExpandedKey) ?? "[]") as number[]);
     } catch {
       return [];
     }
@@ -206,16 +206,16 @@ export function useCollapsed() {
   const save = useCallback((next: number[]) => {
     setIds(next);
     try {
-      localStorage.setItem(CollapsedKey, JSON.stringify(next));
+      localStorage.setItem(ExpandedKey, JSON.stringify(next));
     } catch {
       // Not remembered, still works.
     }
   }, []);
   return {
-    isCollapsed: (id: number) => ids.includes(id),
+    isCollapsed: (id: number) => !ids.includes(id),
     toggle: (id: number) => save(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]),
-    setAll: (all: number[], collapsed: boolean) => save(collapsed ? all : []),
-    any: ids.length > 0,
+    setAll: (all: number[], collapsed: boolean) => save(collapsed ? [] : all),
+    allExpanded: (all: number[]) => all.length > 0 && all.every((id) => ids.includes(id)),
   };
 }
 
@@ -239,11 +239,12 @@ export function CollapseButton({ collapsed, onClick }: { collapsed: boolean; onC
 }
 
 /** One line for a folded product: its pages, how many are in stock. */
-export function PagesSummary({ sites }: { sites: Pick<Site, "lastInStock" | "enabled">[] }) {
+export function PagesSummary({ sites }: { sites: Pick<Site, "name" | "url" | "lastInStock" | "enabled">[] }) {
   const inStock = sites.filter((s) => s.lastInStock && s.enabled).length;
   return (
-    <div className="small muted">
-      {sites.length} page{sites.length === 1 ? "" : "s"}
+    <div className="small muted row" style={{ gap: 8 }}>
+      <span>{sites.length} page{sites.length === 1 ? "" : "s"}</span>
+      {sites.slice(0, 6).map((site) => <MiniStoreIcon key={site.url} name={site.name} url={site.url} />)}
       {inStock > 0 ? (
         <>
           {" · "}
@@ -253,5 +254,20 @@ export function PagesSummary({ sites }: { sites: Pick<Site, "lastInStock" | "ena
         " · none in stock"
       )}
     </div>
+  );
+}
+
+function MiniStoreIcon({ name, url }: { name: string; url: string }) {
+  const [failed, setFailed] = useState(false);
+  let favicon = "";
+  try {
+    favicon = `${new URL(url).origin}/favicon.ico`;
+  } catch {
+    // Use the initials fallback.
+  }
+  return (
+    <span className="store-icon mini" title={name}>
+      {favicon && !failed ? <img src={favicon} alt="" onError={() => setFailed(true)} /> : <span>{name.trim().slice(0, 1).toUpperCase()}</span>}
+    </span>
   );
 }

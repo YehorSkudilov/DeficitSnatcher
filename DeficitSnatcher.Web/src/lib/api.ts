@@ -87,10 +87,12 @@ export type Product = {
   excludedKeywords: string;
   bought: number;
   sites: number;
+  checkingPaused: boolean;
+  checkingResumeAt: string | null;
   createdAt: string;
 };
 
-export type ProductInput = Omit<Product, "id" | "bought" | "sites" | "createdAt">;
+export type ProductInput = Omit<Product, "id" | "bought" | "sites" | "checkingPaused" | "checkingResumeAt" | "createdAt">;
 
 export const SiteKinds = ["Auto", "Shopify", "Html", "Browser"] as const;
 export type SiteKind = (typeof SiteKinds)[number];
@@ -350,31 +352,23 @@ export type EventLevel = "Info" | "Good" | "Warning" | "Error";
 export type BotEvent = { id: number; at: string; level: EventLevel; siteId: number | null; siteName: string | null; message: string };
 
 export type Dashboard = {
-  autoBuyArmed: boolean;
   dryRun: boolean;
-  trackingEnabled: boolean;
   currency: string;
   totalBudget: number;
   spent: number;
-  sites: number;
-  sitesEnabled: number;
   sitesInStock: number;
   sitesFailing: number;
   checksLastHour: number;
   recentEvents: BotEvent[];
-  recentPurchases: Purchase[];
 };
 
 export type Settings = {
-  autoBuyArmed: boolean;
   dryRun: boolean;
   totalBudget: number;
   buyRetryMinutes: number;
   currency: string;
   timeZone: string;
   aiRestockForecast: boolean;
-  trackingEnabled: boolean;
-  trackingResumeAt: string | null;
   defaultIntervalSeconds: number;
   jitterPercent: number;
   slowDownFailingPages: boolean;

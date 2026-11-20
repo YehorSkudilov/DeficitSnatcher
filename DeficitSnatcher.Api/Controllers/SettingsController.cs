@@ -5,8 +5,6 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace DeficitSnatcher.Api.Controllers;
 
-public sealed record ArmRequest(bool Armed);
-public sealed record TrackingRequest(bool Enabled, int CooldownMinutes = 30);
 public sealed record NotificationTestResponse(bool Sent, List<string> Problems);
 
 /// <summary>The checkout profile as the web sees it: the card number and CVV are never sent back.</summary>
@@ -43,31 +41,7 @@ public sealed class SettingsController(SettingsStore store, Notifier notifier) :
     {
         if (DeficitSnatcher.Api.Tracking.StoreProxy.Validate(settings.ProxyUrl) is { } proxyError)
             return Problem(proxyError, statusCode: 400);
-        var before = await store.GetAsync(ct);
-        // General settings edits must not overwrite the separate auto-check pause control.
-        settings = settings with { TrackingEnabled = before.TrackingEnabled, TrackingResumeAt = before.TrackingResumeAt };
         var saved = await store.SaveAsync(settings, ct);
-        await LogArmChange(before, saved);
-        return saved;
-    }
-
-    [HttpPost("tracking")]
-    public async Task<BotSettings> Tracking(TrackingRequest request, CancellationToken ct)
-    {
-        DateTimeOffset? resumeAt = request.Enabled ? null : DateTimeOffset.UtcNow.AddMinutes(Math.Clamp(request.CooldownMinutes, 1, 10080));
-        var saved = await store.UpdateAsync(s => s with { TrackingEnabled = request.Enabled, TrackingResumeAt = resumeAt }, ct);
-        await notifier.LogAsync(request.Enabled ? EventLevel.Info : EventLevel.Warning,
-            request.Enabled ? "Automatic checking resumed." : $"Automatic checking paused until {resumeAt:yyyy-MM-dd HH:mm} UTC.");
-        return saved;
-    }
-
-    /// <summary>The dashboard's big switch.</summary>
-    [HttpPost("arm")]
-    public async Task<BotSettings> Arm(ArmRequest request, CancellationToken ct)
-    {
-        var before = await store.GetAsync(ct);
-        var saved = await store.UpdateAsync(s => s with { AutoBuyArmed = request.Armed }, ct);
-        await LogArmChange(before, saved);
         return saved;
     }
 
@@ -118,12 +92,4 @@ public sealed class SettingsController(SettingsStore store, Notifier notifier) :
         p.City, p.Province, p.PostalCode, p.Country, p.CardName, p.CardNumber.Length >= 4 ? p.CardNumber[^4..] : "",
         p.CardExpiryMonth, p.CardExpiryYear, "", p.CardCvv.Length > 0, false);
 
-    private async Task LogArmChange(BotSettings before, BotSettings after)
-    {
-        if (before.AutoBuyArmed != after.AutoBuyArmed || after.AutoBuyArmed && before.DryRun != after.DryRun)
-            await notifier.LogAsync(after.AutoBuyArmed ? EventLevel.Warning : EventLevel.Info,
-                after.AutoBuyArmed
-                    ? "Auto-buy on: matches will be bought."
-                    : "Auto-buy disarmed.");
-    }
 }

@@ -12,7 +12,11 @@ public sealed record ProductInput(
     int MaxQuantity,
     int QuantityPerOrder,
     string? RequiredKeywords,
-    string? ExcludedKeywords);
+    string? ExcludedKeywords,
+    bool AutoBuyEnabled = false);
+
+public sealed record ProductCheckingRequest(bool Paused, int? CooldownMinutes = null);
+public sealed record ProductAutoBuyRequest(bool Enabled);
 
 public sealed record ProductDto(
     int Id,
@@ -26,7 +30,10 @@ public sealed record ProductDto(
     string ExcludedKeywords,
     int Bought,
     int Sites,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    bool CheckingPaused,
+    DateTimeOffset? CheckingResumeAt,
+    bool AutoBuyEnabled);
 
 [ApiController]
 [Route("api/products")]
@@ -74,6 +81,33 @@ public sealed class ProductsController(AppDbContext db) : ControllerBase
         return await db.Products.Where(p => p.Id == id).ExecuteDeleteAsync(ct) == 0 ? NotFound() : NoContent();
     }
 
+    [HttpPost("{id:int}/checking")]
+    public async Task<ActionResult<ProductDto>> SetChecking(int id, ProductCheckingRequest request, CancellationToken ct)
+    {
+        var product = await db.Products.FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (product == null)
+            return NotFound();
+        product.CheckingPaused = request.Paused;
+        product.CheckingResumeAt = request.Paused && request.CooldownMinutes is > 0
+            ? DateTimeOffset.UtcNow.AddMinutes(Math.Clamp(request.CooldownMinutes.Value, 1, 10080))
+            : null;
+        await db.SaveChangesAsync(ct);
+        var sites = await db.Sites.CountAsync(s => s.ProductId == id, ct);
+        return ToDto(product, (await Bought(ct)).GetValueOrDefault(id), sites);
+    }
+
+    [HttpPost("{id:int}/auto-buy")]
+    public async Task<ActionResult<ProductDto>> SetAutoBuy(int id, ProductAutoBuyRequest request, CancellationToken ct)
+    {
+        var product = await db.Products.FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (product == null)
+            return NotFound();
+        product.AutoBuyEnabled = request.Enabled;
+        await db.SaveChangesAsync(ct);
+        var sites = await db.Sites.CountAsync(s => s.ProductId == id, ct);
+        return ToDto(product, (await Bought(ct)).GetValueOrDefault(id), sites);
+    }
+
     private Task<Dictionary<int, int>> Bought(CancellationToken ct) => db.Purchases
         .Where(p => p.Status == PurchaseStatus.Succeeded && !p.DryRun)
         .GroupBy(p => p.ProductId)
@@ -106,8 +140,10 @@ public sealed class ProductsController(AppDbContext db) : ControllerBase
         p.QuantityPerOrder = i.QuantityPerOrder;
         p.RequiredKeywords = (i.RequiredKeywords ?? "").Trim();
         p.ExcludedKeywords = (i.ExcludedKeywords ?? "").Trim();
+        p.AutoBuyEnabled = i.AutoBuyEnabled;
     }
 
     private static ProductDto ToDto(Product p, int bought, int sites) => new(p.Id, p.Name, p.Enabled, p.MinPrice, p.MaxPrice,
-        p.MaxQuantity, p.QuantityPerOrder, p.RequiredKeywords, p.ExcludedKeywords, bought, sites, p.CreatedAt);
+        p.MaxQuantity, p.QuantityPerOrder, p.RequiredKeywords, p.ExcludedKeywords, bought, sites, p.CreatedAt,
+        p.CheckingPaused, p.CheckingResumeAt, p.AutoBuyEnabled);
 }

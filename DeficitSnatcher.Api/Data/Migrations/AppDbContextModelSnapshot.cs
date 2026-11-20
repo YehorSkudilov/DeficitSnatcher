@@ -215,6 +215,15 @@ namespace DeficitSnatcher.Api.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<bool>("AutoBuyEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("CheckingPaused")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("CheckingResumeAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 

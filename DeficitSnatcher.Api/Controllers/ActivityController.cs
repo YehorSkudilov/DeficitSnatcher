@@ -46,19 +46,14 @@ public sealed record PurchaseDetailDto(
 public sealed record EventDto(long Id, DateTimeOffset At, EventLevel Level, int? SiteId, string? SiteName, string Message);
 
 public sealed record DashboardDto(
-    bool AutoBuyArmed,
     bool DryRun,
-    bool TrackingEnabled,
     string Currency,
     decimal TotalBudget,
     decimal Spent,
-    int Sites,
-    int SitesEnabled,
     int SitesInStock,
     int SitesFailing,
     int ChecksLastHour,
-    List<EventDto> RecentEvents,
-    List<PurchaseDto> RecentPurchases);
+    List<EventDto> RecentEvents);
 
 [ApiController]
 [Route("api")]
@@ -69,25 +64,23 @@ public sealed class ActivityController(AppDbContext db, SettingsStore settingsSt
     {
         var s = await settingsStore.GetAsync(ct);
         var sites = await db.Sites.AsNoTracking()
-            .Select(x => new { x.Enabled, ProductEnabled = x.Product!.Enabled, x.LastInStock, x.ConsecutiveErrors })
+            .Select(x => new { x.Enabled, x.LastInStock, x.ConsecutiveErrors })
             .ToListAsync(ct);
         var spent = (await db.Purchases.Where(p => p.Status == PurchaseStatus.Succeeded && !p.DryRun).Select(p => new { p.Price, p.Quantity }).ToListAsync(ct))
             .Sum(p => p.Price * p.Quantity);
         var hourAgo = DateTimeOffset.UtcNow.AddHours(-1);
+        var alerts = (await Events(new EventFilter { Limit = 100, Level = EventLevel.Good }, ct))
+            .Where(e => e.Message.StartsWith("BOUGHT ", StringComparison.Ordinal) || e.Message.Contains(" is IN STOCK at ", StringComparison.Ordinal))
+            .Take(15).ToList();
         return new DashboardDto(
-            s.AutoBuyArmed,
             s.DryRun,
-            s.TrackingEnabled,
             s.Currency,
             s.TotalBudget,
             spent,
-            sites.Count,
-            sites.Count(x => x.Enabled && x.ProductEnabled),
             sites.Count(x => x.Enabled && x.LastInStock == true),
             sites.Count(x => x.Enabled && x.ConsecutiveErrors > 0),
             await db.Scans.CountAsync(x => x.At >= hourAgo, ct),
-            await Events(new EventFilter { Limit = 15 }, ct),
-            await Purchases(new PurchaseFilter { Limit = 8 }, ct));
+            alerts);
     }
 
     // ---- Activity log ----

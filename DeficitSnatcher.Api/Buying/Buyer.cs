@@ -12,7 +12,7 @@ using Microsoft.Playwright;
 namespace DeficitSnatcher.Api.Buying;
 
 /// <summary>
-/// Buys: runs a site's checkout script in Chromium, after checking every limit (auto-buy armed, units left
+/// Buys: runs a site's checkout script in Chromium, after checking every limit (product auto-buy, units left
 /// to buy for the product, the total budget, the retry wait). The limits are checked and the purchase recorded under
 /// one lock, so two sites coming into stock together can't buy more than the product's limit between them.
 /// </summary>
@@ -27,8 +27,8 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
     public sealed record Outcome(bool Started, string Message, int? PurchaseId = null, PurchaseStatus? Status = null);
 
     /// <summary>
-    /// A check found the site in stock in range. <paramref name="manual"/>: started from the web (doesn't need
-    /// auto-buy armed or the site's AutoBuy, and ignores the retry wait). <paramref name="forceDryRun"/>: stop before
+    /// A check found the site in stock in range. <paramref name="manual"/>: started from the web (ignores the retry wait).
+    /// <paramref name="forceDryRun"/>: stop before
     /// the final steps whatever the settings say. <paramref name="trigger"/>: what led to it, kept with the checkout.
     /// </summary>
     public async Task<Outcome> BuyAsync(int siteId, decimal price, bool manual, bool forceDryRun, string trigger, CancellationToken ct,
@@ -56,10 +56,8 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
 
             if (!manual)
             {
-                if (!settings.AutoBuyArmed)
-                    return new(false, "Auto-buy isn't armed.");
-                if (!site.AutoBuy)
-                    return new(false, "Auto-buy is off for this site.");
+                if (!product.AutoBuyEnabled)
+                    return new(false, "Auto-buy is off for this product.");
                 if (site.LastBuyAttemptAt is { } last && now - last < TimeSpan.FromMinutes(settings.BuyRetryMinutes))
                     return new(false, $"Waiting before trying this site again (last try {(now - last).TotalMinutes:0} min ago, retry after {settings.BuyRetryMinutes}).");
             }
@@ -99,7 +97,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
             var context = new StringBuilder()
                 .AppendLine(trigger)
                 .AppendLine($"Mode: {(dryRun ? "dry run (stops before the final step)" : "REAL purchase")}{(manual ? ", started by hand from the web" : ", started automatically")}")
-                .AppendLine($"Auto-buy armed: {(settings.AutoBuyArmed ? "yes" : "no")} · site auto-buy: {(site.AutoBuy ? "on" : "off")}")
+                .AppendLine($"Product auto-buy: {(product.AutoBuyEnabled ? "on" : "off")}")
                 .AppendLine($"Price {price:0.00} {settings.Currency} · range {product.MinPrice:0.00}–{product.MaxPrice:0.00} · {quantity} per order")
                 .AppendLine($"Bought before: {bought} of {product.MaxQuantity} · spent {spent:0.00}{(settings.TotalBudget > 0 ? $" of budget {settings.TotalBudget:0.00}" : " (no budget)")}")
                 .AppendLine($"Page: {site.Url}")

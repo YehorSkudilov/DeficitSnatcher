@@ -1,4 +1,3 @@
-using System.Net.Http.Json;
 using DeficitSnatcher.Api.Data;
 using DeficitSnatcher.Api.Settings;
 
@@ -31,7 +30,7 @@ public enum NotifyKind
 /// Writes the activity log and emails what matters (when email is set up in Settings). Matches also ring the Android app
 /// (see Alerts).
 /// </summary>
-public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settingsStore, IHttpClientFactory httpFactory, IConfiguration config,
+public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settingsStore, IConfiguration config,
     ILogger<Notifier> log)
 {
     private readonly string _publicUrl = (config["App:PublicUrl"] ?? "").Trim().TrimEnd('/');
@@ -59,20 +58,16 @@ public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settings
     /// <param name="detailsUrl">The page on this site (a checkout's details); default: the store page's own page here.</param>
     public async Task NotifyAsync(NotifyKind kind, EventLevel level, string message, int? siteId = null, string? url = null, string? detailsUrl = null)
     {
+        // Only send user-facing alerts for a qualifying in-stock match or a completed purchase.
+        if (kind is not (NotifyKind.InStock or NotifyKind.Purchase))
+            return;
         await LogAsync(level, message, siteId);
         var s = await settingsStore.GetAsync();
         var wanted = kind switch
         {
             NotifyKind.InStock => s.NotifyInStock,
-            NotifyKind.InStockOutOfRange => s.NotifyInStockOutOfRange,
-            NotifyKind.PriceDrop => s.NotifyPriceDrop,
             NotifyKind.Purchase => s.NotifyPurchase,
-            NotifyKind.NotBought => s.NotifyNotBought,
-            NotifyKind.DryRun => s.NotifyDryRun,
-            NotifyKind.PageFailing => s.NotifyPageFailing ?? s.NotifyErrors,
-            NotifyKind.PageRecovered => s.NotifyPageRecovered ?? s.NotifyErrors,
-            NotifyKind.AiProblem => s.NotifyAiProblems ?? s.NotifyErrors,
-            _ => true,
+            _ => false,
         };
         if (wanted)
             await SendAsync(s, message, url, detailsUrl ?? (siteId is { } id ? Link($"site/{id}") : null));
@@ -83,27 +78,9 @@ public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settings
     {
         // The store link on its own line (tap to buy), then the details here.
         var text = message + (url == null ? "" : $"\nBuy: {url}") + (detailsUrl == null ? "" : $"\nDetails: {detailsUrl}");
-        var http = httpFactory.CreateClient(nameof(Notifier));
         var problems = new List<string>();
-
-        async Task Try(string channel, Func<Task<HttpResponseMessage>> send)
-        {
-            try
-            {
-                using var response = await send();
-                if (!response.IsSuccessStatusCode)
-                    problems.Add($"{channel}: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}".Trim());
-            }
-            catch (Exception e)
-            {
-                problems.Add($"{channel}: {e.Message}");
-            }
-        }
-
-        var tasks = new List<Task>();
         if (EmailReady(s))
-            tasks.Add(EmailAsync(s, message, url, detailsUrl, problems));
-        await Task.WhenAll(tasks);
+            await EmailAsync(s, message, url, detailsUrl, problems);
         foreach (var p in problems)
             log.LogWarning("Notification failed: {Problem}", p);
         return problems;

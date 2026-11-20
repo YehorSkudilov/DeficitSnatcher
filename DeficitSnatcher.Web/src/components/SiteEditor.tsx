@@ -297,18 +297,8 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
         </div>
         <div className="row" style={{ gap: 24 }}>
           <Check label="Enabled (checked on schedule)" checked={form.enabled} onChange={(enabled) => set({ enabled })} />
-          <Check
-            label={
-              <>
-                <b>Auto-buy</b> when it&apos;s a match (off: the app rings and you buy it yourself)
-              </>
-            }
-            checked={form.autoBuy}
-            onChange={(autoBuy) => set({ autoBuy })}
-          />
         </div>
         {id && <SessionLine siteId={id} />}
-        {form.autoBuy && settings.data && <AutoBuyNotice settings={settings.data} product={products.data?.find((p) => p.id === form.productId)} />}
       </div>
 
       <div className="card stack">
@@ -629,34 +619,6 @@ function History({ siteId, min, max, currency }: { siteId: number; min?: number;
         </select>
       </div>
       {chart}
-    </div>
-  );
-}
-
-/** What auto-buy on this page will do right now: real orders, or nothing (follows the Dashboard switch). */
-function AutoBuyNotice({ settings, product }: { settings: Settings; product?: Product }) {
-  const limits = product
-    ? `at most ${product.maxQuantity - product.bought} more ${product.name} (${product.bought} of ${product.maxQuantity} bought, ${product.quantityPerOrder} per order)` +
-      ""
-    : "up to the product's units in all";
-  if (!settings.autoBuyArmed)
-    return (
-      <div className="notice small">
-        <b>Auto-buy is off on the Dashboard:</b> when this page is in stock in range you&apos;re notified, but nothing is bought. Arm it on the
-        Dashboard to buy.
-      </div>
-    );
-  if (product && product.bought >= product.maxQuantity)
-    return (
-      <div className="notice good small">
-        <b>Armed, but done:</b> {product.bought} of {product.maxQuantity} {product.name} already bought, so nothing more is bought.
-        Raise &quot;Units to buy in all&quot; on the product to buy more.
-      </div>
-    );
-  return (
-    <div className="notice good small">
-      <b>Armed:</b> when this page is in stock in range, it&apos;s ordered and paid for right away, {limits}.
-      {" The AI checks the order (only this product, the right quantity, the total) before it's placed."}
     </div>
   );
 }
