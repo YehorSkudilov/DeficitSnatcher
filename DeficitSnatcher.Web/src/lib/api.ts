@@ -152,6 +152,8 @@ export type CheckAllItem = {
   buyMessage: string | null;
 };
 
+export type StoreAccount = { domain: string; email: string; hasPassword: boolean };
+
 export type StoreLogin = {
   domain: string;
   status: "signedIn" | "signedOut" | "humanCheck" | "error" | "unknown";

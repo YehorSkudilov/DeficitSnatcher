@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, type StoreLogin, type WorkerInfo } from "@/lib/api";
+import { api, type StoreAccount, type StoreLogin, type WorkerInfo } from "@/lib/api";
 import { ago, dateTime } from "@/lib/format";
 import { ErrorNote, useAction, useData, useNow } from "./ui";
 
@@ -32,6 +32,7 @@ function setupCode(site: string, key: string) {
 /** Every PC helper and the server: who's connected, what each has checked, and which stores each Chrome is signed in to. */
 export function Helpers() {
   const list = useData(() => api.get<WorkerInfo[]>("/api/runners"), [], 5000);
+  const accounts = useData(() => api.get<StoreAccount[]>("/api/store-accounts"), []);
   const versions = useData(() => api.get<{ latest: string | null; error: string | null }>("/api/runners/latest-version"), [], 600000);
   const helpers = list.data?.filter((w) => w.id != null) ?? [];
   const server = list.data?.find((w) => w.id == null);
@@ -53,9 +54,14 @@ export function Helpers() {
         </div>
       )}
       {helpers.map((h) => (
-        <HelperCard key={h.id} h={h} reload={list.reload} latest={versions.data?.latest ?? null} />
+        <HelperCard key={h.id} h={h} reload={list.reload} latest={versions.data?.latest ?? null} saved={(accounts.data ?? []).map((a) => a.domain)} />
       ))}
       {server && <ServerCard s={server} />}
+      <StoreAccounts
+        domains={[...new Set([...helpers.flatMap((h) => h.logins.map((l) => l.domain)), ...(accounts.data ?? []).map((a) => a.domain)])].sort()}
+        accounts={accounts.data ?? []}
+        reload={accounts.reload}
+      />
       <AddHelper first={helpers.length === 0} reload={list.reload} />
     </div>
   );
@@ -131,7 +137,7 @@ function VersionRow({ h, latest, onUpdate, busy, asked }: { h: WorkerInfo; lates
   );
 }
 
-function HelperCard({ h, reload, latest }: { h: WorkerInfo; reload: () => Promise<void>; latest: string | null }) {
+function HelperCard({ h, reload, latest, saved }: { h: WorkerInfo; reload: () => Promise<void>; latest: string | null; saved: string[] }) {
   const act = useAction();
   const [updateAsked, setUpdateAsked] = useState<string | null>(null);
   const update = async () => {
@@ -162,6 +168,18 @@ function HelperCard({ h, reload, latest }: { h: WorkerInfo; reload: () => Promis
     if (!confirm(`Remove ${h.name}? Its setup code stops working and it's disconnected now. To use that computer again, make a new code.`)) return;
     await act.run(() => api.del(`/api/runners/${id}`));
     await reload();
+  };
+  const [signingIn, setSigningIn] = useState<string | null>(null);
+  const signInForMe = async (l: StoreLogin) => {
+    let ok = false;
+    await act.run(async () => {
+      await api.post(`/api/runners/${id}/sign-in`, { domain: l.domain });
+      ok = true;
+    });
+    if (ok) {
+      setSigningIn(l.domain);
+      setTimeout(() => setSigningIn(null), 60000);
+    }
   };
   const login = async (l: StoreLogin) => {
     setOpened(null);
@@ -279,9 +297,20 @@ function HelperCard({ h, reload, latest }: { h: WorkerInfo; reload: () => Promis
                           onClick={() => setChecks(!storeOn(l.domain), l.domain)}
                         />
                       </td>
-                      <td style={{ textAlign: "right" }}>
+                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                        {saved.includes(l.domain) && l.status !== "signedIn" && (
+                          <button
+                            className="btn small primary"
+                            style={{ marginRight: 6 }}
+                            disabled={!h.connected || act.busy || signingIn === l.domain}
+                            title="Signs in with your saved sign-in for this store, in the background"
+                            onClick={() => signInForMe(l)}
+                          >
+                            {signingIn === l.domain ? "Signing in…" : "Sign in for me"}
+                          </button>
+                        )}
                         <button
-                          className={`btn small ${l.status === "signedOut" || l.status === "humanCheck" ? "primary" : ""}`}
+                          className={`btn small ${(l.status === "signedOut" || l.status === "humanCheck") && !saved.includes(l.domain) ? "primary" : ""}`}
                           disabled={!h.connected || act.busy}
                           title={h.connected ? "Opens the store in this helper's Chrome, in front" : "Not connected"}
                           onClick={() => login(l)}
@@ -416,6 +445,93 @@ deficitsnatcher uninstall     remove it`}</pre>
           First start: Windows may say &quot;Windows protected your PC&quot; (More info → Run anyway); a Mac may refuse it (right-click → Open).
         </div>
       </details>
+    </div>
+  );
+}
+
+/** Your sign-ins for the stores: a helper that finds itself signed out signs in with these (encrypted; never shown again). */
+function StoreAccounts({ domains, accounts, reload }: { domains: string[]; accounts: StoreAccount[]; reload: () => Promise<void> }) {
+  return (
+    <div className="card stack">
+      <div className="card-head" style={{ marginBottom: 0 }}>
+        <h2>Store sign-ins</h2>
+      </div>
+      <p className="muted small" style={{ margin: 0 }}>
+        Save your email and password for a store and a helper that finds itself signed out signs in by itself (at most every 6 hours, so a
+        wrong password can&apos;t lock your account), or when you press <b>Sign in for me</b>. If the store asks for a captcha or a code it
+        sent you, that page opens in a window on the helper&apos;s computer and you get an alert. Stored encrypted, like your card; the
+        password is never shown again.
+      </p>
+      {domains.length === 0 ? (
+        <div className="small faint">No stores yet.</div>
+      ) : (
+        <div className="stack" style={{ gap: 8 }}>
+          {domains.map((d) => (
+            <AccountRow key={d} domain={d} account={accounts.find((a) => a.domain === d)} reload={reload} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AccountRow({ domain, account, reload }: { domain: string; account?: StoreAccount; reload: () => Promise<void> }) {
+  const act = useAction();
+  const [email, setEmail] = useState(account?.email ?? "");
+  const [password, setPassword] = useState("");
+  const [saved, setSaved] = useState(false);
+  const save = async () => {
+    let ok = false;
+    await act.run(async () => {
+      await api.put(`/api/store-accounts/${encodeURIComponent(domain)}`, { email, password: password || null });
+      ok = true;
+    });
+    if (ok) {
+      setPassword("");
+      setSaved(true);
+      await reload();
+    }
+  };
+  const remove = async () => {
+    if (!confirm(`Forget your sign-in for ${domain}?`)) return;
+    await act.run(() => api.del(`/api/store-accounts/${encodeURIComponent(domain)}`));
+    setEmail("");
+    await reload();
+  };
+  return (
+    <div className="stack" style={{ gap: 4 }}>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <b className="small" style={{ minWidth: 160 }}>
+          {domain}
+        </b>
+        <input
+          type="email"
+          autoComplete="off"
+          placeholder="Email or username"
+          value={email}
+          onChange={(e) => (setEmail(e.target.value), setSaved(false))}
+          style={{ maxWidth: 240 }}
+        />
+        <input
+          type="password"
+          autoComplete="new-password"
+          placeholder={account?.hasPassword ? "Password (saved; type to change)" : "Password"}
+          value={password}
+          onChange={(e) => (setPassword(e.target.value), setSaved(false))}
+          style={{ maxWidth: 240 }}
+        />
+        <button className="btn small" disabled={act.busy || !email || (!password && !account?.hasPassword)} onClick={save}>
+          Save
+        </button>
+        {account && (
+          <button className="btn small ghost" disabled={act.busy} onClick={remove}>
+            Forget
+          </button>
+        )}
+        {account && !saved && <span className="badge good">Saved</span>}
+        {saved && <span className="badge good">Saved just now</span>}
+      </div>
+      <ErrorNote error={act.error} />
     </div>
   );
 }

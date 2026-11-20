@@ -16,7 +16,7 @@ public sealed record StoreLoginDto(string Domain, string Status, DateTimeOffset?
 /// page in that Chrome, in front). It never types a password.
 /// </summary>
 public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, BrowserPool browsers, Notifier notifier,
-    ILogger<LoginWatcher> log) : BackgroundService
+    Settings.SettingsStore settingsStore, ILogger<LoginWatcher> log) : BackgroundService
 {
     public static readonly TimeSpan Every = TimeSpan.FromHours(6);
 
@@ -154,7 +154,15 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
                     continue;
                 if (!hub.IsConnected(runnerId) || hub.IsSigningIn(runnerId))
                     return;
-                var (status, detail) = await CheckOneAsync(runnerId, AccountUrl(domain, site.Url), ct);
+                var url = AccountUrl(domain, site.Url);
+                var (status, detail) = await CheckOneAsync(runnerId, url, ct);
+                // Signed out, and you saved your sign-in for this store: it signs in (at most every 6 hours by itself, so a
+                // wrong password can't lock the account).
+                if (status == "signedOut" && await AccountForAsync(domain) != null && AutoAttemptAllowed(runnerId, domain))
+                {
+                    await SignInAsync(runnerId, domain, ct);
+                    continue;
+                }
                 await SaveAsync(runnerId, domain, status, detail, site.SiteId, site.Url);
             }
         }
@@ -280,7 +288,7 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
 
     private static string Cut(string s) => s.Length > 80 ? s[..80] + "…" : s;
 
-    private async Task SaveAsync(int runnerId, string domain, string status, string? detail, int siteId, string? pageUrl)
+    private async Task SaveAsync(int runnerId, string domain, string status, string? detail, int siteId, string? pageUrl, bool alert = true)
     {
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -303,7 +311,7 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         row.CheckedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
 
-        if (status == before)
+        if (status == before || !alert)
             return;
         var name = hub.NameOf(runnerId);
         var link = notifier.Link("helpers");
@@ -389,6 +397,153 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
             {
                 // Mid-navigation, a tab closing, Chrome restarting: look again.
             }
+        }
+    }
+
+    // ---- Signing in with your saved sign-in ----
+
+    private readonly ConcurrentDictionary<(int, string), DateTimeOffset> _autoTried = new();
+
+    private bool AutoAttemptAllowed(int runnerId, string domain)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (_autoTried.TryGetValue((runnerId, domain), out var at) && now - at < TimeSpan.FromHours(6))
+            return false;
+        _autoTried[(runnerId, domain)] = now;
+        return true;
+    }
+
+    private async Task<Settings.StoreAccount?> AccountForAsync(string domain) =>
+        (await settingsStore.GetStoreAccountsAsync()).FirstOrDefault(a => a.Domain == domain || domain.EndsWith("." + a.Domain, StringComparison.Ordinal));
+
+    private const string UserFields =
+        "input[type=email]:visible, input[autocomplete=username]:visible, input[autocomplete=email]:visible, input[name*=email i]:visible, "
+        + "input[id*=email i]:visible, input[name*=user i]:visible, input[name*=login i]:visible";
+
+    private const string CodeFields =
+        "input[autocomplete=one-time-code]:visible, input[name*=otp i]:visible, input[name*=code i]:visible, input[id*=code i]:visible";
+
+    /// <summary>
+    /// Signs the helper's Chrome in to the store with your saved sign-in: the store's sign-in page, your email, then your
+    /// password, like a password manager filling them in. It stops at anything that's yours to do (a captcha, a code sent to
+    /// you, a wrong password): that page opens in a window for you and you get an alert.
+    /// </summary>
+    public async Task SignInAsync(int runnerId, string domain, CancellationToken ct)
+    {
+        var stores = await StoresAsync();
+        stores.TryGetValue(domain, out var site);
+        var url = AccountUrl(domain, site.Url);
+        var account = await AccountForAsync(domain);
+        if (account == null)
+            return;
+        var name = hub.NameOf(runnerId);
+        var (ok, detail, stoppedAt) = await FillSignInAsync(runnerId, url, account, ct);
+        if (ok)
+        {
+            await SaveAsync(runnerId, domain, "signedIn", detail, site.SiteId, site.Url);
+            await notifier.LogAsync(EventLevel.Good, $"{name} signed in to {domain} with your saved sign-in.", site.SiteId);
+            return;
+        }
+        await SaveAsync(runnerId, domain, detail.Contains("human", StringComparison.OrdinalIgnoreCase) ? "humanCheck" : "signedOut", detail,
+            site.SiteId, site.Url, alert: false);
+        var shown = await hub.ShowAsync(runnerId, stoppedAt ?? url);
+        await notifier.NotifyAsync(NotifyKind.SignedOut, EventLevel.Warning,
+            $"{name} couldn't sign in to {domain} by itself: {detail} "
+            + (shown ? "The sign-in page is open in a window on that computer: finish it there." : "On the Helpers tab press Log in next to it to finish."),
+            site.SiteId, url, notifier.Link("helpers"));
+    }
+
+    private async Task<(bool Ok, string Detail, string? StoppedAt)> FillSignInAsync(int runnerId, string url, Settings.StoreAccount account,
+        CancellationToken ct)
+    {
+        IPage? page = null;
+        try
+        {
+            var context = await browsers.GetPcContextAsync(runnerId, ct);
+            page = await BrowserPool.OpenPcPageAsync(context, newWindow: false);
+            try
+            {
+                await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 45000 });
+            }
+            catch (TimeoutException)
+            {
+            }
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);
+            var passwordSent = false;
+            for (var step = 0; step < 4; step++)
+            {
+                var (status, detail) = await ReadAsync(page);
+                if (status == "signedIn")
+                    return (true, detail ?? "Signed in.", null);
+                if (status == "humanCheck")
+                    return (false, "the store wants you to prove you're human.", page.Url);
+                if (await Visible(page, CodeFields))
+                    return (false, "the store sent you a code to type in.", page.Url);
+
+                var password = page.Locator("input[type=password]:visible").First;
+                var user = page.Locator(UserFields).First;
+                var hasPassword = await Visible(page, "input[type=password]:visible");
+                if (hasPassword && passwordSent)
+                    return (false, "it still asks for the password (is the saved one right?).", page.Url);
+                if (await Visible(page, UserFields) && string.IsNullOrEmpty(await user.InputValueAsync()))
+                    await user.FillAsync(account.Email);
+                var before = page.Url;
+                if (hasPassword)
+                {
+                    await password.FillAsync(account.Password);
+                    await password.PressAsync("Enter");
+                    passwordSent = true;
+                }
+                else if (await Visible(page, UserFields))
+                    await user.PressAsync("Enter");
+                else if (page.Locator("a:visible, button:visible").Filter(new() { HasTextRegex = new System.Text.RegularExpressions.Regex(@"^\s*(sign|log)\s?in\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase) }).First is { } signIn
+                         && await signIn.CountAsync() > 0)
+                    await signIn.ClickAsync();
+                else
+                    return (false, "couldn't find where to sign in on its page.", page.Url);
+
+                await Task.Delay(TimeSpan.FromSeconds(4), ct);
+                // Enter didn't go anywhere: the form's own button.
+                if (page.Url == before && !passwordSent && !await Visible(page, "input[type=password]:visible")
+                    && page.Locator("button[type=submit]:visible, input[type=submit]:visible").First is { } submit && await submit.CountAsync() > 0)
+                {
+                    await submit.ClickAsync();
+                    await Task.Delay(TimeSpan.FromSeconds(4), ct);
+                }
+            }
+            var (final, finalDetail) = await ReadAsync(page);
+            return final == "signedIn" ? (true, finalDetail ?? "Signed in.", null) : (false, "it didn't get signed in.", page.Url);
+        }
+        catch (PcHelperException e)
+        {
+            return (false, e.Message, null);
+        }
+        catch (PlaywrightException e)
+        {
+            return (false, e.Message.Split('\n')[0], page?.Url);
+        }
+        finally
+        {
+            if (page != null)
+                try
+                {
+                    await page.CloseAsync();
+                }
+                catch (PlaywrightException)
+                {
+                }
+        }
+    }
+
+    private static async Task<bool> Visible(IPage page, string selector)
+    {
+        try
+        {
+            return await page.Locator(selector).CountAsync() > 0;
+        }
+        catch (PlaywrightException)
+        {
+            return false;
         }
     }
 }

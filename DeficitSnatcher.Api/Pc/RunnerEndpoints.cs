@@ -119,6 +119,15 @@ public static class RunnerEndpoints
                 ? Results.Accepted()
                 : Results.Conflict(new { error = $"{hub.NameOf(id)} is too old to update itself. Download it again from this tab and open it once (your setup is kept); after that it updates by itself." });
         });
+        // Sign in with your saved sign-in for that store, now (in the background; the store's row updates).
+        app.MapPost("/api/runners/{id:int}/sign-in", (int id, OpenLoginRequest request, LoginWatcher logins) =>
+        {
+            if (!hub.IsConnected(id))
+                return Results.Conflict(new { error = $"{hub.NameOf(id)} isn't connected." });
+            var domain = request.Domain.Trim().ToLowerInvariant();
+            _ = Task.Run(() => logins.SignInAsync(id, domain, CancellationToken.None));
+            return Results.Accepted();
+        });
         app.MapPost("/api/runners/{id:int}/logins/check", (int id, LoginWatcher logins) =>
         {
             if (!hub.IsConnected(id))
