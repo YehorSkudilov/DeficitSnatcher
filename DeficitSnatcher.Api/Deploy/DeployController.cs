@@ -156,7 +156,7 @@ public sealed class DeployController(DeployOptions options, ServerVersion versio
         if (!options.Configured)
             return Problem("Deploying from here is off: set the DEPLOY_GITHUB_TOKEN secret.", statusCode: 400);
         using var response = await Send(HttpMethod.Post, $"repos/{options.Repository}/actions/workflows/{options.Workflow}/dispatches",
-            new { @ref = options.Branch }, ct);
+            new { @ref = options.Branch, inputs = new { deploy = true } }, ct);
         return response.IsSuccessStatusCode ? NoContent() : Problem($"GitHub refused: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync(ct)}", statusCode: 502);
     }
 

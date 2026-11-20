@@ -38,12 +38,15 @@ export function localClockTime(iso: string | null | undefined): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-/** Common favicon and touch-icon locations on the store's own origin. */
+/** Try the store's own favicon and touch-icon paths before resolving custom paths through a favicon cache. */
 export function storeIconSources(url: string): string[] {
   try {
     const origin = new URL(url).origin;
-    return ["/favicon.ico", "/favicon.png", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"]
+    const directIcons = ["/favicon.ico", "/favicon.png", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"]
       .map((path) => `${origin}${path}`);
+    // Some stores declare a custom icon path and don't expose one at their root. Keep their own origin first,
+    // then ask Google's favicon cache to resolve the store's published favicon before falling back to initials.
+    return [...directIcons, `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(origin)}&sz=64`];
   } catch {
     return [];
   }
