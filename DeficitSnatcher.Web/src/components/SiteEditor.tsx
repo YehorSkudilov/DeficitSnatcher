@@ -10,7 +10,6 @@ import {
   type HistoryPoint,
   type ProbeResponse,
   type AiStatus,
-  type RunnerStatus,
   type RestockForecast,
   type SetupSuggestion,
   type Product,
@@ -80,7 +79,6 @@ function toInput(s: Site): SiteInput {
     autoBuy: s.autoBuy,
     checkoutSteps: s.checkoutSteps,
     cookies: null,
-    runOnPc: s.runOnPc,
   };
 }
 
@@ -97,7 +95,6 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
   const action = useAction();
   const aiAction = useAction();
   const aiStatus = useData(() => api.get<AiStatus>("/api/ai/status"), []);
-  const runner = useData(() => api.get<RunnerStatus>("/api/runner/status"), [], 10000);
   const [suggestion, setSuggestion] = useState<SetupSuggestion | null>(null);
   const aiOn = !!aiStatus.data?.hasKey && !!aiStatus.data?.enabled;
   const aiOff = aiStatus.data && !aiOn ? (aiStatus.data.hasKey ? "The AI is turned off in Settings." : "The AI is off: add the OPENAI_API_KEY secret and redeploy.") : null;
@@ -127,7 +124,6 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
         autoBuy: false,
         checkoutSteps: [],
         cookies: null,
-        runOnPc: false,
       });
     }
   }, [id, site, products.data, productId, form]);
@@ -153,7 +149,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
   const aiSetup = async () => {
     setSuggestion(null);
     const r = await aiAction.run(() =>
-      api.post<SetupSuggestion>("/api/ai/setup", { url: form.url, productId: form.productId, siteId: id, cookies: form.cookies || null, runOnPc: form.runOnPc }),
+      api.post<SetupSuggestion>("/api/ai/setup", { url: form.url, productId: form.productId, siteId: id, cookies: form.cookies || null }),
     );
     if (!r) return;
     setSuggestion(r);
@@ -197,7 +193,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
     }
   };
 
-  const buy = async (dryRun: boolean) => {
+  const buy = async (dryRun = false) => {
     if (dirty) return setNotice({ tone: "warn", text: "Save first: the checkout runs the saved steps." });
     if (!dryRun && !confirm(`Run the checkout for REAL at ${site?.name}? This places an order at ${money((site?.lastPrice ?? 0) + (site?.shippingCost ?? 0), currency)}.`)) return;
     const r = await action.run(() => api.post<BuyOutcome>(`/api/sites/${id}/buy`, { dryRun }));
@@ -310,33 +306,8 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
             checked={form.autoBuy}
             onChange={(autoBuy) => set({ autoBuy })}
           />
-          <Check
-            label={
-              <>
-                <b>Run on my PC</b> (stores that block servers, like Walmart)
-              </>
-            }
-            checked={form.runOnPc}
-            onChange={(runOnPc) => set({ runOnPc })}
-          />
         </div>
-        {id && !form.runOnPc && <SessionLine siteId={id} />}
-        {form.runOnPc && runner.data && (
-          <div className={`notice small ${runner.data.connected ? "good" : "warn"}`}>
-            {runner.data.connected ? (
-              <>
-                Checked and bought in Chrome on the PC helper{runner.data.connectedCount > 1 ? "s" : ""} (
-                {runner.data.connectedCount > 1 ? `${runner.data.connectedCount} connected, taking turns` : <b>{runner.data.machine}</b>}). If the store asks you to prove you&apos;re human,
-                you get an alert: do it in that window and the bot carries on.
-              </>
-            ) : (
-              <>
-                The PC helper isn&apos;t connected, so this page is checked from the server for now (the store sometimes answers). Start the
-                helper on your computer: <a href="#helpers">Helpers</a>.
-              </>
-            )}
-          </div>
-        )}
+        {id && <SessionLine siteId={id} />}
         {form.autoBuy && settings.data && <AutoBuyNotice settings={settings.data} product={products.data?.find((p) => p.id === form.productId)} />}
       </div>
 
@@ -376,9 +347,8 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
         <div className="card stack">
           <h2>Try the checkout</h2>
           <p className="muted small">
-            A dry run goes through every step except the final ones (marked red), so you can see each step works without buying. The log and a
-            screenshot of every step open as soon as it starts. <b>Record checkout with AI</b>: ChatGPT goes through this store&apos;s checkout
-            itself (dry run, stopping before the order is placed) and the steps it takes are saved here.
+            <b>Record checkout with AI</b>: ChatGPT goes through this store&apos;s checkout itself, stopping before the order is placed, and the
+            steps it takes are saved here. <b>Buy now</b> places a real order. The log and a screenshot of every step open as soon as it starts.
             {aiOn && settings.data && (
               <>
                 {" "}
@@ -388,14 +358,11 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
             )}
           </p>
           <div className="row">
-            <button className="btn" disabled={action.busy || (form.checkoutSteps.length === 0 && !aiOn)} onClick={() => buy(true)}>
-              Dry-run checkout
-            </button>
             <button className="btn primary" disabled={!aiOn || aiAction.busy} title={aiOff ?? undefined} onClick={aiRecord}>
               ✨ Record checkout with AI
             </button>
             <button className="btn danger" disabled={action.busy || (form.checkoutSteps.length === 0 && !aiOn) || site?.lastPrice == null} onClick={() => buy(false)}>
-              Buy now for real
+              Buy now
             </button>
           </div>
         </div>
@@ -666,12 +633,12 @@ function History({ siteId, min, max, currency }: { siteId: number; min?: number;
   );
 }
 
-/** What auto-buy on this page will do right now: real orders, dry runs, or nothing (follows Settings and the Dashboard switch). */
+/** What auto-buy on this page will do right now: real orders, or nothing (follows the Dashboard switch). */
 function AutoBuyNotice({ settings, product }: { settings: Settings; product?: Product }) {
   const limits = product
     ? `at most ${product.maxQuantity - product.bought} more ${product.name} (${product.bought} of ${product.maxQuantity} bought, ${product.quantityPerOrder} per order)` +
-      (settings.totalBudget > 0 ? `, within the total budget of ${money(settings.totalBudget, settings.currency)}` : "")
-    : "up to the product's units in all and the total budget";
+      ""
+    : "up to the product's units in all";
   if (!settings.autoBuyArmed)
     return (
       <div className="notice small">
@@ -679,24 +646,17 @@ function AutoBuyNotice({ settings, product }: { settings: Settings; product?: Pr
         Dashboard to buy.
       </div>
     );
-  if (settings.dryRun)
-    return (
-      <div className="notice warn small">
-        <b>Armed, in dry run:</b> when this page is in stock in range, the checkout runs up to placing the order, then stops. Nothing is
-        bought. Turn dry run off in Settings to buy for real.
-      </div>
-    );
   if (product && product.bought >= product.maxQuantity)
     return (
       <div className="notice good small">
-        <b>Armed for real, but done:</b> {product.bought} of {product.maxQuantity} {product.name} already bought, so nothing more is bought.
+        <b>Armed, but done:</b> {product.bought} of {product.maxQuantity} {product.name} already bought, so nothing more is bought.
         Raise &quot;Units to buy in all&quot; on the product to buy more.
       </div>
     );
   return (
-    <div className="notice bad small">
-      <b>Armed for real:</b> when this page is in stock in range, it&apos;s ordered and paid for right away, {limits}.
-      {settings.aiEnabled && settings.aiCheckOrder && " The AI checks the order (only this product, the right quantity, the total) before it's placed."}
+    <div className="notice good small">
+      <b>Armed:</b> when this page is in stock in range, it&apos;s ordered and paid for right away, {limits}.
+      {" The AI checks the order (only this product, the right quantity, the total) before it's placed."}
     </div>
   );
 }

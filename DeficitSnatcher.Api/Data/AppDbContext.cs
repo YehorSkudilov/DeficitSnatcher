@@ -14,8 +14,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ScanSnapshot> ScanSnapshots => Set<ScanSnapshot>();
     public DbSet<AiCall> AiCalls => Set<AiCall>();
     public DbSet<RestockInsight> RestockInsights => Set<RestockInsight>();
-    public DbSet<RunnerKey> RunnerKeys => Set<RunnerKey>();
-    public DbSet<RunnerLogin> RunnerLogins => Set<RunnerLogin>();
     public DbSet<StoredValue> StoredValues => Set<StoredValue>();
     public DbSet<BrowserSession> BrowserSessions => Set<BrowserSession>();
 
@@ -83,28 +81,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Error).HasMaxLength(1000);
             e.HasOne<Scan>().WithOne().HasForeignKey<ScanSnapshot>(x => x.ScanId).OnDelete(DeleteBehavior.Cascade);
         });
-        b.Entity<RunnerKey>(e =>
-        {
-            e.HasIndex(x => x.KeyHash).IsUnique();
-            e.Property(x => x.Name).HasMaxLength(100);
-            e.Property(x => x.KeyHash).HasMaxLength(100);
-            e.Property(x => x.Machine).HasMaxLength(200);
-            e.Property(x => x.Browser).HasMaxLength(200);
-            e.Property(x => x.DisabledDomains).HasMaxLength(4000);
-        });
         b.Entity<BrowserSession>(e =>
         {
             e.HasKey(x => x.SiteId);
             e.Property(x => x.Engine).HasMaxLength(20);
             e.HasOne<Site>().WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
-        });
-        b.Entity<RunnerLogin>(e =>
-        {
-            e.HasIndex(x => new { x.RunnerId, x.Domain }).IsUnique();
-            e.Property(x => x.Domain).HasMaxLength(200);
-            e.Property(x => x.Status).HasMaxLength(20);
-            e.Property(x => x.Detail).HasMaxLength(500);
-            e.HasOne<RunnerKey>().WithMany().HasForeignKey(x => x.RunnerId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<RestockInsight>(e =>
         {

@@ -9,14 +9,10 @@ public sealed class SettingsStore(IServiceScopeFactory scopes, SecretBox box)
 {
     private const string SettingsKey = "settings";
     private const string ProfileKey = "checkout-profile";
-    private const string StoreLoginsKey = "store-logins";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private BotSettings? _settings;
     private readonly SemaphoreSlim _lock = new(1, 1);
-
-    /// <summary>Alerts only is on (from the settings in memory; false until they're first read).</summary>
-    public bool AlertsOnly => _settings?.AlertsOnly == true;
 
     public async Task<BotSettings> GetAsync(CancellationToken ct = default) =>
         _settings ??= (await ReadAsync<BotSettings>(SettingsKey, ct) ?? new BotSettings()).Normalized();
@@ -46,11 +42,6 @@ public sealed class SettingsStore(IServiceScopeFactory scopes, SecretBox box)
     public Task SaveProfileAsync(CheckoutProfile profile, CancellationToken ct = default) => WriteAsync(ProfileKey, profile, ct);
 
     /// <summary>Your sign-ins for the stores (encrypted, like the card): what helpers sign in with when they're signed out.</summary>
-    public async Task<List<StoreAccount>> GetStoreAccountsAsync(CancellationToken ct = default) =>
-        await ReadAsync<List<StoreAccount>>(StoreLoginsKey, ct) ?? [];
-
-    public Task SaveStoreAccountsAsync(List<StoreAccount> accounts, CancellationToken ct = default) => WriteAsync(StoreLoginsKey, accounts, ct);
-
     private async Task<T?> ReadAsync<T>(string key, CancellationToken ct)
     {
         using var scope = scopes.CreateScope();
@@ -72,7 +63,3 @@ public sealed class SettingsStore(IServiceScopeFactory scopes, SecretBox box)
         await db.SaveChangesAsync(ct);
     }
 }
-
-/// <summary>Your account at a store (domain, e.g. walmart.ca). <see cref="SignInUrl"/>: its sign-in page if you gave it;
-/// <see cref="LearnedSignInUrl"/>: the one a helper last signed in on (found by itself, or by the AI).</summary>
-public sealed record StoreAccount(string Domain, string Email, string Password, string? SignInUrl = null, string? LearnedSignInUrl = null);

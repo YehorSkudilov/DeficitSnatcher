@@ -24,18 +24,12 @@ public enum NotifyKind
     PageRecovered,
     /// <summary>The AI couldn't look at, read or fix a page (or thinks it's the wrong page now).</summary>
     AiProblem,
-    /// <summary>A PC helper went away (and stayed away).</summary>
-    HelperDisconnected,
-    /// <summary>A PC helper isn't signed in to a store.</summary>
-    SignedOut,
-    /// <summary>A store wants the owner to prove they're human on a PC helper.</summary>
-    HumanCheck,
     Test,
 }
 
 /// <summary>
-/// Writes the activity log and sends what matters to the owner's phone: Discord (webhook), Telegram (bot) and any
-/// plain-text webhook (ntfy.sh, for one), each used when it's set in Settings.
+/// Writes the activity log and emails what matters (when email is set up in Settings). Matches also ring the Android app
+/// (see Alerts).
 /// </summary>
 public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settingsStore, IHttpClientFactory httpFactory, IConfiguration config,
     ILogger<Notifier> log)
@@ -78,16 +72,13 @@ public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settings
             NotifyKind.PageFailing => s.NotifyPageFailing ?? s.NotifyErrors,
             NotifyKind.PageRecovered => s.NotifyPageRecovered ?? s.NotifyErrors,
             NotifyKind.AiProblem => s.NotifyAiProblems ?? s.NotifyErrors,
-            NotifyKind.HelperDisconnected => s.NotifyHelperDisconnected ?? s.NotifyErrors,
-            NotifyKind.SignedOut => s.NotifySignedOut,
-            NotifyKind.HumanCheck => s.NotifyHumanCheck,
             _ => true,
         };
         if (wanted)
             await SendAsync(s, message, url, detailsUrl ?? (siteId is { } id ? Link($"site/{id}") : null));
     }
 
-    /// <summary>Sends to every channel that's set; returns what went wrong on each (empty: all fine).</summary>
+    /// <summary>Emails it when email is set up; returns what went wrong (empty: all fine).</summary>
     public async Task<List<string>> SendAsync(BotSettings s, string message, string? url = null, string? detailsUrl = null)
     {
         // The store link on its own line (tap to buy), then the details here.
@@ -110,20 +101,6 @@ public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settings
         }
 
         var tasks = new List<Task>();
-        if (s.DiscordWebhookUrl.Length > 0)
-            tasks.Add(Try("Discord", () => http.PostAsJsonAsync(s.DiscordWebhookUrl, new { content = Limit(text, 1900), username = "Deficit Snatcher" })));
-        if (s.TelegramBotToken.Length > 0 && s.TelegramChatId.Length > 0)
-            tasks.Add(Try("Telegram", () => http.PostAsJsonAsync($"https://api.telegram.org/bot{s.TelegramBotToken}/sendMessage",
-                new { chat_id = s.TelegramChatId, text = Limit(text, 4000), disable_web_page_preview = true })));
-        if (s.WebhookUrl.Length > 0)
-            tasks.Add(Try("Webhook", () =>
-            {
-                var request = new HttpRequestMessage(HttpMethod.Post, s.WebhookUrl) { Content = new StringContent(text) };
-                request.Headers.TryAddWithoutValidation("Title", "Deficit Snatcher");
-                if (url != null)
-                    request.Headers.TryAddWithoutValidation("Click", url);
-                return http.SendAsync(request);
-            }));
         if (EmailReady(s))
             tasks.Add(EmailAsync(s, message, url, detailsUrl, problems));
         await Task.WhenAll(tasks);

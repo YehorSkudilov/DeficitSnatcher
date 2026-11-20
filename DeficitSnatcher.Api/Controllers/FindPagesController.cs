@@ -16,7 +16,7 @@ public sealed record ProbeManyRequest(int ProductId, List<string> Urls);
 /// <summary>reads (price and stock found), blocked (bot protection), unread (no price or stock found), error.</summary>
 public sealed record ProbedPage(string Url, string Name, string Status, decimal? Price, bool? InStock, string? Title, bool? TitleMatches,
     bool InRange, string Message, bool AlreadyAdded, string Domain = "");
-public sealed record AddPage(string Name, string Url, bool RunOnPc);
+public sealed record AddPage(string Name, string Url);
 public sealed record AddPagesRequest(int ProductId, List<AddPage> Pages, bool SetupWithAi);
 public sealed record AddPagesResponse(List<int> Added, List<string> Skipped, bool SettingUpWithAi);
 
@@ -113,7 +113,7 @@ public sealed class FindPagesController(AppDbContext db, OpenAiClient ai, PageFe
             await slots.WaitAsync(ct);
             try
             {
-                var site = SiteFor(url, product.Id, name, runOnPc: false);
+                var site = SiteFor(url, product.Id, name);
                 var r = await fetcher.FetchAsync(site, [], settings, ct);
                 if (StoreRegion.ForeignCurrency(r.Currency, settings.Currency) is { } otherCurrency)
                     return new ProbedPage(url, name, "foreign", r.Price, r.InStock, r.Title, null, false, otherCurrency, already);
@@ -173,7 +173,7 @@ public sealed class FindPagesController(AppDbContext db, OpenAiClient ai, PageFe
                 skipped.Add($"{NameFor(url)} ({Domain(url)}): this store is already watched");
                 continue;
             }
-            var site = SiteFor(url, product.Id, string.IsNullOrWhiteSpace(p.Name) ? NameFor(url) : p.Name.Trim(), p.RunOnPc);
+            var site = SiteFor(url, product.Id, string.IsNullOrWhiteSpace(p.Name) ? NameFor(url) : p.Name.Trim());
             site.Enabled = true;
             site.CreatedAt = DateTimeOffset.UtcNow;
             db.Sites.Add(site);
@@ -210,13 +210,12 @@ public sealed class FindPagesController(AppDbContext db, OpenAiClient ai, PageFe
             }
             catch (Exception)
             {
-                // Blocked or failing: the AI can't do better from the server (unless it's set to run on the PC).
-                if (!site.RunOnPc)
-                    continue;
+                // Blocked or failing: the AI can't do better from the server.
+                continue;
             }
             try
             {
-                var s = await setup.SuggestAsync(site.Url, site.Product, [], site.Id, "setup", CancellationToken.None, site.RunOnPc);
+                var s = await setup.SuggestAsync(site.Url, site.Product, [], site.Id, "setup", CancellationToken.None);
                 if (s.Works && s.RightProduct != false)
                 {
                     site.Kind = s.Kind;
@@ -242,14 +241,14 @@ public sealed class FindPagesController(AppDbContext db, OpenAiClient ai, PageFe
         }
     }
 
-    private static Site SiteFor(string url, int productId, string name, bool runOnPc) =>
+    private static Site SiteFor(string url, int productId, string name) =>
         StorePresets.For(url) is { } preset
             ? new Site
             {
-                Url = url, ProductId = productId, Name = name, RunOnPc = runOnPc, Kind = preset.Kind, PriceSelector = preset.Price,
+                Url = url, ProductId = productId, Name = name, Kind = preset.Kind, PriceSelector = preset.Price,
                 TitleSelector = preset.Title, InStockSelector = preset.InStock, OutOfStockText = preset.OutOfStockText,
             }
-            : new Site { Url = url, ProductId = productId, Name = name, RunOnPc = runOnPc, Kind = SiteKind.Auto };
+            : new Site { Url = url, ProductId = productId, Name = name, Kind = SiteKind.Auto };
 
     /// <summary>The store domains already watched for the product.</summary>
     private async Task<HashSet<string>> ExistingAsync(int productId, CancellationToken ct) =>

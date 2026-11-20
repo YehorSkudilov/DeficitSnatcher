@@ -8,7 +8,7 @@ import { AiCalls } from "./AiCalls";
 
 const tabs = [
   ["scans", "Scans", "Every check, found or not, with the page's screenshot and source when something changed."],
-  ["checkouts", "Checkouts", "Every checkout, real or dry run, with each step's screenshot and the full error."],
+  ["checkouts", "Checkouts", "Every checkout, with each step's screenshot and the full error."],
   ["activity", "Activity", "Alerts, price drops, AI fixes, failing pages."],
   ["ai", "AI", "Every question sent to ChatGPT and its answer."],
 ] as const;

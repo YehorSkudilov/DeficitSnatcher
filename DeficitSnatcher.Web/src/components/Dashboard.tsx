@@ -18,13 +18,8 @@ export function Dashboard() {
   const forecasts = useData(() => api.get<Record<number, RestockForecast>>("/api/restock/product/0"), [], 60000);
 
   const setArmed = async (armed: boolean) => {
-    if (armed && !d?.dryRun && !confirm("Arm auto-buy for REAL purchases? Matches in your price range will be ordered and paid for.")) return;
+    if (armed && !confirm("Turn auto-buy on? Matches in your price range will be ordered and paid for.")) return;
     const s = await arm.run(() => api.post<Settings>("/api/settings/arm", { armed }));
-    if (s) void dash.reload();
-  };
-
-  const setAlertsOnly = async (on: boolean) => {
-    const s = await arm.run(() => api.post<Settings>("/api/settings/alerts-only", { on }));
     if (s) void dash.reload();
   };
 
@@ -38,36 +33,19 @@ export function Dashboard() {
       <div className="page-head">
         <h1>Dashboard</h1>
         <div className="row">
-          {d && !d.trackingEnabled && <span className="badge warn">Tracking paused (Settings)</span>}
           <CheckAllButton count={sites.data?.length ?? 0} currency={d?.currency} onDone={(items) => (setChecked(rowResults(items, d?.currency)), refresh())} />
         </div>
       </div>
       <ErrorNote error={dash.error || arm.error} />
 
       {d && (
-        <div className="card row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+        <div className={`arm ${d.autoBuyArmed ? "on" : ""}`}>
           <div className="stack" style={{ gap: 4 }}>
-            <h2>{d.alertsOnly ? "Alerts only: on" : "Alerts only"}</h2>
-            <div className="muted small">
-              {d.alertsOnly
-                ? "The PC helpers are left alone (they stay connected). The server checks every page and you're alerted; nothing is bought."
-                : "Turn on to leave the PC helpers alone and only get alerts: the server checks every page, nothing is bought."}
-            </div>
-          </div>
-          <button className={`toggle ${d.alertsOnly ? "on" : ""}`} aria-label="Alerts only" disabled={arm.busy} onClick={() => setAlertsOnly(!d.alertsOnly)} />
-        </div>
-      )}
-
-      {d && !d.alertsOnly && (
-        <div className={`arm ${d.autoBuyArmed ? "on" : ""} ${d.dryRun ? "dry" : ""}`}>
-          <div className="stack" style={{ gap: 4 }}>
-            <h2>{d.autoBuyArmed ? (d.dryRun ? "Auto-buy armed: dry run" : "Auto-buy ARMED") : "Auto-buy off"}</h2>
+            <h2>{d.autoBuyArmed ? "Auto-buy on" : "Auto-buy off"}</h2>
             <div className="muted small">
               {d.autoBuyArmed
-                ? d.dryRun
-                  ? "Matches run the checkout up to the final step, then stop. Turn dry run off in Settings to buy for real."
-                  : "A site in stock in your price range will be bought right away."
-                : "Sites are watched and you're told about matches, but nothing is bought."}
+                ? "A page in stock in your price range is bought right away (pages with auto-buy on); if it can't, you're alerted."
+                : "Pages are watched and the app rings for matches, but nothing is bought."}
             </div>
           </div>
           <button className={`toggle ${d.autoBuyArmed ? "on" : ""}`} aria-label="Arm auto-buy" disabled={arm.busy} onClick={() => setArmed(!d.autoBuyArmed)} />
@@ -276,7 +254,6 @@ export function SiteTable({
                     {s.name}
                   </b>
                   {s.autoBuy && <span className="badge bad">Auto-buy</span>}
-                  {s.runOnPc && <span className="badge info">PC</span>}
                   {!s.enabled && <span className="badge">Off</span>}
                 </div>
                 <div className="faint small">{host(s.url)}</div>

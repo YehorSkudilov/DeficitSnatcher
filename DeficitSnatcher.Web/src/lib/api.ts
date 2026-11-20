@@ -138,7 +138,6 @@ export type Site = {
   verdict: string;
   nextCheckAt: string | null;
   checking: boolean;
-  runOnPc: boolean;
 };
 
 export type CheckAllItem = {
@@ -152,41 +151,6 @@ export type CheckAllItem = {
   buyMessage: string | null;
 };
 
-export type StoreAccount = { domain: string; email: string; hasPassword: boolean; signInUrl: string | null; learnedSignInUrl: string | null };
-
-export type StoreLogin = {
-  domain: string;
-  status: "signedIn" | "signedOut" | "humanCheck" | "error" | "unknown";
-  checkedAt: string | null;
-  detail: string | null;
-  accountUrl: string;
-  paused: boolean;
-  retryAt: string | null;
-};
-
-export type WorkerInfo = {
-  worker: string;
-  id: number | null;
-  name: string;
-  connected: boolean;
-  machine: string | null;
-  browser: string | null;
-  since: string | null;
-  lastSeen: string | null;
-  createdAt: string | null;
-  version: string | null;
-  canUpdate: boolean;
-  checksEnabled: boolean;
-  disabledDomains: string[];
-  checksLastHour: number;
-  checksToday: number;
-  pagesLastHour: number;
-  lastCheck: string | null;
-  errorsLastHour: number;
-  logins: StoreLogin[];
-};
-
-export type RunnerStatus = { hasKey: boolean; connected: boolean; machine: string | null; browser: string | null; since: string | null; lastSeen: string | null; connectedCount: number };
 
 export type SiteInput = {
   productId: number;
@@ -205,7 +169,6 @@ export type SiteInput = {
   checkoutSteps: CheckoutStep[];
   /** null: keep the saved cookies; "": remove them. */
   cookies: string | null;
-  runOnPc: boolean;
 };
 
 export type PageResult = {
@@ -387,7 +350,6 @@ export type EventLevel = "Info" | "Good" | "Warning" | "Error";
 export type BotEvent = { id: number; at: string; level: EventLevel; siteId: number | null; siteName: string | null; message: string };
 
 export type Dashboard = {
-  alertsOnly: boolean;
   autoBuyArmed: boolean;
   dryRun: boolean;
   trackingEnabled: boolean;
@@ -404,7 +366,6 @@ export type Dashboard = {
 };
 
 export type Settings = {
-  alertsOnly: boolean;
   autoBuyArmed: boolean;
   dryRun: boolean;
   totalBudget: number;

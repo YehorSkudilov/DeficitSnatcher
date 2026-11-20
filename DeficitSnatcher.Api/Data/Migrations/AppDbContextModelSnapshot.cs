@@ -381,90 +381,6 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.ToTable("RestockInsights");
                 });
 
-            modelBuilder.Entity("DeficitSnatcher.Api.Data.RunnerKey", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Browser")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<bool>("ChecksEnabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DisabledDomains")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<string>("KeyHash")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTimeOffset?>("LastSeenAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Machine")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("KeyHash")
-                        .IsUnique();
-
-                    b.ToTable("RunnerKeys");
-                });
-
-            modelBuilder.Entity("DeficitSnatcher.Api.Data.RunnerLogin", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTimeOffset>("CheckedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Detail")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("Domain")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<int>("RunnerId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RunnerId", "Domain")
-                        .IsUnique();
-
-                    b.ToTable("RunnerLogins");
-                });
-
             modelBuilder.Entity("DeficitSnatcher.Api.Data.Scan", b =>
                 {
                     b.Property<long>("Id")
@@ -656,9 +572,6 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.Property<int>("ProductId")
                         .HasColumnType("integer");
 
-                    b.Property<bool>("RunOnPc")
-                        .HasColumnType("boolean");
-
                     b.Property<decimal>("ShippingCost")
                         .HasPrecision(12, 2)
                         .HasColumnType("numeric(12,2)");
@@ -748,15 +661,6 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.HasOne("DeficitSnatcher.Api.Data.Product", null)
                         .WithMany()
                         .HasForeignKey("ProductId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("DeficitSnatcher.Api.Data.RunnerLogin", b =>
-                {
-                    b.HasOne("DeficitSnatcher.Api.Data.RunnerKey", null)
-                        .WithMany()
-                        .HasForeignKey("RunnerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

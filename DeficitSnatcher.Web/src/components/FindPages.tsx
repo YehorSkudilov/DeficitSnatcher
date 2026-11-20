@@ -20,7 +20,7 @@ type Probed = {
   /** The store (e.g. bestbuy.ca): one page per store. */
   domain: string;
 };
-type Row = Probed & { pick: boolean; runOnPc: boolean; note?: string | null };
+type Row = Probed & { pick: boolean; note?: string | null };
 
 /** Finds a product's pages (the AI searches the web, or links are pasted), checks each, and adds the chosen ones at once. */
 export function FindPages({ productId, productName, currency, onAdded, onClose }: { productId: number; productName: string; currency: string; onAdded: () => void; onClose: () => void }) {
@@ -56,7 +56,6 @@ export function FindPages({ productId, productName, currency, onAdded, onClose }
           message: p.alreadyAdded ? `You already watch ${p.domain}.` : sameStore ? `Another ${p.domain} page is above.` : p.message,
           // Picked: a new store, works (or the AI can set it up), and not another product.
           pick: !sameStore && p.status !== "error" && p.status !== "foreign" && p.titleMatches !== false,
-          runOnPc: p.status === "blocked",
           };
         }),
       );
@@ -86,7 +85,7 @@ export function FindPages({ productId, productName, currency, onAdded, onClose }
       api.post<{ added: number[]; skipped: string[]; settingUpWithAi: boolean }>("/api/find-pages/add", {
         productId,
         setupWithAi: setupWithAi && aiOn,
-        pages: picked.map((p) => ({ name: p.name, url: p.url, runOnPc: p.runOnPc })),
+        pages: picked.map((p) => ({ name: p.name, url: p.url })),
       }),
     );
     if (!r) return;
@@ -178,7 +177,6 @@ export function FindPages({ productId, productName, currency, onAdded, onClose }
                   <th>Check</th>
                   <th>Price</th>
                   <th>What it found</th>
-                  <th>On PC</th>
                 </tr>
               </thead>
               <tbody>
@@ -207,9 +205,6 @@ export function FindPages({ productId, productName, currency, onAdded, onClose }
                       </div>
                       {r.note && <div className="faint">AI: {r.note}</div>}
                     </td>
-                    <td>
-                      <input type="checkbox" checked={r.runOnPc} title="Check and buy it in Chrome on your PC (PC helper)" onChange={(e) => set(i, { runOnPc: e.target.checked })} />
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -224,7 +219,7 @@ export function FindPages({ productId, productName, currency, onAdded, onClose }
             <button className="btn primary" disabled={busy || picked.length === 0} onClick={addPicked}>
               {add.busy ? "Adding…" : `Add ${picked.length} page${picked.length === 1 ? "" : "s"}`}
             </button>
-            <span className="faint small">Added with auto-buy off; turn it on per page once a dry run works.</span>
+            <span className="faint small">Added with auto-buy off; turn it on per page once its checkout is set up.</span>
           </div>
         </>
       )}

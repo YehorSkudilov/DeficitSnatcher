@@ -108,12 +108,13 @@ code,
   background: var(--text-3);
   flex: none;
 }
+/* Armed (it buys): green, glowing. Watching only: blue. */
 .brand-dot.armed {
-  background: var(--danger);
-  box-shadow: 0 0 12px var(--danger);
+  background: var(--success);
+  box-shadow: 0 0 12px var(--success);
 }
 .brand-dot.tracking {
-  background: var(--success);
+  background: var(--accent);
 }
 
 .nav a {
@@ -455,12 +456,8 @@ textarea:focus {
   background: var(--surface);
 }
 .arm.on {
-  border-color: #7a2632;
-  background: linear-gradient(135deg, #2a1015, var(--surface));
-}
-.arm.on.dry {
-  border-color: #6a5420;
-  background: linear-gradient(135deg, #2a2210, var(--surface));
+  border-color: #1f6b43;
+  background: linear-gradient(135deg, var(--success-soft), var(--surface));
 }
 .arm h2 {
   font-size: 20px;
@@ -487,7 +484,7 @@ textarea:focus {
   transition: transform 0.15s;
 }
 .toggle.on {
-  background: var(--danger);
+  background: var(--success);
 }
 .toggle.on::after {
   transform: translateX(30px);

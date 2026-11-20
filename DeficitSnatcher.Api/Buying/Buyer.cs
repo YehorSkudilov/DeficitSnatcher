@@ -17,7 +17,7 @@ namespace DeficitSnatcher.Api.Buying;
 /// one lock, so two sites coming into stock together can't buy more than the product's limit between them.
 /// </summary>
 public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore settingsStore, SecretBox box, BrowserPool browsers,
-    Notifier notifier, Ai.OpenAiClient ai, Ai.CheckoutAgent agent, Pc.HumanCheck humanCheck, Pc.WorkerPool workers, ILogger<Buyer> log)
+    Notifier notifier, Ai.OpenAiClient ai, Ai.CheckoutAgent agent, ILogger<Buyer> log)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -32,7 +32,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
     /// the final steps whatever the settings say. <paramref name="trigger"/>: what led to it, kept with the checkout.
     /// </summary>
     public async Task<Outcome> BuyAsync(int siteId, decimal price, bool manual, bool forceDryRun, string trigger, CancellationToken ct,
-        bool aiRecord = false, string? preferredWorker = null)
+        bool aiRecord = false)
     {
         var settings = await settingsStore.GetAsync(ct);
         var dryRun = forceDryRun || settings.DryRun || aiRecord;
@@ -56,8 +56,6 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
 
             if (!manual)
             {
-                if (settings.AlertsOnly)
-                    return new(false, "Alerts only: nothing is bought.");
                 if (!settings.AutoBuyArmed)
                     return new(false, "Auto-buy isn't armed.");
                 if (!site.AutoBuy)
@@ -136,7 +134,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
 
         await notifier.LogAsync(EventLevel.Info, $"{(dryRun ? "Dry-run checkout" : "Buying")} {product.Name} at {site.Name} for {price:0.00} (checkout #{purchaseId})…", site.Id);
         _ = Task.Run(() => RunAsync(purchaseId, site, product, steps, price, dryRun, settings, aiAvailable, aiRecord, manual, aiAgentAllowed,
-            workers.Best(site, preferredWorker)), CancellationToken.None);
+            "server"), CancellationToken.None);
         return new(true, $"{(dryRun ? "Dry-run checkout" : "Checkout")} #{purchaseId} started.", purchaseId, PurchaseStatus.Running);
     }
 
@@ -194,18 +192,10 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
 
             var cookies = site.CookiesEncrypted == null ? [] : SiteCookies.Parse(box.Decrypt(site.CookiesEncrypted), site.Url);
             Log($"Opening a browser ({cookies.Count} cookies)");
-            await using var lease = await browsers.OpenAsync(settings, cookies, worker, CancellationToken.None, site);
-            ranOn = lease.Worker;
+            await using var lease = await browsers.OpenAsync(settings, cookies, CancellationToken.None, site);
             var page = await lease.NewPageAsync();
-            if (lease.OnPc)
-                Log($"Running in Chrome on {workers.Label(lease.Worker)} (PC helper).");
-            else
-            {
-                if (Pc.WorkerPool.PcId(worker) != null)
-                    Log($"{workers.Label(worker)} isn't reachable: running on the server instead.");
-                Log($"Running in {BrowserPool.EngineName(lease.Engine)} on the server"
-                    + (lease.Engine != BrowserPool.EngineFor(settings) ? " (Camoufox can't be reached right now)" : ", with the page's saved session if it has one") + ".");
-            }
+            Log($"Running in {BrowserPool.EngineName(lease.Engine)}"
+                + (lease.Engine != BrowserPool.EngineFor(settings) ? " (Camoufox can't be reached right now)" : ", with the page's saved session if it has one") + ".");
             page.Console += (_, m) =>
             {
                 if (m.Type is "error" or "warning")
@@ -241,9 +231,6 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                     string? stepError = null;
                     try
                     {
-                        // On the PC: a store's human check is for the owner to do (they're alerted); wait for it.
-                        if (lease.OnPc)
-                            await humanCheck.WaitIfBlockedAsync(page, site.Id, site.Name, CancellationToken.None);
                         await RunStepAsync(page, step, values);
                         stepStatus = "ok";
                         if (step.Value?.Contains("{{card.", StringComparison.OrdinalIgnoreCase) == true)

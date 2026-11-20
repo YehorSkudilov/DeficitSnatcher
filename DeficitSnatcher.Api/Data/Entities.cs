@@ -75,10 +75,6 @@ public class Site
     /// <summary>Shopify: only this variant (id) is looked at; null: the first available one.</summary>
     public string? VariantId { get; set; }
 
-    /// <summary>Checked and bought in the Chrome of the PC helper on the owner's computer (their home connection and
-    /// sign-ins), for stores that block servers.</summary>
-    public bool RunOnPc { get; set; }
-
     /// <summary>Buy automatically when it's in stock in the product's range (and auto-buy is armed in settings).</summary>
     public bool AutoBuy { get; set; }
 
@@ -203,22 +199,6 @@ public class ScanSnapshot
     public string? Error { get; set; }
 }
 
-/// <summary>A PC helper: one setup code, one computer. Its key is kept as a hash only.</summary>
-public class RunnerKey
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = "";
-    public string KeyHash { get; set; } = "";
-    public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset? LastSeenAt { get; set; }
-    public string? Machine { get; set; }
-    public string? Browser { get; set; }
-    /// <summary>Off: this helper isn't given checks or buys at all (it stays connected).</summary>
-    public bool ChecksEnabled { get; set; } = true;
-    /// <summary>Stores this helper leaves alone (comma-separated domains, e.g. "walmart.ca,amazon.ca").</summary>
-    public string DisabledDomains { get; set; } = "";
-}
-
 /// <summary>
 /// A store page's browser session on the server: the cookies and local storage it had when the last check or checkout
 /// ended (Playwright's storage state), put back into the next browser so the store sees a returning visitor.
@@ -233,20 +213,6 @@ public class BrowserSession
     public DateTimeOffset SavedAt { get; set; }
     /// <summary>When it started (the first check without a saved one): it's dropped once it's older than the setting.</summary>
     public DateTimeOffset StartedAt { get; set; }
-}
-
-/// <summary>Whether a PC helper's Chrome is signed in to a store.</summary>
-public class RunnerLogin
-{
-    public int Id { get; set; }
-    public int RunnerId { get; set; }
-    /// <summary>The store, e.g. walmart.ca.</summary>
-    public string Domain { get; set; } = "";
-    /// <summary>signedIn, signedOut, humanCheck (the store wants a captcha / press and hold), unknown, error.</summary>
-    public string Status { get; set; } = "unknown";
-    public DateTimeOffset CheckedAt { get; set; }
-    /// <summary>What it was told by: "Hello, Yehor", "Sign in"…</summary>
-    public string? Detail { get; set; }
 }
 
 /// <summary>What the AI found online about when a store restocks a product (web search), kept a week per store.</summary>

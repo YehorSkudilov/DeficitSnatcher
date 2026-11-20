@@ -23,9 +23,7 @@ public sealed record SiteInput(
     bool AutoBuy,
     List<CheckoutStep>? CheckoutSteps,
     /// <summary>null: keep the saved cookies; "": remove them.</summary>
-    string? Cookies,
-    /// <summary>Checked and bought in the Chrome of the PC helper.</summary>
-    bool RunOnPc = false);
+    string? Cookies);
 
 public sealed record SiteDto(
     int Id,
@@ -55,8 +53,7 @@ public sealed record SiteDto(
     bool Match,
     string Verdict,
     DateTimeOffset? NextCheckAt,
-    bool Checking,
-    bool RunOnPc);
+    bool Checking);
 
 public sealed record ProbeResponse(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage);
 public sealed record BuyRequest(bool DryRun);
@@ -244,7 +241,6 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
         site.OutOfStockText = Blank(i.OutOfStockText);
         site.VariantId = Blank(i.VariantId);
         site.AutoBuy = i.AutoBuy;
-        site.RunOnPc = i.RunOnPc;
         site.CheckoutSteps = CheckoutStep.Serialize(steps);
         if (i.Cookies != null)
             site.CookiesEncrypted = i.Cookies.Trim().Length == 0 ? null : box.Encrypt(i.Cookies.Trim());
@@ -265,6 +261,6 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
         return new SiteDto(s.Id, s.ProductId, s.Product?.Name ?? "", s.Name, s.Url, s.Kind, s.Enabled, s.IntervalSeconds, s.ShippingCost,
             s.PriceSelector, s.TitleSelector, s.InStockSelector, s.OutOfStockText, s.VariantId, s.AutoBuy, CheckoutStep.Parse(s.CheckoutSteps),
             s.CookiesEncrypted != null, s.LastCheckedAt, s.LastChangedAt, s.LastPrice, s.LastInStock, s.LastTitle, s.LastError,
-            s.ConsecutiveErrors, verdict.Match, verdict.Reason, tracker.NextCheck(s.Id), tracker.IsChecking(s.Id), s.RunOnPc);
+            s.ConsecutiveErrors, verdict.Match, verdict.Reason, tracker.NextCheck(s.Id), tracker.IsChecking(s.Id));
     }
 }

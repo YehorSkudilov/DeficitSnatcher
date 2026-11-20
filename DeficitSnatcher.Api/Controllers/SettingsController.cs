@@ -30,8 +30,6 @@ public sealed record ProfileDto(
     bool HasCvv,
     bool ClearCard);
 
-public sealed record AlertsOnlyRequest(bool On);
-
 [ApiController]
 [Route("api/settings")]
 public sealed class SettingsController(SettingsStore store, Notifier notifier) : ControllerBase
@@ -50,17 +48,6 @@ public sealed class SettingsController(SettingsStore store, Notifier notifier) :
         return saved;
     }
 
-    /// <summary>Alerts only on or off (the dashboard's switch).</summary>
-    [HttpPost("alerts-only")]
-    public async Task<BotSettings> AlertsOnly(AlertsOnlyRequest request, CancellationToken ct)
-    {
-        var saved = await store.UpdateAsync(s => s with { AlertsOnly = request.On }, ct);
-        await notifier.LogAsync(EventLevel.Info, request.On
-            ? "Alerts only: the PC helpers are left alone, the server checks every page, and nothing is bought."
-            : "Alerts only is off: the helpers are back to work.");
-        return saved;
-    }
-
     /// <summary>The dashboard's big switch.</summary>
     [HttpPost("arm")]
     public async Task<BotSettings> Arm(ArmRequest request, CancellationToken ct)
@@ -75,9 +62,8 @@ public sealed class SettingsController(SettingsStore store, Notifier notifier) :
     public async Task<NotificationTestResponse> TestNotification(CancellationToken ct)
     {
         var s = await store.GetAsync(ct);
-        if (s.DiscordWebhookUrl.Length == 0 && s.WebhookUrl.Length == 0 && (s.TelegramBotToken.Length == 0 || s.TelegramChatId.Length == 0)
-            && !Notifier.EmailReady(s))
-            return new(false, ["No notification channel is set up."]);
+        if (!Notifier.EmailReady(s))
+            return new(false, ["Email isn't set up: the address to send to, the SMTP username and password."]);
         var problems = await notifier.SendAsync(s, "Deficit Snatcher test: notifications work.");
         return new(problems.Count == 0, problems);
     }
