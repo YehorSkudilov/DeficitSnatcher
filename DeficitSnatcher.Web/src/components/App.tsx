@@ -7,6 +7,7 @@ import { ProductPage, Products } from "./Products";
 import { SiteEditor } from "./SiteEditor";
 import { PurchaseDetail } from "./Purchases";
 import { Deploy } from "./Deploy";
+import { Helpers } from "./Helpers";
 import { SettingsPage } from "./Settings";
 import { Login } from "./Login";
 import { useData } from "./ui";
@@ -41,6 +42,7 @@ export function go(route: string) {
 const nav = [
   ["dashboard", "Dashboard"],
   ["products", "Products"],
+  ["helpers", "Helpers"],
   ["settings", "Settings"],
   ["deploy", "Deploy"],
 ] as const;
@@ -96,6 +98,7 @@ function Shell({ route, onSignOut }: { route: string; onSignOut: () => void }) {
           />
         )}
         {screen === "purchase" && <PurchaseDetail key={arg} id={Number(arg)} />}
+        {screen === "helpers" && <Helpers />}
         {screen === "deploy" && <Deploy />}
         {screen === "settings" && <SettingsPage />}
         {!nav.some(([k]) => k === screen) && !["site", "product", "purchase"].includes(screen) && <p className="muted">Nothing here. <a href="#dashboard">Dashboard</a></p>}

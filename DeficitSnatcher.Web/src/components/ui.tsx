@@ -191,3 +191,67 @@ export async function download(path: string, name: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+const CollapsedKey = "ds.collapsedProducts";
+
+/** Which products are folded up (remembered in this browser, shared by the Dashboard and Products). */
+export function useCollapsed() {
+  const [ids, setIds] = useState<number[]>(() => {
+    try {
+      return typeof localStorage === "undefined" ? [] : (JSON.parse(localStorage.getItem(CollapsedKey) ?? "[]") as number[]);
+    } catch {
+      return [];
+    }
+  });
+  const save = useCallback((next: number[]) => {
+    setIds(next);
+    try {
+      localStorage.setItem(CollapsedKey, JSON.stringify(next));
+    } catch {
+      // Not remembered, still works.
+    }
+  }, []);
+  return {
+    isCollapsed: (id: number) => ids.includes(id),
+    toggle: (id: number) => save(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]),
+    setAll: (all: number[], collapsed: boolean) => save(collapsed ? all : []),
+    any: ids.length > 0,
+  };
+}
+
+/** The ▸/▾ that folds a product up. */
+export function CollapseButton({ collapsed, onClick }: { collapsed: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="btn small ghost collapse-btn"
+      aria-expanded={!collapsed}
+      title={collapsed ? "Show pages" : "Hide pages"}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      <span className={`chevron${collapsed ? "" : " open"}`}>▸</span>
+    </button>
+  );
+}
+
+/** One line for a folded product: its pages, how many are in stock. */
+export function PagesSummary({ sites }: { sites: Pick<Site, "lastInStock" | "enabled">[] }) {
+  const inStock = sites.filter((s) => s.lastInStock && s.enabled).length;
+  return (
+    <div className="small muted">
+      {sites.length} page{sites.length === 1 ? "" : "s"}
+      {inStock > 0 ? (
+        <>
+          {" · "}
+          <span className="badge good">{inStock} in stock</span>
+        </>
+      ) : (
+        " · none in stock"
+      )}
+    </div>
+  );
+}

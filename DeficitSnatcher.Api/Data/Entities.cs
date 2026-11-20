@@ -162,6 +162,8 @@ public class Purchase
     public string? FinalUrl { get; set; }
     /// <summary>The AI did some of it: the whole checkout, or took over after a step broke.</summary>
     public bool AiUsed { get; set; }
+    /// <summary>Where it ran: "server" or "pc:{helper id}".</summary>
+    public string Worker { get; set; } = "server";
 }
 
 /// <summary>A screenshot taken during a checkout: after a step, or of the whole page where it ended.</summary>
@@ -199,6 +201,32 @@ public class ScanSnapshot
     public byte[]? Source { get; set; }
     public string? SourceType { get; set; }
     public string? Error { get; set; }
+}
+
+/// <summary>A PC helper: one setup code, one computer. Its key is kept as a hash only.</summary>
+public class RunnerKey
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public string KeyHash { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? LastSeenAt { get; set; }
+    public string? Machine { get; set; }
+    public string? Browser { get; set; }
+}
+
+/// <summary>Whether a PC helper's Chrome is signed in to a store.</summary>
+public class RunnerLogin
+{
+    public int Id { get; set; }
+    public int RunnerId { get; set; }
+    /// <summary>The store, e.g. walmart.ca.</summary>
+    public string Domain { get; set; } = "";
+    /// <summary>signedIn, signedOut, humanCheck (the store wants a captcha / press and hold), unknown, error.</summary>
+    public string Status { get; set; } = "unknown";
+    public DateTimeOffset CheckedAt { get; set; }
+    /// <summary>What it was told by: "Hello, Yehor", "Sign in"…</summary>
+    public string? Detail { get; set; }
 }
 
 /// <summary>What the AI found online about when a store restocks a product (web search), kept a week per store.</summary>
@@ -263,6 +291,8 @@ public class Scan
     public int? PurchaseId { get; set; }
     /// <summary>Started from the web (Check now) rather than on schedule.</summary>
     public bool Manual { get; set; }
+    /// <summary>Who did it: "server" or "pc:{helper id}".</summary>
+    public string Worker { get; set; } = "server";
 }
 
 public enum EventLevel

@@ -25,7 +25,8 @@ public sealed record ScanDto(
     string? Action,
     int? PurchaseId,
     bool Manual,
-    bool HasSnapshot);
+    bool HasSnapshot,
+    string? Worker = null);
 
 public sealed record SnapshotDto(string Reason, bool HasScreenshot, bool HasSource, string? SourceType, string? Error);
 
@@ -102,10 +103,16 @@ public sealed class ScansController(AppDbContext db, SecretBox box, ScanFollowUp
                            orderby s.Id descending
                            select new ScanDto(s.Id, s.SiteId, site.Name, s.ProductId, p.Name, s.At, s.DurationMs, s.Outcome, s.Price, s.TotalPrice,
                                s.Title, s.Match, s.Verdict, s.Error, s.Notes, s.Action, s.PurchaseId, s.Manual,
-                               db.ScanSnapshots.Any(x => x.ScanId == s.Id)))
+                               db.ScanSnapshots.Any(x => x.ScanId == s.Id), s.Worker))
             .Take(Math.Clamp(f.Limit, 1, 500)).ToListAsync(ct);
+        var names = await db.RunnerKeys.AsNoTracking().ToDictionaryAsync(r => r.Id, r => r.Name, ct);
+        scans = scans.Select(s => s with { Worker = WorkerName(s.Worker, names) }).ToList();
         return new ScansPage(scans, counts);
     }
+
+    /// <summary>"Server", or the helper's name ("pc:3" → "Yehor's PC").</summary>
+    public static string WorkerName(string? worker, IReadOnlyDictionary<int, string> names) =>
+        Pc.WorkerPool.PcId(worker) is { } id ? names.TryGetValue(id, out var n) ? n : $"PC helper {id} (removed)" : "Server";
 
     [HttpGet("{id:long}/snapshot")]
     public async Task<ActionResult<SnapshotDto>> Snapshot(long id, CancellationToken ct)

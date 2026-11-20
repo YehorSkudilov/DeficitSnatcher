@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { api, type Product, type ProductInput, type RestockForecast, type Settings, type Site } from "@/lib/api";
 import { money } from "@/lib/format";
-import { Check, ErrorNote, Field, NumberInput, useAction, useData, useNow } from "./ui";
+import { Check, ErrorNote, Field, NumberInput, useAction, useCollapsed, useData, useNow, CollapseButton, PagesSummary } from "./ui";
 import { CheckAllButton, rowResults, SiteTable } from "./Dashboard";
 import { go } from "./App";
 import { Logs } from "./Logs";
@@ -26,6 +26,7 @@ export function Products() {
   const sites = useData(() => api.get<Site[]>("/api/sites"), [], 5000);
   const settings = useData(() => api.get<Settings>("/api/settings"), []);
   const now = useNow();
+  const fold = useCollapsed();
   const currency = settings.data?.currency ?? "CAD";
   const [checked, setChecked] = useState<Record<number, { ok: boolean; text: string }>>({});
   const forecasts = useData(() => api.get<Record<number, RestockForecast>>("/api/restock/product/0"), [], 60000);
@@ -44,10 +45,18 @@ export function Products() {
       </p>
       <ErrorNote error={products.error} />
       {products.data?.length === 0 && <div className="card muted">No products yet.</div>}
+      {(products.data?.length ?? 0) > 1 && (
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button className="btn small ghost" onClick={() => fold.setAll((products.data ?? []).map((p) => p.id), !fold.any)}>
+            {fold.any ? "Expand all" : "Collapse all"}
+          </button>
+        </div>
+      )}
       {products.data?.map((p) => (
         <div className="card" key={p.id}>
-          <div className="card-head">
+          <div className="card-head" style={fold.isCollapsed(p.id) ? { marginBottom: 0 } : undefined}>
             <a className="row" href={`#product/${p.id}`} style={{ color: "inherit", textDecoration: "none" }}>
+              <CollapseButton collapsed={fold.isCollapsed(p.id)} onClick={() => fold.toggle(p.id)} />
               <h2>{p.name}</h2>
               {!p.enabled && <span className="badge">Off</span>}
               <span className="badge info">
@@ -72,7 +81,11 @@ export function Products() {
               </a>
             </div>
           </div>
-          <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={currency} now={now} onChanged={() => void sites.reload()} results={checked} forecasts={forecasts.data ?? undefined} />
+          {fold.isCollapsed(p.id) ? (
+            <PagesSummary sites={(sites.data ?? []).filter((s) => s.productId === p.id)} />
+          ) : (
+            <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={currency} now={now} onChanged={() => void sites.reload()} results={checked} forecasts={forecasts.data ?? undefined} />
+          )}
         </div>
       ))}
     </div>

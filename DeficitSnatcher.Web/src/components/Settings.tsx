@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, type AiStatus, type Profile, type RunnerStatus, type Settings } from "@/lib/api";
-import { dateTime } from "@/lib/format";
+import { api, type AiStatus, type Profile, type Settings } from "@/lib/api";
 import { Check, ErrorNote, Field, NumberInput, useAction, useData } from "./ui";
 
 export function SettingsPage() {
@@ -14,7 +13,9 @@ export function SettingsPage() {
       </div>
       <ErrorNote error={loaded.error} />
       {loaded.data && <SettingsForm initial={loaded.data} />}
-      <PcHelper />
+      <div className="card small muted">
+        PC helpers (download, setup codes, sign-ins) are on the <a href="#helpers">Helpers</a> tab.
+      </div>
       <ProfileForm />
     </div>
   );
@@ -372,135 +373,6 @@ function AiSettings({ s, set }: { s: Settings; set: (patch: Partial<Settings>) =
         />
         <Check label="Send screenshots to the AI (never once card details are typed)" checked={s.aiSendScreenshots} onChange={(aiSendScreenshots) => set({ aiSendScreenshots })} />
       </div>
-    </div>
-  );
-}
-
-const release = "https://github.com/YehorSkudilov/DeficitSnatcher/releases";
-const downloads = [
-  ["Windows", "win-x64"],
-  ["Mac (Apple chip)", "osx-arm64"],
-  ["Mac (Intel)", "osx-x64"],
-  ["Linux", "linux-x64"],
-] as const;
-
-/** This computer's helper download, by its browser. */
-function myDownload(): (typeof downloads)[number] {
-  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
-  if (/Windows/i.test(ua)) return downloads[0];
-  if (/Mac OS X|Macintosh/i.test(ua)) return downloads[1];
-  if (/Linux/i.test(ua)) return downloads[3];
-  return downloads[0];
-}
-
-/** The site's address and the helper's key in one code, pasted into the helper. */
-function setupCode(site: string, key: string) {
-  const json = JSON.stringify({ site, key });
-  const b64 = btoa(unescape(encodeURIComponent(json))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  return `DSH1.${b64}`;
-}
-
-/** The PC helper: download it, paste a setup code, done. */
-function PcHelper() {
-  const status = useData(() => api.get<RunnerStatus>("/api/runner/status"), [], 5000);
-  const make = useAction();
-  const [code, setCode] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const site = typeof window === "undefined" ? "" : window.location.origin;
-  const [label, rid] = myDownload();
-
-  const newCode = async () => {
-    if (status.data?.hasKey && !confirm("Make a new setup code? The helper using the old one is disconnected until it gets the new one.")) return;
-    const r = await make.run(() => api.post<{ key: string }>("/api/runner/key"));
-    if (r) {
-      setCode(setupCode(site, r.key));
-      setCopied(false);
-      void status.reload();
-    }
-  };
-
-  const copy = async () => {
-    if (!code) return;
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-    } catch {
-      // Select it by hand.
-    }
-  };
-
-  const s = status.data;
-  return (
-    <div className="card stack">
-      <div className="card-head" style={{ marginBottom: 0 }}>
-        <h2>PC helper</h2>
-        {s && (s.connected ? <span className="badge good">Connected: {s.machine}</span> : <span className="badge warn">Not connected</span>)}
-      </div>
-      <p className="muted small">
-        For stores that block servers (Walmart, Costco, Amazon): a small program on your computer lends the bot its Chrome, on your home
-        internet, with your sign-ins. It runs in the background and starts with your computer. Pages with <b>Run on my PC</b> are checked
-        and bought there; while it isn&apos;t connected they&apos;re checked from the server as usual.
-      </p>
-      {s?.connected && (
-        <div className="small muted">
-          {s.browser} · connected {s.since ? dateTime(s.since) : ""}
-        </div>
-      )}
-      <ol className="small" style={{ margin: 0, paddingLeft: 18, lineHeight: 2 }}>
-        <li>
-          <a className="btn small primary" href={`${release}/download/pc-helper/DeficitSnatcher-PC-helper-${rid}.zip`}>
-            Download for {label}
-          </a>{" "}
-          <span className="faint">
-            or{" "}
-            {downloads
-              .filter(([, r]) => r !== rid)
-              .map(([l, r], i) => (
-                <span key={r}>
-                  {i > 0 && ", "}
-                  <a href={`${release}/download/pc-helper/DeficitSnatcher-PC-helper-${r}.zip`}>{l}</a>
-                </span>
-              ))}
-          </span>
-          , and unzip it.
-        </li>
-        <li>
-          <button className="btn small" disabled={make.busy} onClick={newCode}>
-            {s?.hasKey ? "Make a new setup code" : "Make a setup code"}
-          </button>
-        </li>
-        <li>
-          Open <code>DeficitSnatcher.Runner</code> (double-click) and paste the code. That&apos;s it: it installs itself and keeps running in the
-          background. Its Chrome opens once: sign in to the stores there.
-        </li>
-      </ol>
-      <ErrorNote error={make.error} />
-      {code && (
-        <div className="notice warn small stack" style={{ gap: 8 }}>
-          <div>Your setup code (copy it now, it isn&apos;t shown again):</div>
-          <div className="row" style={{ flexWrap: "nowrap" }}>
-            <input type="text" readOnly value={code} onFocus={(e) => e.target.select()} className="mono" />
-            <button className="btn small" style={{ flex: "none" }} onClick={copy}>
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-        </div>
-      )}
-      <details className="small">
-        <summary>Commands</summary>
-        <pre className="log" style={{ marginTop: 8 }}>{`deficitsnatcher status        running? connected?
-deficitsnatcher stop | start | restart
-deficitsnatcher window show   show its Chrome (to sign in to a store)
-deficitsnatcher window hide   minimise it again
-deficitsnatcher autostart off don't start with the computer
-deficitsnatcher setup <code>  connect with a new setup code
-deficitsnatcher logs          what it's been doing
-deficitsnatcher uninstall     remove it`}</pre>
-        <div className="faint">In a new terminal after setup (Windows: Command Prompt or PowerShell; Mac: Terminal).</div>
-        <div className="faint" style={{ marginTop: 4 }}>
-          First start: Windows may say &quot;Windows protected your PC&quot; (More info → Run anyway); a Mac may refuse it (right-click → Open).
-        </div>
-      </details>
     </div>
   );
 }

@@ -70,7 +70,10 @@ builder.Services.AddHttpClient(nameof(Notifier), c => c.Timeout = TimeSpan.FromS
 builder.Services.AddSingleton<Notifier>();
 // The PC helper on the owner's computer, for stores that block servers (Pc/).
 builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.RunnerHub>();
+builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.WorkerPool>();
 builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.HumanCheck>();
+builder.Services.AddSingleton<DeficitSnatcher.Api.Pc.LoginWatcher>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DeficitSnatcher.Api.Pc.LoginWatcher>());
 builder.Services.AddSingleton<BrowserPool>();
 // Timeouts are per request, from settings (PageFetcher).
 builder.Services.AddHttpClient<PageFetcher>(c => c.Timeout = Timeout.InfiniteTimeSpan)

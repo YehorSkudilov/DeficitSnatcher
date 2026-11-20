@@ -14,6 +14,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ScanSnapshot> ScanSnapshots => Set<ScanSnapshot>();
     public DbSet<AiCall> AiCalls => Set<AiCall>();
     public DbSet<RestockInsight> RestockInsights => Set<RestockInsight>();
+    public DbSet<RunnerKey> RunnerKeys => Set<RunnerKey>();
+    public DbSet<RunnerLogin> RunnerLogins => Set<RunnerLogin>();
     public DbSet<StoredValue> StoredValues => Set<StoredValue>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -46,6 +48,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(p => p.StartedAt);
             e.Property(p => p.Price).HasPrecision(12, 2);
             e.Property(p => p.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(p => p.Worker).HasMaxLength(40);
             e.HasOne<Site>().WithMany().HasForeignKey(p => p.SiteId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<PurchaseShot>(e =>
@@ -67,6 +70,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Error).HasMaxLength(2000);
             e.Property(x => x.Notes).HasMaxLength(1000);
             e.Property(x => x.Action).HasMaxLength(1000);
+            e.Property(x => x.Worker).HasMaxLength(40);
+            e.HasIndex(x => new { x.Worker, x.At });
             e.HasOne<Site>().WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<ScanSnapshot>(e =>
@@ -76,6 +81,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.SourceType).HasMaxLength(50);
             e.Property(x => x.Error).HasMaxLength(1000);
             e.HasOne<Scan>().WithOne().HasForeignKey<ScanSnapshot>(x => x.ScanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<RunnerKey>(e =>
+        {
+            e.HasIndex(x => x.KeyHash).IsUnique();
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.KeyHash).HasMaxLength(100);
+            e.Property(x => x.Machine).HasMaxLength(200);
+            e.Property(x => x.Browser).HasMaxLength(200);
+        });
+        b.Entity<RunnerLogin>(e =>
+        {
+            e.HasIndex(x => new { x.RunnerId, x.Domain }).IsUnique();
+            e.Property(x => x.Domain).HasMaxLength(200);
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.Property(x => x.Detail).HasMaxLength(500);
+            e.HasOne<RunnerKey>().WithMany().HasForeignKey(x => x.RunnerId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<RestockInsight>(e =>
         {

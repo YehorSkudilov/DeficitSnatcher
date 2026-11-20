@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { api, type RestockForecast, type CheckAllItem, type Dashboard as DashboardData, type ProbeResponse, type Product, type Settings, type Site } from "@/lib/api";
 import { ago, dateTime, host, money, until } from "@/lib/format";
-import { ErrorNote, LevelDot, PurchaseBadge, StockBadge, useAction, useData, useNow } from "./ui";
+import { ErrorNote, LevelDot, PurchaseBadge, StockBadge, useAction, useCollapsed, useData, useNow, CollapseButton, PagesSummary } from "./ui";
 import { go } from "./App";
 
 export function Dashboard() {
@@ -12,6 +12,7 @@ export function Dashboard() {
   const products = useData(() => api.get<Product[]>("/api/products"), [], 15000);
   const arm = useAction();
   const now = useNow();
+  const fold = useCollapsed();
   const d = dash.data;
   const [checked, setChecked] = useState<Record<number, RowResult>>({});
   const forecasts = useData(() => api.get<Record<number, RestockForecast>>("/api/restock/product/0"), [], 60000);
@@ -66,8 +67,9 @@ export function Dashboard() {
 
       {products.data?.map((p) => (
         <div className="card" key={p.id}>
-          <div className="card-head">
-            <div className="row">
+          <div className="card-head" style={fold.isCollapsed(p.id) ? { marginBottom: 0 } : undefined}>
+            <div className="row" style={{ cursor: "pointer" }} onClick={() => fold.toggle(p.id)}>
+              <CollapseButton collapsed={fold.isCollapsed(p.id)} onClick={() => fold.toggle(p.id)} />
               <h2>{p.name}</h2>
               {!p.enabled && <span className="badge">Off</span>}
               <span className="badge info">
@@ -86,7 +88,11 @@ export function Dashboard() {
               </a>
             </div>
           </div>
-          <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={d?.currency} now={now} onChanged={refresh} results={checked} forecasts={forecasts.data ?? undefined} />
+          {fold.isCollapsed(p.id) ? (
+            <PagesSummary sites={(sites.data ?? []).filter((s) => s.productId === p.id)} />
+          ) : (
+            <SiteTable sites={(sites.data ?? []).filter((s) => s.productId === p.id)} currency={d?.currency} now={now} onChanged={refresh} results={checked} forecasts={forecasts.data ?? undefined} />
+          )}
         </div>
       ))}
 

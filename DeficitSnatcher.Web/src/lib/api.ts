@@ -152,7 +152,33 @@ export type CheckAllItem = {
   buyMessage: string | null;
 };
 
-export type RunnerStatus = { hasKey: boolean; connected: boolean; machine: string | null; browser: string | null; since: string | null; lastSeen: string | null };
+export type StoreLogin = {
+  domain: string;
+  status: "signedIn" | "signedOut" | "humanCheck" | "error" | "unknown";
+  checkedAt: string | null;
+  detail: string | null;
+  accountUrl: string;
+};
+
+export type WorkerInfo = {
+  worker: string;
+  id: number | null;
+  name: string;
+  connected: boolean;
+  machine: string | null;
+  browser: string | null;
+  since: string | null;
+  lastSeen: string | null;
+  createdAt: string | null;
+  checksLastHour: number;
+  checksToday: number;
+  pagesLastHour: number;
+  lastCheck: string | null;
+  errorsLastHour: number;
+  logins: StoreLogin[];
+};
+
+export type RunnerStatus = { hasKey: boolean; connected: boolean; machine: string | null; browser: string | null; since: string | null; lastSeen: string | null; connectedCount: number };
 
 export type SiteInput = {
   productId: number;
@@ -207,6 +233,7 @@ export type Purchase = {
   manual: boolean;
   shots: number;
   aiUsed: boolean;
+  worker: string | null;
 };
 
 export type StepRecord = {
@@ -265,6 +292,7 @@ export type Scan = {
   purchaseId: number | null;
   manual: boolean;
   hasSnapshot: boolean;
+  worker: string | null;
 };
 
 export type ScanSnapshot = { reason: string; hasScreenshot: boolean; hasSource: boolean; sourceType: string | null; error: string | null };

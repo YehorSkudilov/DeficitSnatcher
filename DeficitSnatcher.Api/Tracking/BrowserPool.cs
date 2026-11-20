@@ -10,43 +10,44 @@ namespace DeficitSnatcher.Api.Tracking;
 /// a fresh context (its own cookies) for every use. The Docker image installs it (see Dockerfile); run locally,
 /// <c>dotnet run -- install-browser</c> installs it once.
 /// </summary>
-public sealed class BrowserPool(Pc.RunnerHub runner, IServer server, ILogger<BrowserPool> log) : IAsyncDisposable
+public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, IServer server, ILogger<BrowserPool> log) : IAsyncDisposable
 {
-    /// <summary>Pages set to run on the PC actually do so now (its helper is connected).</summary>
+    /// <summary>Any PC helper is connected.</summary>
     public bool PcAvailable => runner.Connected;
 
-    private IBrowser? _pcBrowser;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, IBrowser> _pcBrowsers = new();
     private readonly SemaphoreSlim _pcLock = new(1, 1);
     private bool _watching;
 
-    /// <summary>The PC's Chrome, through the helper (see Pc/RunnerHub): its default context is the helper's profile.</summary>
-    private async Task<IBrowserContext> GetPcContextAsync(CancellationToken ct)
+    /// <summary>A PC helper's Chrome (see Pc/RunnerHub): its default context is the helper's profile.</summary>
+    public async Task<IBrowserContext> GetPcContextAsync(int runnerId, CancellationToken ct)
     {
-        if (!runner.Connected)
-            throw new PcHelperException("Your PC helper isn't connected: start it on your computer (Settings → PC helper).");
+        if (!runner.IsConnected(runnerId))
+            throw new PcHelperException($"{runner.NameOf(runnerId)} isn't connected.");
         if (!_watching)
         {
             _watching = true;
-            runner.Changed += () => _pcBrowser = null;
+            runner.Changed += id => _pcBrowsers.TryRemove(id, out _);
         }
-        if (_pcBrowser is { IsConnected: true } b && b.Contexts.Count > 0)
+        if (_pcBrowsers.TryGetValue(runnerId, out var b) && b.IsConnected && b.Contexts.Count > 0)
             return b.Contexts[0];
         await _pcLock.WaitAsync(ct);
         try
         {
-            if (_pcBrowser is { IsConnected: true } b2 && b2.Contexts.Count > 0)
+            if (_pcBrowsers.TryGetValue(runnerId, out var b2) && b2.IsConnected && b2.Contexts.Count > 0)
                 return b2.Contexts[0];
             _playwright ??= await Playwright.CreateAsync();
             var address = server.Features.Get<IServerAddressesFeature>()?.Addresses.FirstOrDefault() ?? "http://127.0.0.1:8080";
             var port = new Uri(address.Replace("+", "localhost").Replace("*", "localhost").Replace("[::]", "localhost")).Port;
-            log.LogInformation("Connecting to the PC's Chrome");
-            _pcBrowser = await _playwright.Chromium.ConnectOverCDPAsync($"ws://127.0.0.1:{port}/internal/cdp/{runner.Secret}",
+            log.LogInformation("Connecting to {Helper}'s Chrome", runner.NameOf(runnerId));
+            var browser = await _playwright.Chromium.ConnectOverCDPAsync($"ws://127.0.0.1:{port}/internal/cdp/{runner.Secret}/{runnerId}",
                 new BrowserTypeConnectOverCDPOptions { Timeout = 30000 });
-            return _pcBrowser.Contexts.Count > 0 ? _pcBrowser.Contexts[0] : await _pcBrowser.NewContextAsync();
+            _pcBrowsers[runnerId] = browser;
+            return browser.Contexts.Count > 0 ? browser.Contexts[0] : await browser.NewContextAsync();
         }
         catch (PlaywrightException e)
         {
-            throw new PcHelperException("Couldn't reach Chrome on your PC: " + e.Message.Split('\n')[0]);
+            throw new PcHelperException($"Couldn't reach Chrome on {runner.NameOf(runnerId)}: " + e.Message.Split('\n')[0]);
         }
         finally
         {
@@ -66,28 +67,31 @@ public sealed class BrowserPool(Pc.RunnerHub runner, IServer server, ILogger<Bro
         """;
 
     /// <summary>
-    /// A browser to use and dispose: on the server, a fresh context (its own cookies, through the proxy when one is set);
-    /// on the owner's PC (<paramref name="onPc"/>), their Chrome's own profile (their sign-ins), whose pages are closed when
-    /// done but whose profile stays.
+    /// A browser to use and dispose, on a worker (see Pc/WorkerPool): on the server, a fresh context (its own cookies,
+    /// through the proxy when one is set); on a PC helper, its Chrome's own profile (the owner's sign-ins), whose pages are
+    /// closed when done but whose profile stays. A helper that's gone (or whose Chrome can't be reached) falls back to the
+    /// server.
     /// </summary>
-    public async Task<BrowserLease> OpenAsync(BotSettings settings, IEnumerable<SiteCookie> cookies, bool onPc, CancellationToken ct)
+    public async Task<BrowserLease> OpenAsync(BotSettings settings, IEnumerable<SiteCookie> cookies, string worker, CancellationToken ct)
     {
-        // On the PC when its helper is connected; otherwise on the server, as for any page (the store sometimes answers it).
-        if (onPc && runner.Connected)
+        if (Pc.WorkerPool.PcId(worker) is { } id && runner.IsConnected(id))
         {
             try
             {
-                return new BrowserLease(await GetPcContextAsync(ct), owned: false);
+                return new BrowserLease(await GetPcContextAsync(id, ct), owned: false, worker);
             }
             catch (PcHelperException e)
             {
                 log.LogWarning("PC browser unavailable, using the server's: {Error}", e.Message);
             }
         }
-        return new BrowserLease(await NewContextAsync(settings, cookies, ct), owned: true);
+        return new BrowserLease(await NewContextAsync(settings, cookies, ct), owned: true, Pc.WorkerPool.Server);
     }
 
-    /// <summary>A fresh browser context (its own cookies), through the proxy when one is set in Settings.</summary>
+    /// <summary>The old form: on the PC (the best connected helper) or the server.</summary>
+    public Task<BrowserLease> OpenAsync(BotSettings settings, IEnumerable<SiteCookie> cookies, bool onPc, CancellationToken ct) =>
+        OpenAsync(settings, cookies, onPc ? workers.Best(null) : Pc.WorkerPool.Server, ct);
+
     private async Task<IBrowserContext> NewContextAsync(BotSettings settings, IEnumerable<SiteCookie> cookies, CancellationToken ct)
     {
         var browser = await GetBrowserAsync(ct);
@@ -150,12 +154,14 @@ public sealed class BrowserPool(Pc.RunnerHub runner, IServer server, ILogger<Bro
 
 /// <summary>A browser borrowed for one job: pages opened through it are closed when it's disposed, and a context made for the
 /// job (on the server) is closed too. The PC's profile is never closed.</summary>
-public sealed class BrowserLease(IBrowserContext context, bool owned) : IAsyncDisposable
+public sealed class BrowserLease(IBrowserContext context, bool owned, string worker) : IAsyncDisposable
 {
     private readonly List<IPage> _pages = [];
 
     public IBrowserContext Context => context;
     public bool OnPc => !owned;
+    /// <summary>Where it really runs: "server" or "pc:{id}".</summary>
+    public string Worker => worker;
 
     public async Task<IPage> NewPageAsync()
     {

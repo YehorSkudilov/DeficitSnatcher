@@ -11,7 +11,7 @@ namespace DeficitSnatcher.Api.Tracking;
 /// range, a lower price, a site that keeps failing) and buy when it's a match and auto-buy is on.
 /// </summary>
 public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetcher, SettingsStore settingsStore, SecretBox box,
-    Notifier notifier, Buyer buyer, ScanFollowUp followUp, ILogger<CheckService> log)
+    Notifier notifier, Buyer buyer, ScanFollowUp followUp, Pc.WorkerPool workers, ILogger<CheckService> log)
 {
     public sealed record CheckOutcome(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage, long? ScanId = null,
         int? PurchaseId = null);
@@ -27,13 +27,15 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         var product = site.Product;
         var settings = await settingsStore.GetAsync(ct);
         var now = DateTimeOffset.UtcNow;
+        // Whose turn it is: the PC helpers and the server take turns (see Pc/WorkerPool).
+        var worker = workers.Next(site);
         var watch = System.Diagnostics.Stopwatch.StartNew();
 
         PageResult result;
         try
         {
             var cookies = site.CookiesEncrypted == null ? [] : SiteCookies.Parse(box.Decrypt(site.CookiesEncrypted), site.Url);
-            result = await fetcher.FetchAsync(site, cookies, settings, ct);
+            result = await fetcher.FetchAsync(site, cookies, settings, ct, worker);
         }
         catch (Exception e) when (!ct.IsCancellationRequested)
         {
@@ -52,12 +54,13 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
                 Error = Cut(message, 2000),
                 Notes = $"{site.Kind} · failed {site.ConsecutiveErrors} in a row",
                 Manual = manual,
+                Worker = worker,
             };
             db.Scans.Add(failed);
             await db.SaveChangesAsync(CancellationToken.None);
             log.LogInformation("Check of {Site} failed: {Error}", site.Name, message);
             if (settings.ScanSnapshots != "Off")
-                followUp.Snapshot(failed.Id, site.Url, site.CookiesEncrypted, "The check failed", null, null, site.RunOnPc);
+                followUp.Snapshot(failed.Id, site.Url, site.CookiesEncrypted, "The check failed", null, null, worker);
             // Keeps failing in a way a different reader might get past (blocked, timed out, changed page), not a dead link.
             // (Not when the store's bot protection blocks it: re-reading the page can't get past that.)
             if (site.ConsecutiveErrors >= 3 && !message.Contains("404") && e is not (BlockedException or PcHelperException))
@@ -108,6 +111,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             Notes = Cut(string.Join(" · ", new[] { site.Kind.ToString() }.Concat(result.Notes)
                 .Concat(result.VariantId != null ? [$"variant {result.VariantId}"] : [])), 1000),
             Manual = manual,
+            Worker = result.Worker,
         };
         db.Scans.Add(scan);
         await db.SaveChangesAsync(CancellationToken.None);
@@ -122,7 +126,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             : site.UnreadableCount > 0 ? "No price or stock found"
             : null;
         if (reason != null && settings.ScanSnapshots != "Off")
-            followUp.Snapshot(scan.Id, site.Url, site.CookiesEncrypted, reason, result.Source, result.SourceType, site.RunOnPc);
+            followUp.Snapshot(scan.Id, site.Url, site.CookiesEncrypted, reason, result.Source, result.SourceType, result.Worker);
         if (site.UnreadableCount >= 3)
             await followUp.MaybeRelearnAsync(site.Id, $"{site.UnreadableCount} checks in a row found {(result.Price == null ? "no price" : "no stock")}");
 
@@ -152,7 +156,9 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             var trigger = $"{(manual ? "Check now" : "Scheduled check")} #{scan.Id} at {now:yyyy-MM-dd HH:mm:ss} UTC: {verdict.Reason}"
                 + $"\nListing: {result.Title} · price {result.Price:0.00}{(site.ShippingCost > 0 ? $" + {site.ShippingCost:0.00} shipping" : "")}"
                 + $"{(result.VariantId != null ? $" · variant {result.VariantId}" : "")} · read from {string.Join(", ", result.Notes)}";
-            var outcome = await buyer.BuyAsync(site.Id, verdict.TotalPrice!.Value, manual: false, forceDryRun: false, trigger, ct);
+            // Bought where it was seen in stock (that helper's sign-ins and session), if it's still there.
+            var outcome = await buyer.BuyAsync(site.Id, verdict.TotalPrice!.Value, manual: false, forceDryRun: false, trigger, ct,
+                preferredWorker: result.Worker);
             buyMessage = outcome.Message;
             purchaseId = outcome.PurchaseId;
             scan.Action = Cut(outcome.Started ? outcome.Message : "Not buying: " + outcome.Message, 1000);

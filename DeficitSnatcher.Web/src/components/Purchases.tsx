@@ -92,7 +92,10 @@ export function Purchases({ initial, productId: fixedProduct, siteId: fixedSite 
                     <td className="faint num">{p.id}</td>
                     <td className="small" style={{ whiteSpace: "nowrap" }}>
                       {dateTime(p.startedAt)}
-                      <div className="faint">{p.manual ? "by hand" : "automatic"}</div>
+                      <div className="faint">
+                        {p.manual ? "by hand" : "automatic"}
+                        {p.worker && ` · ${p.worker}`}
+                      </div>
                     </td>
                     <td>
                       {p.productName}
@@ -163,6 +166,7 @@ export function PurchaseDetail({ id }: { id: number }) {
           <PurchaseBadge status={p.status} />
           {p.dryRun && <span className="badge warn">dry run</span>}
           {p.aiUsed && <span className="badge info">AI</span>}
+          {p.worker && <span className="badge">on {p.worker}</span>}
         </div>
         <div className="row">
           {data.hasHtml && (

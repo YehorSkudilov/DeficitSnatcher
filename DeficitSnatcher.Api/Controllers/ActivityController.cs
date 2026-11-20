@@ -23,7 +23,8 @@ public sealed record PurchaseDto(
     bool DryRun,
     bool Manual,
     int Shots,
-    bool AiUsed);
+    bool AiUsed,
+    string? Worker = null);
 
 public sealed record ShotDto(long Id, int? StepIndex, string Label, DateTimeOffset At);
 
@@ -159,7 +160,7 @@ public sealed class ActivityController(AppDbContext db, SettingsStore settingsSt
     [HttpGet("purchases/{id:int}")]
     public async Task<ActionResult<PurchaseDetailDto>> GetPurchase(int id, CancellationToken ct)
     {
-        var row = (await PurchaseQuery(db.Purchases.Where(p => p.Id == id)).ToListAsync(ct)).FirstOrDefault();
+        var row = (await Named(await PurchaseQuery(db.Purchases.Where(p => p.Id == id)).ToListAsync(ct), ct)).FirstOrDefault();
         if (row == null)
             return NotFound();
         var p = await db.Purchases.AsNoTracking().Where(x => x.Id == id)
@@ -228,7 +229,13 @@ public sealed class ActivityController(AppDbContext db, SettingsStore settingsSt
         join s in db.Sites on p.SiteId equals s.Id
         join pr in db.Products on p.ProductId equals pr.Id
         select new PurchaseDto(p.Id, p.SiteId, s.Name, p.ProductId, pr.Name, p.StartedAt, p.FinishedAt, p.Price, p.Quantity, p.Status, p.Message,
-            p.DryRun, p.Manual, db.PurchaseShots.Count(x => x.PurchaseId == p.Id), p.AiUsed);
+            p.DryRun, p.Manual, db.PurchaseShots.Count(x => x.PurchaseId == p.Id), p.AiUsed, p.Worker);
+
+    private async Task<List<PurchaseDto>> Named(List<PurchaseDto> rows, CancellationToken ct)
+    {
+        var names = await db.RunnerKeys.AsNoTracking().ToDictionaryAsync(r => r.Id, r => r.Name, ct);
+        return rows.Select(p => p with { Worker = ScansController.WorkerName(p.Worker, names) }).ToList();
+    }
 
     private async Task<List<PurchaseDto>> Purchases(PurchaseFilter f, CancellationToken ct)
     {
@@ -248,6 +255,6 @@ public sealed class ActivityController(AppDbContext db, SettingsStore settingsSt
         if (f.To != null)
             q = q.Where(p => p.StartedAt < f.To);
         q = q.OrderByDescending(p => p.Id).Take(Math.Clamp(f.Limit, 1, 1000));
-        return (await PurchaseQuery(q).ToListAsync(ct)).OrderByDescending(p => p.Id).ToList();
+        return (await Named(await PurchaseQuery(q).ToListAsync(ct), ct)).OrderByDescending(p => p.Id).ToList();
     }
 }

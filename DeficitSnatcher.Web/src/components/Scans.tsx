@@ -198,6 +198,7 @@ export function Scans({ initial, productId, siteId }: { initial?: string; produc
                       <td className="small" style={{ whiteSpace: "nowrap" }}>
                         {dateTime(s.at)}
                         {s.manual && <div className="faint">Check now</div>}
+                        {s.worker && <div className="faint">on {s.worker}</div>}
                         {s.hasSnapshot && <div className="faint">📷 snapshot</div>}
                       </td>
                       <td>

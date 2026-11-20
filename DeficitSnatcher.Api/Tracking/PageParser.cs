@@ -22,6 +22,9 @@ public sealed record PageResult
     public string? Source { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public string? SourceType { get; init; }
+    /// <summary>Where it was read: "server" or "pc:{helper id}".</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string Worker { get; init; } = "server";
 }
 
 /// <summary>Reads price, stock and title from a Shopify product's JSON or from a page's HTML.</summary>

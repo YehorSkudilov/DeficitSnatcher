@@ -10,81 +10,148 @@ using Microsoft.EntityFrameworkCore;
 namespace DeficitSnatcher.Api.Pc;
 
 /// <summary>
-/// The PC helper (DeficitSnatcher.Runner) on the owner's computer: it connects out to the site and lends it its Chrome.
+/// The PC helpers (DeficitSnatcher.Runner) on the owner's computers: each connects out to the site with its own key and
+/// lends it its Chrome.
 ///
-/// The helper keeps a control WebSocket open (/api/runner/connect). When the server wants the PC's browser, Playwright
-/// connects to a loopback-only endpoint here (/internal/cdp/{secret}); the server asks the helper over the control socket
-/// to open a pipe (/api/runner/pipe/{id}), and the helper joins that pipe to its Chrome's DevTools socket. From then on
-/// Playwright drives the PC's Chrome as if it were local. Nothing on the PC listens to the network.
+/// A helper keeps a control WebSocket open (/api/runner/connect). When the server wants a helper's browser, Playwright
+/// connects to a loopback-only endpoint here (/internal/cdp/{secret}/{helper}); the server asks that helper over its
+/// control socket to open a pipe (/api/runner/pipe/{id}), and the helper joins the pipe to its Chrome's DevTools socket.
+/// From then on Playwright drives that Chrome as if it were local. Nothing on the PCs listens to the network.
 /// </summary>
 public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, ILogger<RunnerHub> log)
 {
-    private const string KeyName = "runner-key-hash";
+    private const string LegacyKeyName = "runner-key-hash";
 
     /// <summary>The loopback endpoint's secret path part, new each start: only this process knows it.</summary>
     public string Secret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 
-    private WebSocket? _control;
-    private readonly SemaphoreSlim _controlSend = new(1, 1);
+    private sealed class Live(int id, string name, WebSocket control, string? machine, string? browser)
+    {
+        public int Id { get; } = id;
+        public string Name { get; set; } = name;
+        public WebSocket Control { get; } = control;
+        public SemaphoreSlim Send { get; } = new(1, 1);
+        public string? Machine { get; } = machine;
+        public string? Browser { get; } = browser;
+        public DateTimeOffset Since { get; } = DateTimeOffset.UtcNow;
+        public DateTimeOffset LastSeen { get; set; } = DateTimeOffset.UtcNow;
+    }
+
+    private readonly ConcurrentDictionary<int, Live> _live = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<WebSocket>> _waitingPipes = new();
+    private readonly ConcurrentDictionary<WebSocket, TaskCompletionSource> _pipeDone = new();
 
-    public sealed record Info(bool Connected, string? Machine, string? Browser, DateTimeOffset? Since, DateTimeOffset? LastSeen);
+    public sealed record Info(int Id, string Name, bool Connected, string? Machine, string? Browser, DateTimeOffset? Since,
+        DateTimeOffset? LastSeen, DateTimeOffset CreatedAt);
 
-    private Info _info = new(false, null, null, null, null);
-    public Info Status => _info with { Connected = _control is { State: WebSocketState.Open } };
-    public bool Connected => _control is { State: WebSocketState.Open };
+    /// <summary>The helpers connected now, oldest key first.</summary>
+    public IReadOnlyList<int> ConnectedIds =>
+        _live.Values.Where(r => r.Control.State == WebSocketState.Open).Select(r => r.Id).OrderBy(i => i).ToList();
 
-    /// <summary>Raised when the helper connects or goes away (the browser pool drops its connection).</summary>
-    public event Action? Changed;
+    public bool Connected => ConnectedIds.Count > 0;
+    public bool IsConnected(int id) => _live.TryGetValue(id, out var r) && r.Control.State == WebSocketState.Open;
+    public string NameOf(int id) => _live.TryGetValue(id, out var r) ? r.Name : $"PC helper {id}";
 
-    // ---- The helper's key ----
+    /// <summary>Raised with the helper's id when it connects or goes away (the browser pool drops its connection).</summary>
+    public event Action<int>? Changed;
 
-    /// <summary>A new key for the helper (shown once); the previous one stops working.</summary>
-    public async Task<string> NewKeyAsync()
+    // ---- Keys: one per helper ----
+
+    /// <summary>A key for a new helper (shown once, as part of its setup code).</summary>
+    public async Task<(int Id, string Key)> NewKeyAsync(string? name)
     {
         var key = "dsr_" + Convert.ToBase64String(RandomNumberGenerator.GetBytes(24)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var row = await db.StoredValues.FirstOrDefaultAsync(v => v.Key == KeyName);
-        var hash = Hash(key);
-        if (row == null)
-            db.StoredValues.Add(new StoredValue { Key = KeyName, Value = hash });
-        else
-            row.Value = hash;
+        var count = await db.RunnerKeys.CountAsync();
+        var row = new RunnerKey
+        {
+            Name = string.IsNullOrWhiteSpace(name) ? $"PC helper {count + 1}" : name.Trim()[..Math.Min(name.Trim().Length, 100)],
+            KeyHash = Hash(key),
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        db.RunnerKeys.Add(row);
         await db.SaveChangesAsync();
-        if (_control != null)
-            await CloseControlAsync("A new key was made.");
-        return key;
+        return (row.Id, key);
     }
 
-    public async Task<bool> HasKeyAsync()
-    {
-        using var scope = scopes.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<AppDbContext>().StoredValues.AnyAsync(v => v.Key == KeyName);
-    }
-
-    public async Task<bool> CheckKeyAsync(string? key)
+    /// <summary>The helper a key belongs to, or null.</summary>
+    public async Task<RunnerKey?> FindAsync(string? key)
     {
         if (string.IsNullOrEmpty(key))
-            return false;
+            return null;
+        await MoveLegacyKeyAsync();
+        var hash = Hash(key);
         using var scope = scopes.CreateScope();
-        var row = await scope.ServiceProvider.GetRequiredService<AppDbContext>().StoredValues.AsNoTracking().FirstOrDefaultAsync(v => v.Key == KeyName);
-        return row != null && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(row.Value), Encoding.UTF8.GetBytes(Hash(key)));
+        return await scope.ServiceProvider.GetRequiredService<AppDbContext>().RunnerKeys.AsNoTracking().FirstOrDefaultAsync(r => r.KeyHash == hash);
+    }
+
+    /// <summary>Every helper there's a key for, connected or not.</summary>
+    public async Task<List<Info>> ListAsync()
+    {
+        await MoveLegacyKeyAsync();
+        using var scope = scopes.CreateScope();
+        var rows = await scope.ServiceProvider.GetRequiredService<AppDbContext>().RunnerKeys.AsNoTracking().OrderBy(r => r.Id).ToListAsync();
+        return rows.Select(r => _live.TryGetValue(r.Id, out var l) && l.Control.State == WebSocketState.Open
+                ? new Info(r.Id, r.Name, true, l.Machine, l.Browser, l.Since, l.LastSeen, r.CreatedAt)
+                : new Info(r.Id, r.Name, false, r.Machine, r.Browser, null, r.LastSeenAt, r.CreatedAt))
+            .ToList();
+    }
+
+    public async Task<bool> RenameAsync(int id, string name)
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var row = await db.RunnerKeys.FirstOrDefaultAsync(r => r.Id == id);
+        if (row == null || string.IsNullOrWhiteSpace(name))
+            return false;
+        row.Name = name.Trim()[..Math.Min(name.Trim().Length, 100)];
+        await db.SaveChangesAsync();
+        if (_live.TryGetValue(id, out var l))
+            l.Name = row.Name;
+        return true;
+    }
+
+    /// <summary>The helper's key stops working, and it's disconnected now.</summary>
+    public async Task<bool> RevokeAsync(int id)
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var gone = await db.RunnerKeys.Where(r => r.Id == id).ExecuteDeleteAsync() > 0;
+        if (_live.TryRemove(id, out var l))
+            await CloseAsync(l.Control, "This helper's setup code was revoked.");
+        Changed?.Invoke(id);
+        return gone;
+    }
+
+    /// <summary>The first version had one key, kept as a setting: it becomes the first helper.</summary>
+    private async Task MoveLegacyKeyAsync()
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var legacy = await db.StoredValues.FirstOrDefaultAsync(v => v.Key == LegacyKeyName);
+        if (legacy == null)
+            return;
+        if (!await db.RunnerKeys.AnyAsync(r => r.KeyHash == legacy.Value))
+            db.RunnerKeys.Add(new RunnerKey { Name = "PC helper", KeyHash = legacy.Value, CreatedAt = DateTimeOffset.UtcNow });
+        db.StoredValues.Remove(legacy);
+        await db.SaveChangesAsync();
     }
 
     private static string Hash(string key) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
 
     // ---- Sockets ----
 
-    /// <summary>The helper's control socket: kept until it closes. A newer helper replaces an older one.</summary>
-    public async Task RunControlAsync(WebSocket ws, string? machine, string? browser, CancellationToken ct)
+    /// <summary>A helper's control socket: kept until it closes. The same helper connecting again replaces itself.</summary>
+    public async Task RunControlAsync(WebSocket ws, RunnerKey key, string? machine, string? browser, CancellationToken ct)
     {
-        if (_control != null)
-            await CloseControlAsync("Another PC helper connected.");
-        _control = ws;
-        _info = new Info(true, machine, browser, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
-        Changed?.Invoke();
-        await notifier.LogAsync(EventLevel.Good, $"PC helper connected ({machine ?? "a computer"}, {browser ?? "Chrome"}).");
+        if (_live.TryRemove(key.Id, out var old))
+            await CloseAsync(old.Control, "The same helper connected again.");
+        var live = new Live(key.Id, key.Name, ws, machine, browser);
+        _live[key.Id] = live;
+        Changed?.Invoke(key.Id);
+        await SeenAsync(key.Id, machine, browser);
+        await notifier.LogAsync(EventLevel.Good, $"{key.Name} connected ({machine ?? "a computer"}, {browser ?? "Chrome"}).");
         var buffer = new byte[4096];
         try
         {
@@ -93,7 +160,7 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
                 var r = await ws.ReceiveAsync(buffer, ct);
                 if (r.MessageType == WebSocketMessageType.Close)
                     break;
-                _info = _info with { LastSeen = DateTimeOffset.UtcNow };
+                live.LastSeen = DateTimeOffset.UtcNow;
             }
         }
         catch (Exception e) when (e is WebSocketException or OperationCanceledException)
@@ -101,49 +168,65 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
         }
         finally
         {
-            if (ReferenceEquals(_control, ws))
+            if (_live.TryGetValue(key.Id, out var current) && ReferenceEquals(current, live))
             {
-                _control = null;
-                _info = _info with { Connected = false, LastSeen = DateTimeOffset.UtcNow };
-                Changed?.Invoke();
+                _live.TryRemove(key.Id, out _);
+                Changed?.Invoke(key.Id);
+                await SeenAsync(key.Id, machine, browser);
+                var left = ConnectedIds.Count;
                 await notifier.NotifyAsync(NotifyKind.Error, EventLevel.Warning,
-                    "PC helper disconnected: pages set to run on your PC can't be checked until it's back.");
+                    $"{live.Name} disconnected. {(left > 0 ? $"{left} other helper{(left == 1 ? " is" : "s are")} still connected." : "Pages are checked from the server until a helper is back.")}");
             }
         }
     }
 
-    private async Task CloseControlAsync(string why)
+    private async Task SeenAsync(int id, string? machine, string? browser)
     {
-        var old = _control;
-        _control = null;
         try
         {
-            if (old is { State: WebSocketState.Open })
-                await old.CloseAsync(WebSocketCloseStatus.PolicyViolation, why, CancellationToken.None);
+            using var scope = scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.RunnerKeys.Where(r => r.Id == id).ExecuteUpdateAsync(u => u
+                .SetProperty(r => r.LastSeenAt, DateTimeOffset.UtcNow)
+                .SetProperty(r => r.Machine, machine)
+                .SetProperty(r => r.Browser, browser));
+        }
+        catch (Exception e)
+        {
+            log.LogWarning("Couldn't note helper {Id} was seen: {Error}", id, e.Message);
+        }
+    }
+
+    private static async Task CloseAsync(WebSocket ws, string why)
+    {
+        try
+        {
+            if (ws.State == WebSocketState.Open)
+                await ws.CloseAsync(WebSocketCloseStatus.PolicyViolation, why, CancellationToken.None);
         }
         catch (Exception)
         {
         }
     }
 
-    /// <summary>Playwright connected to the loopback endpoint: get a pipe from the helper and join the two.</summary>
-    public async Task RunCdpAsync(WebSocket playwright, CancellationToken ct)
+    /// <summary>Playwright connected to the loopback endpoint for one helper: get a pipe from it and join the two.</summary>
+    public async Task RunCdpAsync(int runnerId, WebSocket playwright, CancellationToken ct)
     {
-        var control = _control ?? throw new InvalidOperationException("The PC helper isn't connected.");
+        if (!_live.TryGetValue(runnerId, out var live) || live.Control.State != WebSocketState.Open)
+            throw new InvalidOperationException("That PC helper isn't connected.");
         var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
         var waiting = new TaskCompletionSource<WebSocket>(TaskCreationOptions.RunContinuationsAsynchronously);
         _waitingPipes[id] = waiting;
         try
         {
-            await _controlSend.WaitAsync(ct);
+            await live.Send.WaitAsync(ct);
             try
             {
-                await control.SendAsync(JsonSerializer.SerializeToUtf8Bytes(new { open = id }), WebSocketMessageType.Text, true, ct);
-                log.LogInformation("Asked the PC helper for a browser pipe {Id} (socket {State})", id, control.State);
+                await live.Control.SendAsync(JsonSerializer.SerializeToUtf8Bytes(new { open = id }), WebSocketMessageType.Text, true, ct);
             }
             finally
             {
-                _controlSend.Release();
+                live.Send.Release();
             }
             var pipe = await waiting.Task.WaitAsync(TimeSpan.FromSeconds(20), ct);
             await JoinAsync(playwright, pipe, ct);
@@ -154,7 +237,7 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
         }
     }
 
-    /// <summary>The helper's side of a pipe arrived: hand it to whoever asked for it, and keep it open until it's done.</summary>
+    /// <summary>A helper's side of a pipe arrived: hand it to whoever asked for it, and keep it open until it's done.</summary>
     public async Task RunPipeAsync(string id, WebSocket pipe, CancellationToken ct)
     {
         if (!_waitingPipes.TryGetValue(id, out var waiting))
@@ -167,8 +250,6 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
         waiting.TrySetResult(pipe);
         await done.Task.WaitAsync(ct);
     }
-
-    private readonly ConcurrentDictionary<WebSocket, TaskCompletionSource> _pipeDone = new();
 
     private async Task JoinAsync(WebSocket a, WebSocket b, CancellationToken ct)
     {

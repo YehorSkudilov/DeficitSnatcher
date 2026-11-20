@@ -833,3 +833,15 @@ details > summary {
     transform: rotate(360deg);
   }
 }
+
+.collapse-btn {
+  padding: 2px 6px;
+  min-width: 0;
+}
+.chevron {
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+.chevron.open {
+  transform: rotate(90deg);
+}

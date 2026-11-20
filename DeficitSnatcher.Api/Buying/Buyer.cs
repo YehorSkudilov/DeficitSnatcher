@@ -17,7 +17,7 @@ namespace DeficitSnatcher.Api.Buying;
 /// one lock, so two sites coming into stock together can't buy more than the product's limit between them.
 /// </summary>
 public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore settingsStore, SecretBox box, BrowserPool browsers,
-    Notifier notifier, Ai.OpenAiClient ai, Ai.CheckoutAgent agent, Pc.HumanCheck humanCheck, ILogger<Buyer> log)
+    Notifier notifier, Ai.OpenAiClient ai, Ai.CheckoutAgent agent, Pc.HumanCheck humanCheck, Pc.WorkerPool workers, ILogger<Buyer> log)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -32,7 +32,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
     /// the final steps whatever the settings say. <paramref name="trigger"/>: what led to it, kept with the checkout.
     /// </summary>
     public async Task<Outcome> BuyAsync(int siteId, decimal price, bool manual, bool forceDryRun, string trigger, CancellationToken ct,
-        bool aiRecord = false)
+        bool aiRecord = false, string? preferredWorker = null)
     {
         var settings = await settingsStore.GetAsync(ct);
         var dryRun = forceDryRun || settings.DryRun || aiRecord;
@@ -133,7 +133,8 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
         }
 
         await notifier.LogAsync(EventLevel.Info, $"{(dryRun ? "Dry-run checkout" : "Buying")} {product.Name} at {site.Name} for {price:0.00} (checkout #{purchaseId})…", site.Id);
-        _ = Task.Run(() => RunAsync(purchaseId, site, product, steps, price, dryRun, settings, aiAvailable, aiRecord, manual, aiAgentAllowed), CancellationToken.None);
+        _ = Task.Run(() => RunAsync(purchaseId, site, product, steps, price, dryRun, settings, aiAvailable, aiRecord, manual, aiAgentAllowed,
+            workers.Best(site, preferredWorker)), CancellationToken.None);
         return new(true, $"{(dryRun ? "Dry-run checkout" : "Checkout")} #{purchaseId} started.", purchaseId, PurchaseStatus.Running);
     }
 
@@ -156,9 +157,10 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
         string? Note = null);
 
     private async Task RunAsync(int purchaseId, Site site, Product product, List<CheckoutStep> steps, decimal price, bool dryRun, BotSettings settings,
-        bool aiAvailable, bool aiRecord, bool manual, bool aiAgentAllowed)
+        bool aiAvailable, bool aiRecord, bool manual, bool aiAgentAllowed, string worker)
     {
         var aiUsed = false;
+        var ranOn = worker;
         var logText = new StringBuilder();
         var records = new List<StepRecord>();
         var browserLog = new List<string>();
@@ -190,12 +192,13 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
 
             var cookies = site.CookiesEncrypted == null ? [] : SiteCookies.Parse(box.Decrypt(site.CookiesEncrypted), site.Url);
             Log($"Opening a browser ({cookies.Count} cookies, user agent: {settings.UserAgent})");
-            await using var lease = await browsers.OpenAsync(settings, cookies, site.RunOnPc, CancellationToken.None);
+            await using var lease = await browsers.OpenAsync(settings, cookies, worker, CancellationToken.None);
+            ranOn = lease.Worker;
             var page = await lease.NewPageAsync();
             if (lease.OnPc)
-                Log("Running in Chrome on your PC (PC helper).");
-            else if (site.RunOnPc)
-                Log("The PC helper isn't connected: running on the server instead.");
+                Log($"Running in Chrome on {workers.Label(lease.Worker)} (PC helper).");
+            else if (Pc.WorkerPool.PcId(worker) != null)
+                Log($"{workers.Label(worker)} isn't reachable: running on the server instead.");
             page.Console += (_, m) =>
             {
                 if (m.Type is "error" or "warning")
@@ -409,6 +412,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
             purchase.PageHtml = html == null ? null : box.Encrypt(html.Length > 3_000_000 ? html[..3_000_000] : html);
             purchase.FinalUrl = finalUrl;
             purchase.AiUsed = aiUsed;
+            purchase.Worker = ranOn;
             purchase.FinishedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync();
         }

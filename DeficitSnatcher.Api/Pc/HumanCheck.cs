@@ -30,29 +30,7 @@ public sealed class HumanCheck(Notifier notifier)
         if (vendor == null)
             return;
 
-        // Up from minimised, in front, on the store's tab.
-        try
-        {
-            var cdp = await page.Context.NewCDPSessionAsync(page);
-            var window = await cdp.SendAsync("Browser.getWindowForTarget");
-            if (window is { } w && w.TryGetProperty("windowId", out var id))
-                await cdp.SendAsync("Browser.setWindowBounds", new Dictionary<string, object>
-                {
-                    ["windowId"] = id.GetInt32(),
-                    ["bounds"] = new Dictionary<string, object> { ["windowState"] = "normal" },
-                });
-            await cdp.DetachAsync();
-        }
-        catch (PlaywrightException)
-        {
-        }
-        try
-        {
-            await page.BringToFrontAsync();
-        }
-        catch (PlaywrightException)
-        {
-        }
+        await ShowAsync(page);
         var now = DateTimeOffset.UtcNow;
         if (!_lastAlert.TryGetValue(siteId, out var last) || now - last > TimeSpan.FromMinutes(10))
         {
@@ -87,5 +65,32 @@ public sealed class HumanCheck(Notifier notifier)
             }
         }
         throw new BlockedException($"Blocked by {vendor} on your PC: the human check wasn't done within {Wait.TotalMinutes:0} minutes.");
+    }
+
+    /// <summary>Brings the helper's Chrome window up (un-minimised) and in front, on this page's tab.</summary>
+    public static async Task ShowAsync(IPage page)
+    {
+        try
+        {
+            var cdp = await page.Context.NewCDPSessionAsync(page);
+            var window = await cdp.SendAsync("Browser.getWindowForTarget");
+            if (window is { } w && w.TryGetProperty("windowId", out var id))
+                await cdp.SendAsync("Browser.setWindowBounds", new Dictionary<string, object>
+                {
+                    ["windowId"] = id.GetInt32(),
+                    ["bounds"] = new Dictionary<string, object> { ["windowState"] = "normal" },
+                });
+            await cdp.DetachAsync();
+        }
+        catch (PlaywrightException)
+        {
+        }
+        try
+        {
+            await page.BringToFrontAsync();
+        }
+        catch (PlaywrightException)
+        {
+        }
     }
 }

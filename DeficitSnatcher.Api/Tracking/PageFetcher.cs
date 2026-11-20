@@ -5,7 +5,7 @@ using DeficitSnatcher.Api.Settings;
 namespace DeficitSnatcher.Api.Tracking;
 
 /// <summary>Fetches a site's product page and reads it (see PageParser), the way the site's kind says.</summary>
-public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanCheck humanCheck)
+public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanCheck humanCheck, Pc.WorkerPool workers)
 {
     public static SocketsHttpHandler CreateHandler() => new()
     {
@@ -16,18 +16,21 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
         PooledConnectionLifetime = TimeSpan.FromMinutes(5),
     };
 
-    public async Task<PageResult> FetchAsync(Site site, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct)
+    /// <param name="worker">Who reads it: "server", or "pc:{id}" for a PC helper (see Pc/WorkerPool); null: a helper for
+    /// a Run-on-my-PC page when one's connected, else the server.</param>
+    public async Task<PageResult> FetchAsync(Site site, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, string? worker = null)
     {
         var url = new Uri(site.Url);
         var selectors0 = new PageParser.Selectors(site.PriceSelector, site.TitleSelector, site.InStockSelector, site.OutOfStockText);
-        // On the owner's PC everything goes through their Chrome (the store blocks the server). Without the PC helper
-        // connected, the page is read from the server like any other.
-        if (site.RunOnPc && browsers.PcAvailable)
+        worker ??= site.RunOnPc ? workers.Best(site) : Pc.WorkerPool.Server;
+        // On a PC helper everything goes through its Chrome (its home connection and sign-ins). A helper that's gone
+        // falls back to the server, like any other page.
+        if (Pc.WorkerPool.PcId(worker) != null && workers.Available(worker))
         {
-            var rendered = await RenderAsync(url, cookies, settings, ct, site);
+            var (rendered, ranOn) = await RenderAsync(url, cookies, settings, ct, site, worker);
             if (BlockDetector.Detect(rendered) is { } pcVendor)
                 throw new BlockedException(BlockDetector.Message(pcVendor, browser: true));
-            return PageParser.ParseHtml(rendered, selectors0) with { Source = rendered, SourceType = "text/html" };
+            return PageParser.ParseHtml(rendered, selectors0) with { Source = rendered, SourceType = "text/html", Worker = ranOn };
         }
         if (site.Kind == SiteKind.Shopify || site.Kind == SiteKind.Auto && LooksLikeShopifyProduct(url))
         {
@@ -42,7 +45,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
         var selectors = new PageParser.Selectors(site.PriceSelector, site.TitleSelector, site.InStockSelector, site.OutOfStockText);
         if (site.Kind == SiteKind.Browser)
         {
-            var rendered = await RenderAsync(url, cookies, settings, ct);
+            var (rendered, _) = await RenderAsync(url, cookies, settings, ct, site, Pc.WorkerPool.Server);
             if (BlockDetector.Detect(rendered) is { } vendor)
                 throw new BlockedException(BlockDetector.Message(vendor, browser: true));
             return PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" };
@@ -75,9 +78,10 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
         return (response.StatusCode, body);
     }
 
-    private async Task<string> RenderAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site? site = null)
+    private async Task<(string Html, string Worker)> RenderAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site? site,
+        string worker)
     {
-        await using var lease = await browsers.OpenAsync(settings, cookies, site?.RunOnPc == true, ct);
+        await using var lease = await browsers.OpenAsync(settings, cookies, worker, ct);
         var onPc = lease.OnPc;
         var page = await lease.NewPageAsync();
         await page.GotoAsync(url.ToString(), new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = settings.RequestTimeoutSeconds * 1000 });
@@ -91,7 +95,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
         }
         if (onPc)
             await humanCheck.WaitIfBlockedAsync(page, site!.Id, site.Name, ct);
-        return await page.ContentAsync();
+        return (await page.ContentAsync(), lease.Worker);
     }
 
     private static bool LooksLikeShopifyProduct(Uri url) => url.AbsolutePath.Contains("/products/", StringComparison.OrdinalIgnoreCase);

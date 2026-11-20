@@ -323,13 +323,14 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
           <div className={`notice small ${runner.data.connected ? "good" : "warn"}`}>
             {runner.data.connected ? (
               <>
-                Checked and bought in Chrome on <b>{runner.data.machine}</b> (PC helper connected). If the store asks you to prove you&apos;re human,
+                Checked and bought in Chrome on the PC helper{runner.data.connectedCount > 1 ? "s" : ""} (
+                {runner.data.connectedCount > 1 ? `${runner.data.connectedCount} connected, taking turns` : <b>{runner.data.machine}</b>}). If the store asks you to prove you&apos;re human,
                 you get an alert: do it in that window and the bot carries on.
               </>
             ) : (
               <>
                 The PC helper isn&apos;t connected, so this page is checked from the server for now (the store sometimes answers). Start the
-                helper on your computer: Settings → PC helper.
+                helper on your computer: <a href="#helpers">Helpers</a>.
               </>
             )}
           </div>
