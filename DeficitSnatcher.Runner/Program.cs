@@ -34,7 +34,6 @@ static partial class Helper
     {
         public string? Site { get; set; }
         public string? Key { get; set; }
-        public bool Headless { get; set; }
         public bool Autostart { get; set; } = true;
         /// <summary>Installs new versions by itself (checked every few hours).</summary>
         public bool AutoUpdate { get; set; } = true;
@@ -90,7 +89,6 @@ static partial class Helper
                 "restart" => Restart(),
                 "window" => Window(args.Length > 1 ? args[1] : ""),
                 "autostart" => Autostart(args.Length > 1 ? args[1] : ""),
-                "headless" => Headless(args.Length > 1 ? args[1] : ""),
                 "update" => SendCommand("update", "Checking for a new version: deficitsnatcher logs to see how it went."),
                 "autoupdate" => AutoUpdate(args.Length > 1 ? args[1] : ""),
                 "logs" => Logs(args.Length > 1 && int.TryParse(args[1], out var n) ? n : 40),
@@ -190,7 +188,6 @@ static partial class Helper
                 Console.WriteLine($"Last error: {s.LastError}");
         }
         Console.WriteLine($"Autostart:  {(c.Autostart ? "on" : "off")}");
-        Console.WriteLine($"Window:     {(c.Headless ? "none (headless)" : "minimised Chrome")}");
         Console.WriteLine($"Version:    {MyVersion} (updates by itself: {(c.AutoUpdate ? "on" : "off")})");
         Console.WriteLine($"Files:      {Home}");
         return 0;
@@ -265,21 +262,6 @@ static partial class Helper
         return Print(c.Autostart ? "It starts at every login." : "It no longer starts at login (deficitsnatcher start to run it now).");
     }
 
-    static int Headless(string what)
-    {
-        if (what is not ("on" or "off"))
-            return Fail("deficitsnatcher headless on | off   (on: no Chrome window at all; stores can't ask you to prove you're human then)");
-        var c = LoadConfig();
-        c.Headless = what == "on";
-        SaveConfig(c);
-        if (IsRunning())
-        {
-            StopBackground();
-            StartBackground();
-        }
-        return Print(c.Headless ? "Chrome now runs without a window." : "Chrome runs in a minimised window.");
-    }
-
     static int Logs(int lines)
     {
         if (!File.Exists(LogFile))
@@ -314,7 +296,6 @@ static partial class Helper
               deficitsnatcher start | stop | restart
               deficitsnatcher window show     show its Chrome (to sign in to stores); window hide to minimise it
               deficitsnatcher autostart on    start at every login (off: only when you start it)
-              deficitsnatcher headless on     no Chrome window at all (off: minimised window, the default)
               deficitsnatcher update          install a new version now, if there is one
               deficitsnatcher autoupdate off  don't update by itself (on: it does, the default)
               deficitsnatcher version         which version this is
@@ -482,27 +463,14 @@ static partial class Helper
 
         // Commands from the terminal (stop, window show/hide), through a file.
         IBrowserContext? browser = null;
-        // Headless, but the site needs you (sign in, prove you're human): Chrome runs with a window until this time, then
-        // goes back to headless. The page to open once it's up.
-        var visibleUntil = DateTime.MinValue;
-        var lastShow = DateTime.MinValue;
+        // The site needs you (sign in, prove you're human): the page opens in a window of its own, in front. Asked before
+        // Chrome is up, it opens once Chrome is.
         var pendingUrls = new System.Collections.Concurrent.ConcurrentQueue<string>();
-        var runningHeadless = false;
-        CancellationTokenSource? restartChrome = null;
-        var restartNow = false;
         Func<string, Task> show = async url =>
         {
-            visibleUntil = DateTime.UtcNow.AddMinutes(20);
-            lastShow = DateTime.UtcNow;
-            if (runningHeadless || browser == null)
+            if (browser == null)
             {
                 pendingUrls.Enqueue(url);
-                if (!restartNow)
-                {
-                    Log("The site needs you: starting Chrome with a window.");
-                    restartNow = true;
-                    restartChrome?.Cancel();
-                }
                 return;
             }
             await Chrome.OpenWindowAsync(browser, url);
@@ -533,29 +501,17 @@ static partial class Helper
                     await Chrome.SetWindowAsync(browser, cmd == "show" ? "normal" : "minimized");
             }
         });
-        // Back to headless once the window's time is up.
+        // The site leaves this helper alone while you're signing in (nothing opens behind your window).
         _ = Task.Run(async () =>
         {
             while (!stop.IsCancellationRequested)
             {
                 await Task.Delay(5000);
-                // Back to headless when the sign-in windows are closed (30 seconds' grace), or after 20 minutes anyway.
-                var open = Chrome.OpenSignIns;
-                // The site leaves this helper alone while you're signing in (nothing opens behind your window), and, when it
-                // runs headless, until Chrome is headless again.
-                var busy = open > 0 || c.Headless && !runningHeadless && browser != null;
+                var busy = Chrome.OpenSignIns > 0;
                 if (busy != BusyNow)
                 {
                     BusyNow = busy;
                     await TellSiteAsync(new { signin = busy });
-                }
-                var done = DateTime.UtcNow > visibleUntil || open == 0 && DateTime.UtcNow - lastShow > TimeSpan.FromSeconds(30);
-                if (c.Headless && !runningHeadless && browser != null && !restartNow && done)
-                {
-                    Log("Back to running Chrome without a window.");
-                    visibleUntil = DateTime.MinValue;
-                    restartNow = true;
-                    restartChrome?.Cancel();
                 }
             }
         });
@@ -566,22 +522,17 @@ static partial class Helper
             try
             {
                 c = LoadConfig();
-                restartNow = false;
-                var headless = c.Headless && pendingUrls.IsEmpty && DateTime.UtcNow > visibleUntil;
-                if (headless)
-                    visibleUntil = DateTime.MinValue;
-                var (context, cdpUrl, name) = await Chrome.StartAsync(headless, Log);
+                var (context, cdpUrl, name) = await Chrome.StartAsync(Log);
                 browser = context;
-                runningHeadless = headless;
                 state = state with { Browser = name };
                 WriteState(state);
                 using var chromeClosed = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
-                restartChrome = chromeClosed;
                 context.Close += (_, _) => chromeClosed.Cancel();
                 while (pendingUrls.TryDequeue(out var url))
                     await Chrome.OpenWindowAsync(context, url);
                 await ConnectLoopAsync(c, cdpUrl, name, change => WriteState(state = change(state)), show, tryUpdate, chromeClosed.Token);
-                if (!stop.IsCancellationRequested && !restartNow)
+                browser = null;
+                if (!stop.IsCancellationRequested)
                     Log("Chrome was closed: starting it again in 5 s (deficitsnatcher stop to stop the helper).");
                 try
                 {
@@ -599,9 +550,7 @@ static partial class Helper
             }
             try
             {
-                // Restarting to show or hide the window: straight away.
-                if (!restartNow)
-                    await Task.Delay(5000, stop.Token);
+                await Task.Delay(5000, stop.Token);
             }
             catch (OperationCanceledException)
             {
@@ -908,14 +857,15 @@ static partial class Helper
 
         /// <summary>Chrome (the installed Google Chrome when there is one) with its own profile and a DevTools port on this
         /// computer only; minimised once the stores have been signed in to.</summary>
-        public static async Task<(IBrowserContext Context, string CdpUrl, string Name)> StartAsync(bool headless, Action<string> log)
+        public static async Task<(IBrowserContext Context, string CdpUrl, string Name)> StartAsync(Action<string> log)
         {
             Directory.CreateDirectory(ProfileDir);
             _playwright ??= await Playwright.CreateAsync();
             var port = FreePort();
             var options = new BrowserTypeLaunchPersistentContextOptions
             {
-                Headless = headless,
+                // Always with a window: a headless Chrome is the easiest thing for a store's bot check to spot.
+                Headless = false,
                 Args = [$"--remote-debugging-port={port}", "--remote-debugging-address=127.0.0.1", "--disable-blink-features=AutomationControlled"],
                 ViewportSize = ViewportSize.NoViewport,
                 Locale = "en-CA",
@@ -934,6 +884,9 @@ static partial class Helper
                 context = await _playwright.Chromium.LaunchPersistentContextAsync(ProfileDir, new(options) { Channel = "chromium" });
                 name = "Chromium";
             }
+
+            // Hides the one property that says "a program is driving this browser".
+            await context.AddInitScriptAsync("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });");
 
             var start = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
             // Tabs Chrome brought back from last time: the site opens what it needs.
@@ -967,7 +920,7 @@ static partial class Helper
 
             // Shown the first time (to sign in to the stores), minimised after that.
             var marker = Path.Combine(Home, "started-before");
-            if (!headless && File.Exists(marker))
+            if (File.Exists(marker))
                 await SetWindowAsync(context, "minimized");
             File.WriteAllText(marker, DateTime.Now.ToString("O"));
             return (context, cdpUrl, full);
@@ -1058,7 +1011,7 @@ static partial class Helper
             }
             catch (Exception)
             {
-                // Headless: no window.
+                // Chrome is closing.
             }
         }
 

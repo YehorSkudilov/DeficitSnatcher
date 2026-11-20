@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace DeficitSnatcher.Api.Buying;
 
 /// <summary>
-/// One step of a site's checkout script, run in headless Chromium. Values may use placeholders: {{url}}, {{origin}},
+/// One step of a site's checkout script, run in Chromium. Values may use placeholders: {{url}}, {{origin}},
 /// {{variantId}}, {{quantity}}, {{price}} and the checkout profile's ({{email}}, {{firstName}}, {{card.number}}, …; see
 /// CheckoutProfile.Placeholders).
 /// </summary>

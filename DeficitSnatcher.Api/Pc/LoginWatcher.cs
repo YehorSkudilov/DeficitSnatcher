@@ -338,16 +338,8 @@ public sealed class LoginWatcher(IServiceScopeFactory scopes, RunnerHub hub, Bro
         var context = await browsers.GetPcContextAsync(runnerId, ct);
         if (hub.CanShow(runnerId))
         {
-            // The helper opens it in a window of its own (one per store), starting Chrome with a window if it runs headless.
+            // The helper opens it in a window of its own (one per store).
             await hub.ShowAsync(runnerId, url);
-        }
-        else if (await BrowserPool.IsHeadlessAsync(context))
-        {
-            // No window to sign in on: the helper starts Chrome with one for a while, on this page.
-            if (!await hub.ShowAsync(runnerId, url))
-                throw new PcHelperException($"{hub.NameOf(runnerId)} runs Chrome without a window, and this version of the helper can't "
-                    + "bring one up. Update it: download it again from this tab and open it (your setup is kept). "
-                    + "Or on that computer run: deficitsnatcher headless off");
         }
         else
         {

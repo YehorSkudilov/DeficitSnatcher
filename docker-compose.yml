@@ -1,4 +1,4 @@
-# Everything: the database, the API (with headless Chromium) and the site (nginx: the pages, and /api passed to the API).
+# Everything: the database, the API (with Chromium, on a virtual screen) and the site (nginx: the pages, and /api passed to the API).
 # Settings come from .env next to this file (copy .env.example); on the server the Deploy workflow writes it.
 #
 #   docker compose up -d --build        everything, on http://localhost:${WEB_PORT}

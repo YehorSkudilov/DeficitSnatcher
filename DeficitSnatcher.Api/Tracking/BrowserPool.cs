@@ -6,9 +6,10 @@ using Microsoft.Playwright;
 namespace DeficitSnatcher.Api.Tracking;
 
 /// <summary>
-/// One headless Chromium, started the first time a page needs it (a Browser-kind site's check, or a checkout), and
-/// a fresh context (its own cookies) for every use. The Docker image installs it (see Dockerfile); run locally,
-/// <c>dotnet run -- install-browser</c> installs it once.
+/// One Chromium, started the first time a page needs it (a Browser-kind site's check, or a checkout), and a fresh
+/// context (its own cookies) for every use. It always runs with a window, like the PC helper's Chrome: headless is the
+/// easiest thing for a store's bot check to spot. In Docker the window is on a virtual screen (Xvfb, see Dockerfile);
+/// run locally, <c>dotnet run -- install-browser</c> installs it once.
 /// </summary>
 public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, IServer server, ILogger<BrowserPool> log) : IAsyncDisposable
 {
@@ -134,24 +135,6 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
         return page;
     }
 
-    /// <summary>Does this helper's Chrome run without a window (deficitsnatcher headless on)?</summary>
-    public static async Task<bool> IsHeadlessAsync(IBrowserContext context)
-    {
-        if (context.Browser is not { } browser)
-            return false;
-        try
-        {
-            var cdp = await browser.NewBrowserCDPSessionAsync();
-            var v = await cdp.SendAsync("Browser.getVersion");
-            await cdp.DetachAsync();
-            return v?.GetProperty("userAgent").GetString()?.Contains("HeadlessChrome", StringComparison.Ordinal) == true;
-        }
-        catch (PlaywrightException)
-        {
-            return false;
-        }
-    }
-
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IPage, string> TargetIds = new();
 
     private static async Task<string?> TargetIdAsync(IPage page)
@@ -177,8 +160,6 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
     private readonly SemaphoreSlim _lock = new(1, 1);
     private IPlaywright? _playwright;
     private IBrowser? _browser;
-
-    private string _userAgent = "";
 
     // Hides the one property that says "a program is driving this browser".
     private const string Stealth = """
@@ -216,9 +197,6 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
         var browser = await GetBrowserAsync(ct);
         var options = new BrowserNewContextOptions
         {
-            // The real Chrome version on Linux, as a desktop Chrome would say (no "HeadlessChrome"), so it matches what the
-            // browser itself reports.
-            UserAgent = _userAgent,
             Locale = "en-CA",
             TimezoneId = "America/Toronto",
             ViewportSize = new ViewportSize { Width = 1366, Height = 900 },
@@ -244,17 +222,15 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
             if (_browser is { IsConnected: true })
                 return _browser;
             _playwright ??= await Playwright.CreateAsync();
-            log.LogInformation("Starting Chromium (new headless mode)");
-            // Channel "chromium": the full browser in its new headless mode, which looks like ordinary Chrome to bot
-            // checks; the default "headless shell" is a stripped-down build that's easy to spot.
+            log.LogInformation("Starting Chromium (with a window, on {Display})", Environment.GetEnvironmentVariable("DISPLAY") ?? "the desktop");
+            // The full browser with a window, set up like the PC helper's Chrome: no headless mode, no automation flag, and
+            // its own user agent (a headed Chrome's, so nothing to fake).
             _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
-                Headless = true,
+                Headless = false,
                 Channel = "chromium",
-                Args = ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"],
+                Args = ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=1366,900"],
             });
-            var major = _browser.Version.Split('.')[0];
-            _userAgent = $"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36";
             return _browser;
         }
         finally

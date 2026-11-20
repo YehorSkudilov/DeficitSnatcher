@@ -13,7 +13,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
-// `dotnet DeficitSnatcher.Api.dll install-browser`: installs the headless Chromium the checkouts and Browser-kind
+// `dotnet DeficitSnatcher.Api.dll install-browser`: installs the Chromium the checkouts and Browser-kind
 // sites use (the Dockerfile runs it; run it once locally too).
 if (args is ["install-browser", ..])
     return Microsoft.Playwright.Program.Main(["install", .. args.Skip(1), "chromium"]);

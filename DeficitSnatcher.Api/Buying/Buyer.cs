@@ -12,7 +12,7 @@ using Microsoft.Playwright;
 namespace DeficitSnatcher.Api.Buying;
 
 /// <summary>
-/// Buys: runs a site's checkout script in headless Chromium, after checking every limit (auto-buy armed, units left
+/// Buys: runs a site's checkout script in Chromium, after checking every limit (auto-buy armed, units left
 /// to buy for the product, the total budget, the retry wait). The limits are checked and the purchase recorded under
 /// one lock, so two sites coming into stock together can't buy more than the product's limit between them.
 /// </summary>

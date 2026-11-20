@@ -2,7 +2,7 @@
 
 Watches stores for a PS5 Pro (or anything else) and buys it automatically when it's in stock within your price range.
 
-- **DeficitSnatcher.Api**: ASP.NET Core (.NET 11) + Postgres. Checks the sites, decides, buys (headless Chromium via
+- **DeficitSnatcher.Api**: ASP.NET Core (.NET 11) + Postgres. Checks the sites, decides, buys (Chromium via
   Playwright), sends notifications, and runs deploys.
 - **DeficitSnatcher.Web**: Next.js exported as a static site, served by nginx. nginx also passes `/api` to the API, so
   the browser only ever talks to one address.
@@ -79,7 +79,7 @@ while the helper isn't connected they're checked from the server as usual (Walma
    background and again at every login; its Chrome opens once to sign in to the stores, then stays minimised.
 
 Commands, in a new terminal: `deficitsnatcher status | stop | start | restart | window show | window hide |
-autostart on|off | headless on|off | setup <code> | logs | uninstall`.
+autostart on|off | setup <code> | logs | uninstall`.
 
 It only connects out to the site (WebSocket through `/api`); nothing on the PC listens to the network. If a store shows
 its human check (Walmart's Press & Hold), you get an alert, do it in that window, and the bot carries on (it waits 2
@@ -91,7 +91,7 @@ stock so resellers' markups aren't bought); the AI is only asked when those don'
 ## How buying works
 
 A site is a **match** when it's in stock, the title fits the keywords, and price + shipping is within the range. A match
-is reported once, and if the site has **auto-buy** on and auto-buy is **armed**, its **checkout steps** run in headless
+is reported once, and if the site has **auto-buy** on and auto-buy is **armed**, its **checkout steps** run in
 Chromium (goto, click, fill, select, type, wait, expectText…), filling in the checkout profile (`{{email}}`,
 `{{card.number}}`, …). The step that places the order is marked **final**.
 
@@ -107,8 +107,8 @@ Chromium (goto, click, fill, select, type, wait, expectText…), filling in the 
 
 **Bot protection.** Big retailers (Best Buy, Walmart, Amazon) use bot protection (Akamai, Cloudflare, HUMAN, DataDome),
 captchas and 3-D Secure. A blocked check says "Blocked by …" in its scan. Most of these block servers' addresses
-outright, however real the browser looks (the browser runs as full Chrome in its new headless mode, not the easy-to-spot
-headless shell), so the fix is a **residential proxy**: Settings → Checking → Proxy (`http://user:password@host:port`); all
+outright, however real the browser looks (the browser always runs as full Chrome with a window, never headless: on the server
+its window is on a virtual screen, Xvfb), so the fix is a **residential proxy**: Settings → Checking → Proxy (`http://user:password@host:port`); all
 store traffic goes through it, ChatGPT's doesn't. Your own signed-in cookies on the page help too. A checkout can still
 stop at a captcha or bank prompt; its screenshots and error show where. Shopify and smaller stores work best.
 
@@ -127,8 +127,8 @@ The site is on `http://localhost:8090` (`WEB_PORT`).
 cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
 cd DeficitSnatcher.Api
-dotnet run -- install-browser   # once: headless Chromium
-dotnet run                      # http://localhost:5210, reads ../.env
+dotnet run -- install-browser   # once: Chromium
+dotnet run                      # http://localhost:5210, reads ../.env   (Linux with no desktop: xvfb-run dotnet run, Chromium needs a screen)
 ```
 
 ```bash

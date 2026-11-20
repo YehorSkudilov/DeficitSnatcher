@@ -32,7 +32,7 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
         public string? Version { get; } = version;
         /// <summary>The owner is signing in (or proving they're human) in a window of this helper's: it gets no work meanwhile.</summary>
         public volatile bool SigningIn;
-        /// <summary>The helper can bring Chrome out of headless and open a page in front (newer helpers).</summary>
+        /// <summary>The helper can open a page in a window of its own, in front (newer helpers).</summary>
         public bool CanShow { get; } = canShow;
         public int Id { get; } = id;
         public string Name { get; set; } = name;
@@ -278,7 +278,7 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
 
     /// <summary>Playwright connected to the loopback endpoint for one helper: get a pipe from it and join the two.</summary>
     /// <summary>
-    /// Asks the helper to show this page in a Chrome window, in front, starting Chrome with a window if it runs headless.
+    /// Asks the helper to show this page in a Chrome window, in front.
     /// False when it isn't connected or is too old to (it needs updating).
     /// </summary>
     public bool CanShow(int runnerId) => _live.TryGetValue(runnerId, out var live) && live.CanShow;

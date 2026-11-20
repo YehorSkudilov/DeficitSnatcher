@@ -30,20 +30,20 @@ public sealed class HumanCheck(Notifier notifier, RunnerHub hub, BrowserPool bro
         if (vendor == null)
             return;
 
-        // The helper opens this page in a window of its own for the owner (starting Chrome with a window if it runs headless),
-        // and the bot's tabs stay out of sight. This job doesn't wait: the next check carries on once it's done.
-        if (browsers.RunnerOf(page.Context) is { } runnerId && (hub.CanShow(runnerId) || await BrowserPool.IsHeadlessAsync(page.Context)))
+        // The helper opens this page in a window of its own for the owner, and the bot's tabs stay out of sight. This job
+        // doesn't wait: the next check carries on once it's done.
+        if (browsers.RunnerOf(page.Context) is { } runnerId && hub.CanShow(runnerId))
         {
             var shown = await hub.ShowAsync(runnerId, page.Url);
             if (Throttle(siteId))
                 await notifier.NotifyAsync(NotifyKind.HumanCheck, Data.EventLevel.Warning, shown
                     ? $"{siteName}: the store wants you to prove you're human ({vendor}). Chrome on {hub.NameOf(runnerId)} came up with the page: "
                       + "do it there, and the next check carries on."
-                    : $"{siteName}: the store wants you to prove you're human ({vendor}), but {hub.NameOf(runnerId)} runs Chrome without a window. "
-                      + "Update the helper (download it again from the Helpers tab and open it) so it can bring one up, or run: deficitsnatcher headless off",
+                    : $"{siteName}: the store wants you to prove you're human ({vendor}), but {hub.NameOf(runnerId)} couldn't bring the page up. "
+                      + "Do it in that computer's Chrome, or update the helper (download it again from the Helpers tab and open it).",
                     siteId);
             throw new BlockedException($"Blocked by {vendor} on {hub.NameOf(runnerId)}: "
-                + (shown ? "Chrome came up with the page for you to prove you're human." : "it runs without a window, so nobody could do the check."));
+                + (shown ? "Chrome came up with the page for you to prove you're human." : "it couldn't bring the page up."));
         }
 
         await ShowAsync(page);

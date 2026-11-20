@@ -28,7 +28,7 @@ const kindHelp: Record<SiteKind, string> = {
   Auto: "Shopify product JSON if it's a Shopify /products/ page, otherwise the page's structured data, then your selectors.",
   Shopify: "A Shopify store's /products/… page: exact price and stock per variant. The most reliable.",
   Html: "Reads the page's HTML: structured data (JSON-LD, meta tags) and your selectors.",
-  Browser: "Opens the page in headless Chromium first. For sites that build the page in script or block plain requests. Slower.",
+  Browser: "Opens the page in Chromium first. For sites that build the page in script or block plain requests. Slower.",
 };
 
 const templates: Record<string, CheckoutStep[]> = {
@@ -539,7 +539,7 @@ function StepsEditor({ steps, onChange }: { steps: CheckoutStep[]; onChange: (s:
         </div>
       </div>
       <p className="muted small">
-        Run in headless Chromium, top to bottom. Selectors are Playwright&apos;s: CSS, <code>button:has-text(&apos;Add to cart&apos;)</code>,{" "}
+        Run in Chromium, top to bottom. Selectors are Playwright&apos;s: CSS, <code>button:has-text(&apos;Add to cart&apos;)</code>,{" "}
         <code>text=Place order</code>. Values can use <code>{"{{url}}"}</code> <code>{"{{origin}}"}</code> <code>{"{{variantId}}"}</code>{" "}
         <code>{"{{quantity}}"}</code> and your checkout profile: <code>{"{{email}}"}</code> <code>{"{{firstName}}"}</code>{" "}
         <code>{"{{lastName}}"}</code> <code>{"{{fullName}}"}</code> <code>{"{{phone}}"}</code> <code>{"{{address1}}"}</code> <code>{"{{address2}}"}</code>{" "}

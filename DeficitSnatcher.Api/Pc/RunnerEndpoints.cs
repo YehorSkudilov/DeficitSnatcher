@@ -101,7 +101,7 @@ public static class RunnerEndpoints
             foreach (var r in all)
                 rows.Add(Row(WorkerPool.Pc(r.Id), r.Id, r.Name, r.Connected, r.Machine, r.Browser, r.Since, r.LastSeen, r.CreatedAt,
                     r.Version, r.CanUpdate, r.ChecksEnabled, r.DisabledDomains, await logins.ListAsync(r.Id)));
-            rows.Add(Row(WorkerPool.Server, null, "Server", true, Environment.MachineName, "Chromium (headless)", null, null, null, null, false, true, [], []));
+            rows.Add(Row(WorkerPool.Server, null, "Server", true, Environment.MachineName, "Chromium", null, null, null, null, false, true, [], []));
             return rows;
         });
         app.MapPut("/api/runners/{id:int}/checks", async (int id, ChecksRequest request) =>
