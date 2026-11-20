@@ -37,6 +37,15 @@ public static class BlockDetector
         return null;
     }
 
+    /// <summary>A challenge a real browser gets through by itself given a few seconds (Cloudflare's "Just a moment…" and
+    /// Turnstile), as opposed to a flat refusal (Akamai's "Access Denied").</summary>
+    public static bool IsChallenge(string? html) =>
+        !string.IsNullOrEmpty(html) && html.Length < 200_000
+        && (html.Contains("<title>Just a moment", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("cf-chl-", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("challenges.cloudflare.com", StringComparison.OrdinalIgnoreCase)
+            || html.Contains("challenge-platform", StringComparison.OrdinalIgnoreCase) && html.Contains("cloudflare", StringComparison.OrdinalIgnoreCase));
+
     public static string Message(string vendor, bool browser) =>
         $"Blocked by {vendor}{(browser ? " (even in the browser)" : "")}. {Advice}";
 }

@@ -16,6 +16,9 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, ILogger<P
         PooledConnectionLifetime = TimeSpan.FromMinutes(5),
     };
 
+    // Auto-kind pages whose plain request was blocked: checked in the browser for a day before trying plain again.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTimeOffset> NeedsBrowser = new();
+
     public async Task<PageResult> FetchAsync(Site site, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct)
     {
         var url = new Uri(site.Url);
@@ -32,7 +35,9 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, ILogger<P
         }
 
         var selectors = new PageParser.Selectors(site.PriceSelector, site.TitleSelector, site.InStockSelector, site.OutOfStockText);
-        if (site.Kind == SiteKind.Browser)
+        var useBrowser = site.Kind == SiteKind.Browser
+            || site.Kind == SiteKind.Auto && NeedsBrowser.TryGetValue(site.Id, out var since) && DateTimeOffset.UtcNow - since < TimeSpan.FromDays(1);
+        if (useBrowser)
         {
             var (rendered, engine, status, retryAfter) = await RenderAsync(url, cookies, settings, ct, site);
             if (BlockDetector.Detect(rendered, status ?? 200) is { } vendor)
@@ -41,8 +46,19 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, ILogger<P
         }
 
         var (code, html, httpRetryAfter) = await GetAsync(url, cookies, settings, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", ct);
-        if (BlockDetector.Detect(html, (int)code) is { } blockedBy)
-            throw new BlockedException($"The site answered {(int)code}: " + BlockDetector.Message(blockedBy, browser: false)
+        if (BlockDetector.Detect(html, (int)code) is { } blockedBy && site.Kind == SiteKind.Auto)
+        {
+            // Bot protection turns plain requests away: the same check, at once, in the browser (which runs its scripts and
+            // challenges), and the page's next checks go there too.
+            log.LogInformation("Plain request to {Site} blocked by {Vendor}; checking in the browser instead", site.Name, blockedBy);
+            NeedsBrowser[site.Id] = DateTimeOffset.UtcNow;
+            var (rendered, engine, status, retryAfter) = await RenderAsync(url, cookies, settings, ct, site);
+            if (BlockDetector.Detect(rendered, status ?? 200) is { } vendor)
+                throw new BlockedException($"In {BrowserPool.EngineName(engine)}: " + BlockDetector.Message(vendor, browser: true), retryAfter);
+            return PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" };
+        }
+        if (BlockDetector.Detect(html, (int)code) is { } blockedBy2)
+            throw new BlockedException($"The site answered {(int)code}: " + BlockDetector.Message(blockedBy2, browser: false)
                 + " Or try the Browser kind.", httpRetryAfter);
         if (code != HttpStatusCode.OK)
             throw new HttpRequestException($"The site answered {(int)code} {code}.");
@@ -116,9 +132,42 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, ILogger<P
         }
         var retryAfter = response?.Headers.TryGetValue("retry-after", out var value) == true ? ParseRetryAfter(value) : null;
         var html = await page.ContentAsync();
+        int? status = response?.Status;
+        if (BlockDetector.IsChallenge(html))
+        {
+            // Cloudflare's "Just a moment…" often clears by itself in a real browser after a few seconds, then the store's
+            // page loads. Nothing is clicked: one that asks for a person (a checkbox) stays a block.
+            log.LogInformation("Browser check for {Site} got a Cloudflare challenge; waiting for it to clear", site.Name);
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+            while (DateTimeOffset.UtcNow < deadline && BlockDetector.IsChallenge(html))
+            {
+                await Task.Delay(2000, ct);
+                try
+                {
+                    html = await page.ContentAsync();
+                }
+                catch (Microsoft.Playwright.PlaywrightException)
+                {
+                    // Navigating away from the challenge right now: read again next round.
+                }
+            }
+            if (!BlockDetector.IsChallenge(html))
+            {
+                status = 200;
+                try
+                {
+                    await page.WaitForLoadStateAsync(Microsoft.Playwright.LoadState.NetworkIdle, new() { Timeout = 8000 });
+                }
+                catch (TimeoutException)
+                {
+                }
+                html = await page.ContentAsync();
+                log.LogInformation("Browser check for {Site} got past the challenge in {ElapsedMs} ms", site.Name, watch.ElapsedMilliseconds);
+            }
+        }
         log.LogInformation("Browser check for {Site} read {Length} characters of page content in {ElapsedMs} ms",
             site.Name, html.Length, watch.ElapsedMilliseconds);
-        return (html, lease.Engine, response?.Status, retryAfter);
+        return (html, lease.Engine, status, retryAfter);
     }
 
     private static TimeSpan? RetryAfter(System.Net.Http.Headers.RetryConditionHeaderValue? header) =>

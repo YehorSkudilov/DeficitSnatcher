@@ -169,6 +169,9 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
             // Around a likely restock (its forecast): every minute, so a drop isn't missed; the rest of the time, the usual pace.
             if (await RestockLikelyAsync(site.Id, now, ct))
                 interval = Math.Min(interval, 60);
+            // A store that blocked a check that came soon after one it let through: no closer than that, restock or not.
+            if (backoff.MinGap(site.Id) is { } gap)
+                interval = Math.Max(interval, (int)gap.TotalSeconds);
             if (settings.StoreIntervals.FirstOrDefault(x => x.Matches(site.Url)) is { } strict)
                 interval = Math.Max(interval, strict.Minutes * 60);
             // Keep scheduled polling at or below one request per minute per page, even for older saved settings.

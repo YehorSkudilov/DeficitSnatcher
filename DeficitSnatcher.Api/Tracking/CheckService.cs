@@ -69,6 +69,8 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             {
                 var rest = backoff.Blocked(site.Id, (e as BlockedException)?.RetryAfter);
                 message += $" It rests for {(rest.TotalHours >= 1 ? $"{rest.TotalHours:0.#} h" : $"{rest.TotalMinutes:0} min")}.";
+                if (backoff.MinGap(site.Id) is { } gap)
+                    message += $" The store seems to rate-limit: its checks are now spaced at least {gap.TotalMinutes:0} min apart.";
             }
             site.LastCheckedAt = now;
             site.LastError = message;
