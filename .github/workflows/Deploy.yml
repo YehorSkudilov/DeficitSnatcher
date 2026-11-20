@@ -54,6 +54,8 @@ jobs:
 
             App__PublicUrl=${{ vars.PUBLIC_URL }}
             WEB_PORT=${{ vars.WEB_PORT || '8090' }}
+            # Optional services: "camoufox" also runs the Camoufox browser service (Camoufox-kind pages).
+            COMPOSE_PROFILES=${{ vars.COMPOSE_PROFILES }}
 
             OpenAI__ApiKey=${{ secrets.OPENAI_API_KEY }}
 
