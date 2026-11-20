@@ -110,7 +110,7 @@ public sealed class SettingsController(SettingsStore store, Notifier notifier) :
         if (before.AutoBuyArmed != after.AutoBuyArmed || after.AutoBuyArmed && before.DryRun != after.DryRun)
             await notifier.LogAsync(after.AutoBuyArmed ? EventLevel.Warning : EventLevel.Info,
                 after.AutoBuyArmed
-                    ? $"Auto-buy ARMED{(after.DryRun ? " (dry run: checkouts stop before placing the order)" : ": matches will be bought for real")}."
+                    ? "Auto-buy on: matches will be bought."
                     : "Auto-buy disarmed.");
     }
 }

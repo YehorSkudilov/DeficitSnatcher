@@ -127,7 +127,7 @@ public sealed class FindPagesController(AppDbContext db, OpenAiClient ai, PageFe
             }
             catch (BlockedException e)
             {
-                return new ProbedPage(url, name, "blocked", null, null, null, null, false, e.Message.Split(". Stores")[0] + ": use Run on my PC.", already);
+                return new ProbedPage(url, name, "blocked", null, null, null, null, false, e.Message.Split(". Stores")[0] + ".", already);
             }
             catch (Exception e) when (!ct.IsCancellationRequested)
             {

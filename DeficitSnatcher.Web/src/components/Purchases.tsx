@@ -6,7 +6,7 @@ import { dateTime, money } from "@/lib/format";
 import { AuthImage, ErrorNote, Field, PurchaseBadge, download, useAction, useData } from "./ui";
 import { go } from "./App";
 
-/** Every checkout, real or dry run, with filters (a product's or a page's own, in its Logs). */
+/** Every checkout (and older dry runs), with filters (a product's or a page's own, in its Logs). */
 export function Purchases({ initial, productId: fixedProduct, siteId: fixedSite }: { initial?: string; productId?: number; siteId?: number }) {
   const start = new URLSearchParams(initial ?? "");
   const [status, setStatus] = useState(start.get("status") ?? "");
@@ -23,7 +23,7 @@ export function Purchases({ initial, productId: fixedProduct, siteId: fixedSite 
   return (
     <div className="stack" style={{ gap: 16 }}>
       <p className="muted">
-        Every checkout, real or dry run. Open one for what started it, every step with its screenshot and timing, the full error, the
+        Every checkout. Open one for what started it, every step with its screenshot and timing, the full error, the
         browser&apos;s console and network errors, and the page&apos;s HTML where it ended.
       </p>
       <ErrorNote error={list.error} />

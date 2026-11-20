@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The Android app: rings loudly when something is in stock in your range, and turning the alarm off opens the store's page.
+    Built by .github/workflows/Android.yml into DeficitSnatcher.apk on the "android" release; it updates itself from there.
+      dotnet publish -f net11.0-android -c Release -p:ApplicationVersion=<n>
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0-android</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>DeficitSnatcher.Phone</RootNamespace>
+    <AssemblyName>DeficitSnatcher</AssemblyName>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <ApplicationTitle>Deficit Snatcher</ApplicationTitle>
+    <ApplicationId>ca.deficitsnatcher.app</ApplicationId>
+    <!-- The workflow's run number: each build is newer, which is what the app's own updater compares. -->
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0.$(ApplicationVersion)</ApplicationDisplayVersion>
+    <!-- Android 8: notification channels and foreground services as used here. -->
+    <SupportedOSPlatformVersion>26.0</SupportedOSPlatformVersion>
+
+    <!-- One APK to download (not a Play Store bundle), signed with this repository's own key so every build installs over
+         the last one (Android only updates an app with the same signature). Not a store signature: it's a personal app. -->
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <AndroidKeyStore>true</AndroidKeyStore>
+    <AndroidSigningKeyStore>$(MSBuildThisFileDirectory)signing/deficitsnatcher.keystore</AndroidSigningKeyStore>
+    <AndroidSigningKeyAlias>deficitsnatcher</AndroidSigningKeyAlias>
+    <AndroidSigningStorePass>deficitsnatcher</AndroidSigningStorePass>
+    <AndroidSigningKeyPass>deficitsnatcher</AndroidSigningKeyPass>
+    <!-- Phones are arm64 (and the emulator x86_64): a smaller APK than every ABI. -->
+    <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#0B0D12" />
+    <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#0B0D12" BaseSize="128,128" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+  </ItemGroup>
+</Project>

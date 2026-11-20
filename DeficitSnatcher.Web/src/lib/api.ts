@@ -405,9 +405,6 @@ export type Settings = {
   aiCheckOrder: boolean;
   aiDailyTokenLimit: number;
   aiCooldownHours: number;
-  discordWebhookUrl: string;
-  telegramBotToken: string;
-  telegramChatId: string;
   webhookUrl: string;
   emailTo: string;
   smtpHost: string;

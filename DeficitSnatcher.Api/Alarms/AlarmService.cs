@@ -14,11 +14,19 @@ public sealed class AlarmService(IServiceScopeFactory scopes, ILogger<AlarmServi
     /// <summary>Completed (and replaced) each time an alarm is raised: what waiting long polls wake on.</summary>
     private TaskCompletionSource _raised = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly object _gate = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTimeOffset> _recent = new();
 
     public async Task<AlarmDto?> RaiseAsync(string product, string store, decimal? price, string url, string message, int? siteId, bool test = false)
     {
         try
         {
+            // One ring per restock: two checks of the page at once (a scheduled one and Check now) both see it come in.
+            if (!test && siteId != null && !_recent.TryAdd(siteId.Value, DateTimeOffset.UtcNow))
+            {
+                if (DateTimeOffset.UtcNow - _recent[siteId.Value] < TimeSpan.FromMinutes(2))
+                    return null;
+                _recent[siteId.Value] = DateTimeOffset.UtcNow;
+            }
             using var scope = scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var alarm = new Alarm

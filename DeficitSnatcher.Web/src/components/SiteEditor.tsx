@@ -171,7 +171,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
     if (r.result) setProbe({ result: r.result, verdict: r.verdict, error: r.error, buyMessage: null });
   };
 
-  // The AI goes through the checkout (dry run) and saves the steps it takes.
+  // The AI goes through the checkout (stopping before the order) and saves the steps it takes.
   const aiRecord = async () => {
     if (dirty) return setNotice({ tone: "warn", text: "Save first: the AI records the checkout of the saved page." });
     const r = await aiAction.run(() => api.post<BuyOutcome>(`/api/ai/record-checkout/${id}`));
@@ -300,7 +300,7 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
           <Check
             label={
               <>
-                <b>Auto-buy</b> when it&apos;s a match (off: alerts only; the alert&apos;s store link opens in your own browser to buy it yourself)
+                <b>Auto-buy</b> when it&apos;s a match (off: the app rings and you buy it yourself)
               </>
             }
             checked={form.autoBuy}
@@ -515,7 +515,7 @@ function StepsEditor({ steps, onChange }: { steps: CheckoutStep[]; onChange: (s:
         <code>{"{{city}}"}</code> <code>{"{{province}}"}</code> <code>{"{{postalCode}}"}</code> <code>{"{{country}}"}</code>{" "}
         <code>{"{{card.number}}"}</code> <code>{"{{card.name}}"}</code> <code>{"{{card.expiryMonth}}"}</code> <code>{"{{card.expiryYear}}"}</code>{" "}
         <code>{"{{card.expiryYear2}}"}</code> <code>{"{{card.expiry}}"}</code> <code>{"{{card.cvv}}"}</code>. Mark the step that places the order as{" "}
-        <b>final</b>: dry runs stop before it, and real buys need one. Card fields are usually inside an iframe: put the iframe&apos;s selector in
+        <b>final</b>: Record checkout with AI stops before it, and real buys need one. Card fields are usually inside an iframe: put the iframe&apos;s selector in
         &quot;in frame&quot;.
       </p>
       {steps.length === 0 && (

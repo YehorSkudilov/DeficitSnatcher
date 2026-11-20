@@ -182,7 +182,7 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
         return new ProbeResponse(o.Result, o.Verdict, o.Error, null);
     }
 
-    /// <summary>Runs the checkout now at the last price seen: a dry run to test the steps, or for real.</summary>
+    /// <summary>Runs the checkout now at the last price seen (Buy now).</summary>
     [HttpPost("{id:int}/buy")]
     public async Task<ActionResult<Buyer.Outcome>> Buy(int id, BuyRequest request, CancellationToken ct)
     {

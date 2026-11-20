@@ -177,7 +177,7 @@ public sealed class BrowserPool(BrowserSessions sessions, ILogger<BrowserPool> l
             _playwright ??= await Playwright.CreateAsync();
             var display = await DisplayAsync(ct);
             log.LogInformation("Starting Chromium (with a window, on {Display})", display ?? "the desktop");
-            // The full browser with a window, set up like the PC helper's Chrome: no headless mode, no automation flag, and
+            // The full browser with a window: no headless mode, no automation flag, and
             // its own user agent (a headed Chrome's, so nothing to fake).
             var options = new BrowserTypeLaunchOptions
             {
