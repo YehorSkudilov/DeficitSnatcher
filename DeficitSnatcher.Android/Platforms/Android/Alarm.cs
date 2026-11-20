@@ -67,7 +67,7 @@ public static class Alarm
         var notification = new Notification.Builder(context, Channel)
             .SetContentTitle($"IN STOCK: {alarm.Product}")!
             .SetContentText($"{alarm.Store}{(alarm.Price is { } p ? $" · {p:0.00}" : "")}: tap to buy")!
-            .SetSmallIcon(global::Android.Resource.Drawable.IcLockIdleAlarm)!
+            .SetSmallIcon(Resource.Drawable.tab_alarm)!
             .SetCategory(Notification.CategoryAlarm)!
             .SetFullScreenIntent(show, true)!
             .SetContentIntent(show)!

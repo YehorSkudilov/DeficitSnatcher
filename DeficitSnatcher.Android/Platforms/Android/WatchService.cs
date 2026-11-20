@@ -147,7 +147,7 @@ public sealed class WatchService : Service
         return new Notification.Builder(context, Channel)
             .SetContentTitle("Deficit Snatcher")!
             .SetContentText(text)!
-            .SetSmallIcon(global::Android.Resource.Drawable.IcPopupSync)!
+            .SetSmallIcon(Resource.Drawable.tab_alarm)!
             .SetContentIntent(open)!
             .SetOngoing(true)!
             .Build()!;
