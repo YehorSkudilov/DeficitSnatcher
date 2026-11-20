@@ -7,8 +7,8 @@ namespace DeficitSnatcher.Api.Tracking;
 public static class BlockDetector
 {
     public const string Advice =
-        "Stores often block servers' addresses outright, however the page is opened: set a residential proxy (Settings → Checking → Proxy). "
-        + "Your own signed-in cookies (on the page) and a longer interval help too.";
+        "The store refused this request. Let its cooldown expire, check the product URL, and use a longer interval. "
+        + "A normal signed-in browser session may help when the store allows it.";
 
     private static readonly (string Name, string[] Signs)[] Vendors =
     [

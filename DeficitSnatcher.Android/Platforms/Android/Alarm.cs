@@ -10,7 +10,7 @@ namespace DeficitSnatcher.Phone;
 
 /// <summary>
 /// The alarm: the phone's alarm sound at full alarm volume, looping, with vibration, and a full-screen page (over the lock
-/// screen) until it's turned off. Turning it off opens the store's page. It stops by itself after 30 minutes.
+/// screen) until the user dismisses it and opens the store's page.
 /// </summary>
 public static class Alarm
 {
@@ -18,7 +18,6 @@ public static class Alarm
     private const int NotificationId = 2;
     private static MediaPlayer? _player;
     private static Vibrator? _vibrator;
-    private static CancellationTokenSource? _timeout;
 
     /// <summary>What's ringing now (for the alarm page).</summary>
     public static AlarmDto? Current { get; private set; }
@@ -75,16 +74,10 @@ public static class Alarm
             .Build()!;
         manager.Notify(NotificationId, notification);
 
-        _timeout = new CancellationTokenSource();
-        var token = _timeout.Token;
-        _ = Task.Delay(TimeSpan.FromMinutes(30), token).ContinueWith(_ => Stop(context), token, TaskContinuationOptions.OnlyOnRanToCompletion,
-            TaskScheduler.Default);
     }
 
     public static void Stop(Context context)
     {
-        _timeout?.Cancel();
-        _timeout = null;
         try
         {
             _player?.Stop();
@@ -96,11 +89,12 @@ public static class Alarm
         _player = null;
         _vibrator?.Cancel();
         _vibrator = null;
+        Current = null;
         ((NotificationManager)context.GetSystemService(Context.NotificationService)!).Cancel(NotificationId);
     }
 }
 
-/// <summary>The alarm's page: over the lock screen, the screen on. "Stop and open" silences it and opens the store's page.</summary>
+/// <summary>The alarm's page: over the lock screen, the screen on. The only action silences it and opens the store.</summary>
 [Activity(Theme = "@android:style/Theme.DeviceDefault.NoActionBar", ExcludeFromRecents = true, LaunchMode = LaunchMode.SingleInstance,
     ShowWhenLocked = true, TurnScreenOn = true)]
 public sealed class AlarmActivity : Activity
@@ -132,38 +126,27 @@ public sealed class AlarmActivity : Activity
         Text(alarm?.Product ?? "", 26, "#F2F4F8", bold: true);
         Text($"{alarm?.Store}{(alarm?.Price is { } p ? $" · {p:0.00}" : "")}", 22, "#9AA3B5");
 
-        var open = new global::Android.Widget.Button(this) { Text = "STOP & OPEN CART / STORE" };
+        var open = new global::Android.Widget.Button(this) { Text = "DISMISS & OPEN STORE" };
         open.SetTextSize(global::Android.Util.ComplexUnitType.Sp, 22);
         open.SetBackgroundColor(global::Android.Graphics.Color.ParseColor("#2ED47A"));
         open.SetTextColor(global::Android.Graphics.Color.ParseColor("#0B0D12"));
         open.SetPadding(24, 48, 24, 48);
-        open.Click += async (_, _) => await StopAndOpenAsync(alarm);
+        open.Click += (_, _) => DismissAndOpen(alarm);
         var openParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent) { TopMargin = 64 };
         layout.AddView(open, openParams);
-
-        var stop = new global::Android.Widget.Button(this) { Text = "Stop" };
-        stop.Click += (_, _) => StopAndOpen(null);
-        var stopParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent) { TopMargin = 24 };
-        layout.AddView(stop, stopParams);
 
         SetContentView(layout);
     }
 
-    private async Task StopAndOpenAsync(AlarmDto? alarm)
+    public override void OnBackPressed()
+    {
+        // Keep the alarm active until the user chooses Dismiss & Open Store.
+    }
+
+    private void DismissAndOpen(AlarmDto? alarm)
     {
         Alarm.Stop(this);
         var url = alarm?.Url;
-        if (alarm is { Test: false, SiteId: { } siteId })
-        {
-            try
-            {
-                url = await Server.CartUrlAsync(siteId, CancellationToken.None) ?? url;
-            }
-            catch
-            {
-                // Keep the product-page fallback available if the app temporarily can't reach its server.
-            }
-        }
         if (!string.IsNullOrEmpty(url))
         {
             var view = new Intent(Intent.ActionView, global::Android.Net.Uri.Parse(url)).AddFlags(ActivityFlags.NewTask);

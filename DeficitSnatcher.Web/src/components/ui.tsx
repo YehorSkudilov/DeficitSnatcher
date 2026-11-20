@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type EventLevel, type PurchaseStatus, type ScanOutcome, type Site } from "@/lib/api";
+import { storeIconSources } from "@/lib/format";
 
 /** Loads with `load`, again every `refreshMs` (if set) and whenever `reload` is called. */
 export function useData<T>(load: () => Promise<T>, deps: unknown[], refreshMs?: number) {
@@ -258,16 +259,11 @@ export function PagesSummary({ sites }: { sites: Pick<Site, "name" | "url" | "la
 }
 
 function MiniStoreIcon({ name, url }: { name: string; url: string }) {
-  const [failed, setFailed] = useState(false);
-  let favicon = "";
-  try {
-    favicon = `${new URL(url).origin}/favicon.ico`;
-  } catch {
-    // Use the initials fallback.
-  }
+  const sources = storeIconSources(url);
+  const [sourceIndex, setSourceIndex] = useState(0);
   return (
     <span className="store-icon mini" title={name}>
-      {favicon && !failed ? <img src={favicon} alt="" onError={() => setFailed(true)} /> : <span>{name.trim().slice(0, 1).toUpperCase()}</span>}
+      {sourceIndex < sources.length ? <img src={sources[sourceIndex]} alt="" onError={() => setSourceIndex((i) => i + 1)} /> : <span>{name.trim().slice(0, 1).toUpperCase()}</span>}
     </span>
   );
 }

@@ -1,3 +1,4 @@
+using DeficitSnatcher.Api.Ai;
 using DeficitSnatcher.Api.Buying;
 using DeficitSnatcher.Api.Data;
 using DeficitSnatcher.Api.Notifications;
@@ -33,7 +34,9 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         // It rests after the store blocked it (not a failure): blocks wear off with time, not with checking again.
         if (!manual && backoff.RestingUntil(site.Id) is { } until)
         {
-            site.LastError = $"Resting: the store blocked the last checks, so it isn't asked again until {until:HH:mm} UTC (blocks wear off "
+            var zone = RestockForecaster.Zone(settings.TimeZone);
+            var localUntil = TimeZoneInfo.ConvertTime(until, zone);
+            site.LastError = $"Resting: the store blocked the last checks, so it isn't asked again until {localUntil:HH:mm} ({settings.TimeZone}); blocks wear off "
                 + "with time; checking again right away keeps them on). Check now still checks.";
             await db.SaveChangesAsync(CancellationToken.None);
             return new(null, null, null, null);
@@ -188,7 +191,8 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             scan.Action = "Auto-buy is off for this product: only notified.";
         else if (verdict.Match && product.AutoBuyEnabled && product.Enabled)
         {
-            var trigger = $"{(manual ? "Check now" : "Scheduled check")} #{scan.Id} at {now:yyyy-MM-dd HH:mm:ss} UTC: {verdict.Reason}"
+            var localNow = TimeZoneInfo.ConvertTime(now, RestockForecaster.Zone(settings.TimeZone));
+            var trigger = $"{(manual ? "Check now" : "Scheduled check")} #{scan.Id} at {localNow:yyyy-MM-dd HH:mm:ss} ({settings.TimeZone}): {verdict.Reason}"
                 + $"\nListing: {result.Title} · price {result.Price:0.00}{(site.ShippingCost > 0 ? $" + {site.ShippingCost:0.00} shipping" : "")}"
                 + $"{(result.VariantId != null ? $" · variant {result.VariantId}" : "")} · read from {string.Join(", ", result.Notes)}";
             var outcome = await buyer.BuyAsync(site.Id, verdict.TotalPrice!.Value, manual: false, forceDryRun: false, trigger, ct);

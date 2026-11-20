@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api, type RestockForecast, type CheckAllItem, type Dashboard as DashboardData, type ProbeResponse, type Product, type Site } from "@/lib/api";
-import { ago, dateTime, host, money, until } from "@/lib/format";
+import { ago, dateTime, host, money, storeIconSources, until } from "@/lib/format";
 import { Check, ErrorNote, LevelDot, PurchaseBadge, StockBadge, useAction, useCollapsed, useData, useNow, CollapseButton, PagesSummary } from "./ui";
 import { go } from "./App";
 
@@ -229,7 +229,7 @@ export function SiteTable({
             <tr key={s.id} className="clickable" onClick={() => go(`site/${s.id}`)}>
               <td>
                 <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
-                  <StoreIcon name={s.name} url={s.url} />
+                  <StoreIcon key={s.url} name={s.name} url={s.url} />
                   <b className="ellipsis" style={{ maxWidth: 200 }}>
                     {s.name}
                   </b>
@@ -289,16 +289,11 @@ export function rowResults(items: CheckAllItem[], currency?: string): Record<num
 }
 
 function StoreIcon({ name, url }: { name: string; url: string }) {
-  const [failed, setFailed] = useState(false);
-  let favicon = "";
-  try {
-    favicon = `${new URL(url).origin}/favicon.ico`;
-  } catch {
-    // A malformed URL can still use the initials fallback.
-  }
+  const sources = storeIconSources(url);
+  const [sourceIndex, setSourceIndex] = useState(0);
   return (
     <span className="store-icon" aria-label={`${name} store`}>
-      {favicon && !failed ? <img src={favicon} alt="" onError={() => setFailed(true)} /> : <span>{name.trim().slice(0, 1).toUpperCase()}</span>}
+      {sourceIndex < sources.length ? <img src={sources[sourceIndex]} alt="" onError={() => setSourceIndex((i) => i + 1)} /> : <span>{name.trim().slice(0, 1).toUpperCase()}</span>}
     </span>
   );
 }
@@ -307,6 +302,7 @@ function StoreIcon({ name, url }: { name: string; url: string }) {
 export function RestockCell({ f }: { f?: RestockForecast }) {
   if (!f) return <span className="faint">—</span>;
   if (f.inStockNow) return <span className="badge good">In stock now</span>;
+  if (!f.when && f.onlineCheckedAt) return <span className="faint" title={f.onlineError ?? f.explanation}>No estimate</span>;
   if (!f.when) return <span className="faint" title={f.explanation}>Learning…</span>;
   const cls = { low: "", medium: "info", high: "good" }[f.confidence];
   return (

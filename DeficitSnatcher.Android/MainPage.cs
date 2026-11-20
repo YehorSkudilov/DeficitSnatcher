@@ -116,7 +116,7 @@ public sealed class MainPage : ContentPage
             Heading("Watching for stock"),
             _status,
             Small($"{Server.Url} · {Server.Username} · build {Updater.CurrentVersion(Ctx)}", Theme.Muted),
-            Small("When something is in stock in your range, it rings loudly (even on silent). Stop & Open opens a cart for Shopify sites with a known variant; otherwise it opens the product page.",
+            Small("When something is in stock in your range, it rings loudly (even on silent). Dismiss & Open silences the alarm and opens the product page.",
                 Theme.Muted),
             Heading("Ready to wake you"), _ready,
             test, update, _note,

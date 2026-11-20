@@ -70,8 +70,11 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                 return new(false, "This page has no checkout steps (and the AI isn't on to do the checkout itself).");
             // The AI failed here a little while ago: an automatic checkout doesn't ask it again yet (it'd likely fail the same way).
             var aiResting = !manual && site.AiCheckoutFailedAt is { } aiFailed && now - aiFailed < TimeSpan.FromHours(settings.AiCooldownHours);
+            var aiFailedAtLocal = site.AiCheckoutFailedAt is { } failedAt
+                ? TimeZoneInfo.ConvertTime(failedAt, Ai.RestockForecaster.Zone(settings.TimeZone))
+                : (DateTimeOffset?)null;
             if (steps.Count == 0 && !aiRecord && aiResting)
-                return new(false, $"The AI couldn't get through this checkout at {site.AiCheckoutFailedAt:HH:mm} UTC; it tries again after "
+                return new(false, $"The AI couldn't get through this checkout at {aiFailedAtLocal:HH:mm} ({settings.TimeZone}); it tries again after "
                     + $"{settings.AiCooldownHours} h (Settings → AI). Record the steps with AI, or add them, to buy sooner.");
             if (aiResting)
                 aiAgentAllowed = false;
@@ -163,6 +166,9 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
         var records = new List<StepRecord>();
         var browserLog = new List<string>();
         var started = DateTimeOffset.UtcNow;
+        var aiFailedAtLocal = site.AiCheckoutFailedAt is { } failedAt
+            ? TimeZoneInfo.ConvertTime(failedAt, Ai.RestockForecaster.Zone(settings.TimeZone))
+            : (DateTimeOffset?)null;
         PurchaseStatus status = PurchaseStatus.Failed;
         string message = "";
         string? error = null, html = null, finalUrl = null;
@@ -312,7 +318,7 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
                 var aiFromStart = steps.Count == 0;
                 var aiTakesOver = brokeAt != null && aiAvailable && settings.AiAutofixCheckout && !(finalRan && !dryRun);
                 if (brokeAt != null && aiAvailable && settings.AiAutofixCheckout && !aiAgentAllowed)
-                    Log($"The AI isn't asked to fix this: it failed on this page at {site.AiCheckoutFailedAt:HH:mm} UTC and rests {settings.AiCooldownHours} h.");
+                    Log($"The AI isn't asked to fix this: it failed on this page at {aiFailedAtLocal:HH:mm} ({settings.TimeZone}) and rests {settings.AiCooldownHours} h.");
                 if (aiAvailable && aiAgentAllowed && (aiFromStart || aiTakesOver))
                 {
                     aiUsed = true;

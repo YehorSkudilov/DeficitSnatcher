@@ -14,24 +14,32 @@ public sealed class AlarmService(IServiceScopeFactory scopes, ILogger<AlarmServi
     /// <summary>Completed (and replaced) each time an alarm is raised: what waiting long polls wake on.</summary>
     private TaskCompletionSource _raised = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly object _gate = new();
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTimeOffset> _recent = new();
+    private static readonly TimeSpan Cooldown = TimeSpan.FromMinutes(5);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _recent = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<AlarmDto?> RaiseAsync(string product, string store, decimal? price, string url, string message, int? siteId, bool test = false)
     {
         try
         {
-            // One ring per restock: two checks of the page at once (a scheduled one and Check now) both see it come in.
-            if (!test && siteId != null && !_recent.TryAdd(siteId.Value, DateTimeOffset.UtcNow))
+            // One ring per product per cooldown, including simultaneous checks and app/server restarts.
+            var now = DateTimeOffset.UtcNow;
+            var productKey = Cut(product, 200);
+            if (!test)
             {
-                if (DateTimeOffset.UtcNow - _recent[siteId.Value] < TimeSpan.FromMinutes(2))
-                    return null;
-                _recent[siteId.Value] = DateTimeOffset.UtcNow;
+                lock (_gate)
+                {
+                    if (_recent.TryGetValue(productKey, out var last) && now - last < Cooldown)
+                        return null;
+                    _recent[productKey] = now;
+                }
             }
             using var scope = scopes.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            if (!test && await db.Alarms.AnyAsync(a => !a.Test && a.Product == productKey && a.At >= now - Cooldown))
+                return null;
             var alarm = new Alarm
             {
-                At = DateTimeOffset.UtcNow, SiteId = siteId, Product = Cut(product, 200), Store = Cut(store, 200), Price = price,
+                At = now, SiteId = siteId, Product = productKey, Store = Cut(store, 200), Price = price,
                 Url = Cut(url, 2000), Message = Cut(message, 1000), Test = test,
             };
             db.Alarms.Add(alarm);

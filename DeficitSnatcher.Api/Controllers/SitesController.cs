@@ -1,4 +1,5 @@
 using DeficitSnatcher.Api.Buying;
+using DeficitSnatcher.Api.Ai;
 using DeficitSnatcher.Api.Data;
 using DeficitSnatcher.Api.Settings;
 using DeficitSnatcher.Api.Tracking;
@@ -64,7 +65,8 @@ public sealed record HistoryPoint(DateTimeOffset At, decimal? Price, bool InStoc
 
 [ApiController]
 [Route("api/sites")]
-public sealed class SitesController(AppDbContext db, SecretBox box, Tracker tracker, CheckService checks, Buyer buyer, BrowserSessions sessions)
+public sealed class SitesController(AppDbContext db, SecretBox box, Tracker tracker, CheckService checks, Buyer buyer, BrowserSessions sessions,
+    SettingsStore settingsStore)
     : ControllerBase
 {
     /// <summary>The page's saved browser session on the server (see BrowserSessions), or 204 when there's none.</summary>
@@ -193,9 +195,13 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
         if (!request.DryRun && site.LastPrice == null)
             return Problem("No price seen yet: check the site first.", statusCode: StatusCodes.Status400BadRequest);
         var price = (site.LastPrice ?? 0) + site.ShippingCost;
-        var trigger = $"Started by hand from the web ({(request.DryRun ? "Dry-run checkout" : "Buy now")}) at {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC"
+        var settings = await settingsStore.GetAsync(ct);
+        var zone = RestockForecaster.Zone(settings.TimeZone);
+        var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone);
+        var lastChecked = site.LastCheckedAt is { } checkedAt ? TimeZoneInfo.ConvertTime(checkedAt, zone) : (DateTimeOffset?)null;
+        var trigger = $"Started by hand from the web ({(request.DryRun ? "Dry-run checkout" : "Buy now")}) at {localNow:yyyy-MM-dd HH:mm:ss} ({settings.TimeZone})"
             + $"\nLast seen: {site.LastTitle ?? "—"} · price {site.LastPrice:0.00}{(site.ShippingCost > 0 ? $" + {site.ShippingCost:0.00} shipping" : "")}"
-            + $" · {(site.LastInStock == true ? "in stock" : site.LastInStock == false ? "out of stock" : "stock unknown")}, checked {site.LastCheckedAt:yyyy-MM-dd HH:mm:ss} UTC";
+            + $" · {(site.LastInStock == true ? "in stock" : site.LastInStock == false ? "out of stock" : "stock unknown")}, checked {(lastChecked is { } at ? at.ToString("yyyy-MM-dd HH:mm:ss") : "never")} ({settings.TimeZone})";
         return await buyer.BuyAsync(id, price, manual: true, forceDryRun: request.DryRun, trigger, ct);
     }
 

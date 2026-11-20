@@ -17,6 +17,7 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
     private static TimeSpan CheckLimit(Settings.BotSettings settings) => CheckService.FetchLimit(settings) + TimeSpan.FromSeconds(60);
 
     private DateTimeOffset _lastForecastLookup;
+    private int _forecastRefreshRunning;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, (DateTimeOffset? Next, DateTimeOffset At)> _forecasts = new();
 
     /// <summary>A restock looks likely now for this page: from 30 minutes before its forecast to 90 after (forecasts are
@@ -84,9 +85,10 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Every few minutes: one store's restock pattern looked up online, when it's never been, is a week old, or its
+        // Once a minute: one store's restock pattern looked up online, when it's never been, is a week old, or its
         // predicted restock has passed (so the forecast moves on). One at a time keeps the AI's use low.
-        if (DateTimeOffset.UtcNow - _lastForecastLookup > TimeSpan.FromMinutes(3))
+        if (DateTimeOffset.UtcNow - _lastForecastLookup > TimeSpan.FromMinutes(1)
+            && Interlocked.CompareExchange(ref _forecastRefreshRunning, 1, 0) == 0)
         {
             _lastForecastLookup = DateTimeOffset.UtcNow;
             _ = Task.Run(async () =>
@@ -98,6 +100,10 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
                 catch (Exception e)
                 {
                     log.LogWarning("Restock lookup failed: {Error}", e.Message);
+                }
+                finally
+                {
+                    Volatile.Write(ref _forecastRefreshRunning, 0);
                 }
             });
         }
@@ -227,7 +233,7 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
     {
         var seconds = (double)intervalSeconds;
         if (errors > 2)
-            seconds = Math.Min(seconds * Math.Min(errors - 1, 5), Math.Max(intervalSeconds, 1800));
+            seconds = Math.Min(seconds * Math.Pow(2, Math.Min(errors - 2, 5)), Math.Max(intervalSeconds, 1800));
         var jitter = seconds * jitterPercent / 100.0;
         seconds += (Random.Shared.NextDouble() * 2 - 1) * jitter;
         return TimeSpan.FromSeconds(Math.Max(3, seconds));

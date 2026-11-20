@@ -5,7 +5,7 @@ using DeficitSnatcher.Api.Settings;
 namespace DeficitSnatcher.Api.Tracking;
 
 /// <summary>Fetches a site's product page and reads it (see PageParser), the way the site's kind says.</summary>
-public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSessions sessions, ILogger<PageFetcher> log)
+public sealed class PageFetcher(HttpClient http, BrowserPool browsers, ILogger<PageFetcher> log)
 {
     public static SocketsHttpHandler CreateHandler() => new()
     {
@@ -36,11 +36,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSe
         {
             var (rendered, engine, status, retryAfter) = await RenderAsync(url, cookies, settings, ct, site);
             if (BlockDetector.Detect(rendered, status ?? 200) is { } vendor)
-            {
-                // The store has marked this session: the next check comes as someone new.
-                await sessions.ForgetAsync(site.Id, $"blocked by {vendor}");
                 throw new BlockedException($"In {BrowserPool.EngineName(engine)}: " + BlockDetector.Message(vendor, browser: true), retryAfter);
-            }
             return PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" };
         }
 

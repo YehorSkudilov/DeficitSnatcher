@@ -22,14 +22,31 @@ export function until(iso: string | null | undefined, now = Date.now()): string 
   if (!iso) return "—";
   const s = Math.round((new Date(iso).getTime() - now) / 1000);
   if (s <= 0) return "now";
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  const clock = localClockTime(iso);
+  if (s < 60) return `${s}s at ${clock}`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s at ${clock}`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m at ${clock}`;
 }
 
 export function dateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" });
+}
+
+export function localClockTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+/** Common favicon and touch-icon locations on the store's own origin. */
+export function storeIconSources(url: string): string[] {
+  try {
+    const origin = new URL(url).origin;
+    return ["/favicon.ico", "/favicon.png", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"]
+      .map((path) => `${origin}${path}`);
+  } catch {
+    return [];
+  }
 }
 
 export function host(url: string): string {
