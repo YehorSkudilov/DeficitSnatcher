@@ -15,7 +15,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
+      - id: version
+        run: echo "version=1.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v5
         with:
@@ -39,3 +43,32 @@ jobs:
             --notes "The PC helper for stores that block servers (Walmart). Download the zip for your computer, unzip, open DeficitSnatcher.Runner and paste a setup code from the site's Helpers tab."
           gh release upload pc-helper dist/*.zip --clobber
           gh release upload pc-helper version.txt --clobber
+
+  # The Windows installer (DeficitSnatcher-PC-helper-Setup.exe: Start menu entry, listed in Settings -> Apps), with Inno
+  # Setup on a Windows runner.
+  installer:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ needs.build.outputs.version }}'
+          dotnet publish DeficitSnatcher.Runner/DeficitSnatcher.Runner.csproj -c Release -r win-x64 --self-contained -p:Version=$version -o out/win-x64
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DMyVersion=$version" "/DSourceDir=$PWD\out\win-x64" DeficitSnatcher.Runner/installer/DeficitSnatcher.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Publish to the pc-helper release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh release upload pc-helper DeficitSnatcher.Runner/installer/DeficitSnatcher-PC-helper-Setup.exe --clobber
+

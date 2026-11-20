@@ -19,7 +19,10 @@ static partial class Helper
 {
     // ---- Where things live ----
 
-    static readonly string Home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeficitSnatcher");
+    // Create: without it, a data folder that doesn't exist yet (a new Linux account without ~/.local/share) comes back empty,
+    // and everything would land in whatever folder the helper was started from.
+    static readonly string Home = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.Create), "DeficitSnatcher");
     static readonly string AppDir = Path.Combine(Home, "app");
     static readonly string ConfigFile = Path.Combine(Home, "helper.json");
     static readonly string StateFile = Path.Combine(Home, "state.json");
@@ -53,6 +56,8 @@ static partial class Helper
     public static async Task<int> MainAsync(string[] args)
     {
         Directory.CreateDirectory(Home);
+        // A Chromium it downloads (no Google Chrome on the computer) is kept in its own folder, so uninstalling removes it.
+        Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", Path.Combine(Home, "browsers"));
         var command = args.Length > 0 ? args[0].TrimStart('-').ToLowerInvariant() : "";
 
         // The background helper itself (what autostart runs): no window.
@@ -62,8 +67,11 @@ static partial class Helper
         if (command == "finish-update")
             return FinishUpdate(args.Length > 1 && int.TryParse(args[1], out var oldPid) ? oldPid : 0);
 
-        // Started without a terminal (double-clicked on Windows): a window to talk in.
-        Terminal.Open();
+        // Started without a terminal (double-clicked on Windows): a window to talk in. Not for the installer's own calls
+        // (--quiet): nobody is there to read it or press Enter.
+        var quiet = args.Contains("--quiet");
+        if (!quiet)
+            Terminal.Open();
 
         try
         {
@@ -92,7 +100,7 @@ static partial class Helper
                 "update" => SendCommand("update", "Checking for a new version: deficitsnatcher logs to see how it went."),
                 "autoupdate" => AutoUpdate(args.Length > 1 ? args[1] : ""),
                 "logs" => Logs(args.Length > 1 && int.TryParse(args[1], out var n) ? n : 40),
-                "uninstall" => Uninstall(),
+                "uninstall" => await UninstallAsync(args.Contains("--yes"), args.Contains("--from-installer")),
                 "reset" => Reset(args.Skip(1).Contains("--yes")),
                 "version" => Print($"Deficit Snatcher PC helper {MyVersion}"),
                 _ => Help(),
@@ -100,7 +108,8 @@ static partial class Helper
         }
         finally
         {
-            Terminal.Done();
+            if (!quiet)
+                Terminal.Done();
         }
     }
 
@@ -311,16 +320,85 @@ static partial class Helper
         return 0;
     }
 
-    static int Uninstall()
+    /// <summary>
+    /// Removes everything: stops the helper and its Chrome, autostart, the deficitsnatcher command, the Start menu entry
+    /// and the installed-apps entry (Windows), and the whole folder: the program, settings, logs, its Chrome profile
+    /// (sign-ins) and any Chromium it downloaded. The owner's own Chrome isn't touched.
+    /// </summary>
+    static async Task<int> UninstallAsync(bool yes, bool fromInstaller)
     {
+        // Installed with the Windows installer: its uninstaller does it (it runs this with --from-installer), so Windows'
+        // list of apps is cleaned up too.
+        var uninstaller = Path.Combine(AppDir, "unins000.exe");
+        if (OperatingSystem.IsWindows() && !fromInstaller && File.Exists(uninstaller))
+        {
+            if (!yes && !Confirm())
+                return Print("Nothing removed.");
+            Console.WriteLine("Removing…");
+            Process.Start(new ProcessStartInfo(uninstaller, "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART") { UseShellExecute = false });
+            return Print("Removed: the helper, its Chrome profile, settings and logs (it finishes in a few seconds). Also remove it on the "
+                + "site's Helpers tab.");
+        }
+        if (!yes && !fromInstaller && !Confirm())
+            return Print("Nothing removed.");
+
         if (IsRunning())
             StopBackground();
-        Service.Disable();
+        await Chrome.KillProfileChromeAsync(_ => { });
+        try
+        {
+            Service.Disable();
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("(Couldn't remove autostart: " + e.Message + ")");
+        }
         RemoveFromPath();
-        Console.WriteLine("Removed: it won't start again. Your settings and its Chrome profile (sign-ins) are kept in:");
-        Console.WriteLine("  " + Home);
-        Console.WriteLine("Delete that folder too to remove everything.");
+        if (OperatingSystem.IsWindows())
+            try
+            {
+                var menu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Deficit Snatcher PC helper.lnk");
+                if (File.Exists(menu))
+                    File.Delete(menu);
+            }
+            catch (Exception)
+            {
+            }
+
+        if (OperatingSystem.IsWindows())
+        {
+            // This program runs from that folder, so Windows won't let it delete itself: a hidden command deletes the folder
+            // once it has exited.
+            if (!fromInstaller)
+                Process.Start(new ProcessStartInfo("cmd.exe",
+                    $"/c ping -n 4 127.0.0.1 >nul & rmdir /s /q \"{Home}\"") { UseShellExecute = false, CreateNoWindow = true });
+        }
+        else
+        {
+            for (var i = 0; i < 10 && Directory.Exists(Home); i++)
+                try
+                {
+                    Directory.Delete(Home, recursive: true);
+                }
+                catch (IOException)
+                {
+                    await Task.Delay(500);
+                }
+            if (OperatingSystem.IsLinux())
+                Service.Reload();
+        }
+        if (!fromInstaller)
+            Console.WriteLine("Removed: the helper, its Chrome profile (sign-ins), settings and logs. The deficitsnatcher command is gone "
+                + "(close this terminal). Also remove it on the site's Helpers tab.");
         return 0;
+    }
+
+    static bool Confirm()
+    {
+        Console.WriteLine("This removes the PC helper completely: the program, its settings and logs, and its Chrome profile (your");
+        Console.WriteLine("sign-ins in the helper's Chrome). Your own Chrome isn't touched.");
+        Console.Write("Remove it? Type yes: ");
+        return string.Equals(Console.ReadLine()?.Trim(), "yes", StringComparison.OrdinalIgnoreCase);
     }
 
     static int Help()
@@ -340,7 +418,7 @@ static partial class Helper
               deficitsnatcher logs [lines]    what it's been doing
               deficitsnatcher reset           a fresh Chrome: wipes its cookies, site data, cache and sign-ins (for a
                                               browser a store has flagged); sign in to the stores again after
-              deficitsnatcher uninstall       stop it and don't start it again
+              deficitsnatcher uninstall       remove it completely (program, settings, logs, its Chrome profile)
             """);
         return 0;
     }
@@ -867,15 +945,20 @@ static partial class Helper
                 Shell("reg", $"delete HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v {Name} /f");
             else if (OperatingSystem.IsMacOS())
             {
-                Shell("launchctl", $"unload -w \"{MacPlist}\"");
-                File.Delete(MacPlist);
+                if (File.Exists(MacPlist))
+                    Shell("launchctl", $"unload -w \"{MacPlist}\"");
+                if (File.Exists(MacPlist))
+                    File.Delete(MacPlist);
             }
             else
             {
                 Shell("systemctl", "--user disable --now deficitsnatcher");
-                File.Delete(LinuxUnit);
+                if (File.Exists(LinuxUnit))
+                    File.Delete(LinuxUnit);
             }
         }
+
+        public static void Reload() => Shell("systemctl", "--user daemon-reload");
 
         public static void StartNow()
         {
@@ -1235,7 +1318,7 @@ static partial class Helper
         }
 
         /// <summary>Closes whatever Chrome has the helper's profile open (only that one: the owner's own Chrome is left alone).</summary>
-        static async Task KillProfileChromeAsync(Action<string> log)
+        public static async Task KillProfileChromeAsync(Action<string> log)
         {
             try
             {

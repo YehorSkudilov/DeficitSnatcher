@@ -50,6 +50,12 @@ public static class RunnerEndpoints
             return Results.Empty;
         }).AllowAnonymous().DisableRateLimiting();
 
+        // The one-line install / update commands' scripts (no secrets in them: the setup code is on the command line).
+        app.MapGet("/api/runner/install.sh", () => Results.Text(HelperInstallScripts.Shell, "text/x-shellscript; charset=utf-8"))
+            .AllowAnonymous();
+        app.MapGet("/api/runner/install.ps1", () => Results.Text(HelperInstallScripts.PowerShell, "text/plain; charset=utf-8"))
+            .AllowAnonymous();
+
         // Where Playwright connects to reach a helper's Chrome: this machine only, with a path only this process knows.
         app.Map("/internal/cdp/{secret}/{runnerId:int}", async (HttpContext http, string secret, int runnerId) =>
         {

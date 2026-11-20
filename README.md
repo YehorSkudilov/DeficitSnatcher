@@ -94,14 +94,29 @@ Never for going out of stock. A store's human check on your PC always alerts you
 Pages with **Run on my PC** are checked and bought there (checks, checkouts, screenshots, AI auto-fill all work the same);
 while the helper isn't connected they're checked from the server as usual (Walmart sometimes answers).
 
-1. Settings → PC helper → **Download** (the right zip for your computer, from the
-   [pc-helper release](../../releases/tag/pc-helper)) and unzip it.
-2. Same card → **Make a setup code** (the site's address and a key in one), and copy it.
-3. Double-click `DeficitSnatcher.Runner` and paste the code. It installs itself (in your user folder), starts in the
-   background and again at every login; its Chrome opens once to sign in to the stores, then stays minimised.
+1. Helpers tab → **Make a setup code** (the site's address and a key in one).
+2. On that computer, either:
+   - **Windows:** **Download the installer** (`DeficitSnatcher-PC-helper-Setup.exe`), run it and paste the code when it
+     asks. It installs for your user only (no admin), with a Start menu entry and an entry in Settings → Apps.
+   - **Any computer:** paste the one-line command shown there (it has the code in) into PowerShell (Windows) or Terminal
+     (Mac, Linux): it downloads the newest helper, installs it and connects it.
+     `& ([scriptblock]::Create((irm <site>/api/runner/install.ps1))) <code>` or
+     `curl -fsSL <site>/api/runner/install.sh | sh -s -- <code>`.
+   - Or the zip for your computer from the [pc-helper release](../../releases/tag/pc-helper): unzip, open
+     `DeficitSnatcher.Runner`, paste the code.
+
+   It starts in the background and again at every login; its Chrome opens once to sign in to the stores, then stays
+   minimised.
 
 Its Chrome is your installed Google Chrome, started as a normal program with its own profile (no automation switches,
 nothing patched in the page), which the helper then connects to; so to a store it looks like an ordinary Chrome.
+
+**Updating:** it updates itself (every few hours, or the Update button on its card). By hand: run the installer again, or
+the same command without a code; its setup is kept.
+
+**Uninstalling:** Settings → Apps → Deficit Snatcher PC helper (Windows installer), or `deficitsnatcher uninstall`, removes
+everything: the program, the `deficitsnatcher` command, autostart, its settings and logs, and its Chrome profile (its
+sign-ins; your own Chrome isn't touched). Then remove it on the Helpers tab.
 
 Commands, in a new terminal: `deficitsnatcher status | stop | start | restart | window show | window hide |
 autostart on|off | setup <code> | reset | logs | uninstall`.

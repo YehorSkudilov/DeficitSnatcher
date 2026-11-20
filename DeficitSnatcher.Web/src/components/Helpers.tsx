@@ -419,6 +419,12 @@ function AddHelper({ first, reload }: { first: boolean; reload: () => Promise<vo
     }
   };
 
+  const windows = rid === "win-x64";
+  const command = (c: string | null) =>
+    windows
+      ? `& ([scriptblock]::Create((irm ${site}/api/runner/install.ps1)))${c ? ` ${c}` : ""}`
+      : `curl -fsSL ${site}/api/runner/install.sh | sh${c ? ` -s -- ${c}` : ""}`;
+
   return (
     <div className="card stack">
       <div className="card-head" style={{ marginBottom: 0 }}>
@@ -430,39 +436,36 @@ function AddHelper({ first, reload }: { first: boolean; reload: () => Promise<vo
       </p>
       <ol className="small" style={{ margin: 0, paddingLeft: 18, lineHeight: 2 }}>
         <li>
-          <a className="btn small primary" href={`${release}/download/pc-helper/DeficitSnatcher-PC-helper-${rid}.zip`}>
-            Download for {label}
-          </a>{" "}
-          <span className="faint">
-            or{" "}
-            {downloads
-              .filter(([, r]) => r !== rid)
-              .map(([l, r], i) => (
-                <span key={r}>
-                  {i > 0 && ", "}
-                  <a href={`${release}/download/pc-helper/DeficitSnatcher-PC-helper-${r}.zip`}>{l}</a>
-                </span>
-              ))}
-          </span>
-          , and unzip it.
-        </li>
-        <li>
           <div className="row" style={{ flexWrap: "nowrap", maxWidth: 420 }}>
             <input type="text" placeholder="Name, e.g. Gaming PC" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} />
-            <button className="btn small" style={{ flex: "none" }} disabled={make.busy} onClick={newCode}>
+            <button className="btn small primary" style={{ flex: "none" }} disabled={make.busy} onClick={newCode}>
               Make a setup code
             </button>
           </div>
         </li>
         <li>
-          Open <code>DeficitSnatcher.Runner</code> (double-click) and paste the code. That&apos;s it: it installs itself and keeps running in the
-          background. Then sign in to the stores from its card here (Log in).
+          On that computer ({label}):
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {windows && (
+              <li>
+                <a className="btn small" href={`${release}/download/pc-helper/DeficitSnatcher-PC-helper-Setup.exe`}>
+                  Download the installer
+                </a>{" "}
+                and run it; paste the setup code when it asks. Or:
+              </li>
+            )}
+            <li>
+              paste this into {windows ? "PowerShell" : "Terminal"}: it downloads, installs and connects it in one go.
+              <CopyLine text={command(code)} placeholder={!code} />
+            </li>
+          </ul>
         </li>
+        <li>Then sign in to the stores from its card here (Log in).</li>
       </ol>
       <ErrorNote error={make.error} />
       {code && (
         <div className="notice warn small stack" style={{ gap: 8 }}>
-          <div>The setup code (copy it now, it isn&apos;t shown again):</div>
+          <div>The setup code (copy it now, it isn&apos;t shown again; the command above has it in):</div>
           <div className="row" style={{ flexWrap: "nowrap" }}>
             <input type="text" readOnly value={code} onFocus={(e) => e.target.select()} className="mono" />
             <button className="btn small" style={{ flex: "none" }} onClick={copy}>
@@ -472,6 +475,31 @@ function AddHelper({ first, reload }: { first: boolean; reload: () => Promise<vo
         </div>
       )}
       <details className="small">
+        <summary>Update, other computers, uninstall</summary>
+        <div className="stack" style={{ gap: 6, marginTop: 8 }}>
+          <div>
+            <b>Update</b> (keeps its setup): it updates itself; or {windows ? "run the installer again, or " : ""}run:
+            <CopyLine text={command(null)} />
+          </div>
+          <div>
+            <b>Other computers:</b>{" "}
+            {downloads.map(([l, r], i) => (
+              <span key={r}>
+                {i > 0 && ", "}
+                <a href={`${release}/download/pc-helper/DeficitSnatcher-PC-helper-${r}.zip`}>{l}</a>
+              </span>
+            ))}{" "}
+            (zip: unzip, open <code>DeficitSnatcher.Runner</code>, paste the code) ·{" "}
+            <a href={`${release}/download/pc-helper/DeficitSnatcher-PC-helper-Setup.exe`}>Windows installer</a>
+          </div>
+          <div>
+            <b>Uninstall</b> (the program, its settings and its Chrome profile):{" "}
+            {windows ? "Settings → Apps → Deficit Snatcher PC helper, or " : ""}
+            <code>deficitsnatcher uninstall</code>. Then remove it here too.
+          </div>
+        </div>
+      </details>
+      <details className="small">
         <summary>Commands</summary>
         <pre className="log" style={{ marginTop: 8 }}>{`deficitsnatcher status        running? connected?
 deficitsnatcher stop | start | restart
@@ -480,7 +508,7 @@ deficitsnatcher window hide   minimise it again
 deficitsnatcher autostart off don't start with the computer
 deficitsnatcher setup <code>  connect with a new setup code
 deficitsnatcher logs          what it's been doing
-deficitsnatcher uninstall     remove it`}</pre>
+deficitsnatcher uninstall     remove it completely`}</pre>
         <div className="faint">In a new terminal after setup (Windows: Command Prompt or PowerShell; Mac: Terminal).</div>
         <div className="faint" style={{ marginTop: 4 }}>
           First start: Windows may say &quot;Windows protected your PC&quot; (More info → Run anyway); a Mac may refuse it (right-click → Open).
@@ -573,6 +601,38 @@ function AccountRow({ domain, account, reload }: { domain: string; account?: Sto
         {saved && <span className="badge good">Saved just now</span>}
       </div>
       <ErrorNote error={act.error} />
+    </div>
+  );
+}
+
+/** A command to paste, with a Copy button. */
+function CopyLine({ text, placeholder }: { text: string; placeholder?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="row" style={{ flexWrap: "nowrap", margin: "4px 0" }}>
+      <input
+        type="text"
+        readOnly
+        value={placeholder ? "Make a setup code first: the command will have it in." : text}
+        onFocus={(e) => e.target.select()}
+        className="mono"
+        disabled={placeholder}
+      />
+      <button
+        className="btn small"
+        style={{ flex: "none" }}
+        disabled={placeholder}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+          } catch {
+            // Select it by hand.
+          }
+        }}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
     </div>
   );
 }
