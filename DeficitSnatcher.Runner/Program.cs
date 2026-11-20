@@ -948,6 +948,13 @@ static partial class Helper
             }
             else
             {
+                // A Chrome on the profile that can't be reached (left over, or started some other way) would take the new
+                // one's place: Chrome only opens another window in it and exits.
+                if (ProfileInUse())
+                {
+                    log("A Chrome is still open on the helper's profile but can't be reached: closing it.");
+                    await KillProfileChromeAsync(log);
+                }
                 var exe = ChromePath();
                 name = "Google Chrome";
                 if (exe == null)
@@ -957,42 +964,64 @@ static partial class Helper
                     exe = _playwright.Chromium.ExecutablePath;
                     name = "Chromium";
                 }
-                port = FreePort();
+                File.Delete(Path.Combine(ProfileDir, "DevToolsActivePort"));
                 var launch = new ProcessStartInfo(exe) { UseShellExecute = false };
                 foreach (var a in new[]
                 {
                     $"--user-data-dir={ProfileDir}",
-                    $"--remote-debugging-port={port}",
+                    // 0: Chrome picks a free port and writes it to DevToolsActivePort in the profile (it only writes that file
+                    // for 0), which is also how a later start finds this Chrome again.
+                    "--remote-debugging-port=0",
                     "--remote-debugging-address=127.0.0.1",
                     // Only what a first start of a new profile would otherwise ask about.
                     "--no-first-run",
                     "--no-default-browser-check",
+                    // A blank first tab (not the New Tab page, which pages can't be written into).
+                    "about:blank",
                 })
                     launch.ArgumentList.Add(a);
                 _process = Process.Start(launch) ?? throw new InvalidOperationException($"{name} didn't start.");
+                for (var i = 0; port == null; i++)
+                {
+                    if (_process.HasExited)
+                        throw new InvalidOperationException($"{name} closed right after starting.");
+                    if (i == 60)
+                    {
+                        await CloseAsync();
+                        throw new InvalidOperationException($"{name} started but its DevTools didn't come up in 30 s.");
+                    }
+                    await Task.Delay(500);
+                    port = await RunningPortAsync(http);
+                }
             }
 
-            // Its DevTools answer once it's up.
-            JsonElement version;
-            for (var i = 0; ; i++)
+            IBrowserContext context;
+            string cdpUrl;
+            try
             {
-                try
-                {
-                    version = JsonDocument.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/json/version")).RootElement;
-                    break;
-                }
-                catch (Exception) when (i < 60)
-                {
-                    if (_process is { HasExited: true })
-                        throw new InvalidOperationException($"{name} closed right after starting (is it already open on {ProfileDir}?).");
-                    await Task.Delay(500);
-                }
+                var version = JsonDocument.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/json/version")).RootElement;
+                cdpUrl = version.GetProperty("webSocketDebuggerUrl").GetString()!;
+                _browser = await _playwright.Chromium.ConnectOverCDPAsync(cdpUrl, new() { Timeout = 30000 });
+                context = _browser.Contexts.Count > 0 ? _browser.Contexts[0] : throw new InvalidOperationException("Chrome has no profile open.");
+                var (full, ready) = await PrepareAsync(context, name, version, log);
+                return (ready, cdpUrl, full);
             }
-            var cdpUrl = version.GetProperty("webSocketDebuggerUrl").GetString()!;
-            _browser = await _playwright.Chromium.ConnectOverCDPAsync(cdpUrl, new() { Timeout = 30000 });
-            var context = _browser.Contexts.Count > 0 ? _browser.Contexts[0] : throw new InvalidOperationException("Chrome has no profile open.");
+            catch
+            {
+                // Not left open to be started over: the next try would only open another window in it.
+                await CloseAsync();
+                await KillProfileChromeAsync(log);
+                throw;
+            }
+        }
+
+        /// <summary>The helper's home page in the first tab, the other tabs closed, the window minimised after the first run.</summary>
+        static async Task<(string Name, IBrowserContext Context)> PrepareAsync(IBrowserContext context, string name, JsonElement version, Action<string> log)
+        {
 
             var start = context.Pages.Count > 0 ? context.Pages[0] : await context.NewPageAsync();
+            if (start.Url != "about:blank")
+                await start.GotoAsync("about:blank");
             // Tabs Chrome brought back from last time: the site opens what it needs.
             foreach (var restored in context.Pages.Skip(1).ToList())
                 try
@@ -1024,7 +1053,7 @@ static partial class Helper
             if (File.Exists(marker))
                 await SetWindowAsync(context, "minimized");
             File.WriteAllText(marker, DateTime.Now.ToString("O"));
-            return (context, cdpUrl, full);
+            return (full, context);
         }
 
         /// <summary>The windows opened for the owner (sign in, prove you're human), one per store. While any is open the site
@@ -1151,6 +1180,85 @@ static partial class Helper
             {
                 return null;
             }
+        }
+
+        /// <summary>Some Chrome has the helper's profile open (its lock is there and, on Linux and Mac, its process is alive).</summary>
+        static bool ProfileInUse()
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                // Chrome holds "lockfile" open while it runs: it can't be deleted then.
+                var lockFile = Path.Combine(ProfileDir, "lockfile");
+                if (!File.Exists(lockFile))
+                    return false;
+                try
+                {
+                    File.Delete(lockFile);
+                    return false;
+                }
+                catch (IOException)
+                {
+                    return true;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    return true;
+                }
+            }
+            return LockPid() is { } pid && Alive(pid);
+        }
+
+        /// <summary>Linux and Mac: SingletonLock is a link to "host-pid" of the Chrome that has the profile.</summary>
+        static int? LockPid()
+        {
+            try
+            {
+                var target = new FileInfo(Path.Combine(ProfileDir, "SingletonLock")).LinkTarget;
+                return target != null && int.TryParse(target[(target.LastIndexOf('-') + 1)..], out var pid) ? pid : null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        static bool Alive(int pid)
+        {
+            try
+            {
+                return !Process.GetProcessById(pid).HasExited;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>Closes whatever Chrome has the helper's profile open (only that one: the owner's own Chrome is left alone).</summary>
+        static async Task KillProfileChromeAsync(Action<string> log)
+        {
+            try
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    // The Chrome processes whose command line names this profile.
+                    var script = "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | Where-Object { $_.CommandLine -like '*"
+                        + ProfileDir.Replace("'", "''") + "*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+                    using var ps = Process.Start(new ProcessStartInfo("powershell", ["-NoProfile", "-NonInteractive", "-Command", script])
+                        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true });
+                    if (ps != null)
+                        await ps.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(20)).Token);
+                }
+                else if (LockPid() is { } pid && Alive(pid))
+                    Process.GetProcessById(pid).Kill(entireProcessTree: true);
+            }
+            catch (Exception e)
+            {
+                log("Couldn't close the old Chrome: " + e.Message);
+            }
+            // It lets go of the profile.
+            for (var i = 0; i < 20 && ProfileInUse(); i++)
+                await Task.Delay(500);
         }
 
         /// <summary>Closes Chrome the way its own menu does (so the profile is saved), then makes sure it's gone.</summary>

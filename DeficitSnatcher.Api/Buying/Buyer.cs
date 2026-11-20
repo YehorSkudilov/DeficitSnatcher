@@ -191,15 +191,19 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
             values["price"] = price.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 
             var cookies = site.CookiesEncrypted == null ? [] : SiteCookies.Parse(box.Decrypt(site.CookiesEncrypted), site.Url);
-            Log($"Opening a browser ({cookies.Count} cookies; on the server: {BrowserPool.EngineName(BrowserPool.EngineFor(settings))}, "
-                + $"with the page's saved session if it has one)");
+            Log($"Opening a browser ({cookies.Count} cookies)");
             await using var lease = await browsers.OpenAsync(settings, cookies, worker, CancellationToken.None, site);
             ranOn = lease.Worker;
             var page = await lease.NewPageAsync();
             if (lease.OnPc)
                 Log($"Running in Chrome on {workers.Label(lease.Worker)} (PC helper).");
-            else if (Pc.WorkerPool.PcId(worker) != null)
-                Log($"{workers.Label(worker)} isn't reachable: running on the server instead.");
+            else
+            {
+                if (Pc.WorkerPool.PcId(worker) != null)
+                    Log($"{workers.Label(worker)} isn't reachable: running on the server instead.");
+                Log($"Running in {BrowserPool.EngineName(lease.Engine)} on the server"
+                    + (lease.Engine != BrowserPool.EngineFor(settings) ? " (Camoufox can't be reached right now)" : ", with the page's saved session if it has one") + ".");
+            }
             page.Console += (_, m) =>
             {
                 if (m.Type is "error" or "warning")

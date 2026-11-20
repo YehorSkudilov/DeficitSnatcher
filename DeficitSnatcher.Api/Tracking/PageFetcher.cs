@@ -27,7 +27,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
         // falls back to the server, like any other page.
         if (Pc.WorkerPool.PcId(worker) != null && workers.Available(worker))
         {
-            var (rendered, ranOn) = await RenderAsync(url, cookies, settings, ct, site, worker);
+            var (rendered, ranOn, _) = await RenderAsync(url, cookies, settings, ct, site, worker);
             if (BlockDetector.Detect(rendered) is { } pcVendor)
                 throw new BlockedException(BlockDetector.Message(pcVendor, browser: true));
             return PageParser.ParseHtml(rendered, selectors0) with { Source = rendered, SourceType = "text/html", Worker = ranOn };
@@ -45,12 +45,12 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
         var selectors = new PageParser.Selectors(site.PriceSelector, site.TitleSelector, site.InStockSelector, site.OutOfStockText);
         if (site.Kind == SiteKind.Browser)
         {
-            var (rendered, _) = await RenderAsync(url, cookies, settings, ct, site, Pc.WorkerPool.Server);
+            var (rendered, _, engine) = await RenderAsync(url, cookies, settings, ct, site, Pc.WorkerPool.Server);
             if (BlockDetector.Detect(rendered) is { } vendor)
             {
                 // The store has marked this session: the next check comes as someone new.
                 await sessions.ForgetAsync(site.Id, $"blocked by {vendor}");
-                throw new BlockedException($"In {BrowserPool.EngineName(BrowserPool.EngineFor(settings))}: " + BlockDetector.Message(vendor, browser: true));
+                throw new BlockedException($"In {BrowserPool.EngineName(engine)}: " + BlockDetector.Message(vendor, browser: true));
             }
             return PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" };
         }
@@ -82,7 +82,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
         return (response.StatusCode, body);
     }
 
-    private async Task<(string Html, string Worker)> RenderAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site? site,
+    private async Task<(string Html, string Worker, string Engine)> RenderAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site? site,
         string worker)
     {
         // On a helper: the page's own tab, kept open and refreshed each time, like a person leaving it open.
@@ -101,7 +101,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
                 {
                 }
                 await humanCheck.WaitIfBlockedAsync(tab, site.Id, site.Name, ct);
-                return (await tab.ContentAsync(), worker);
+                return (await tab.ContentAsync(), worker, BrowserPool.Chromium);
             }
             catch (PcHelperException)
             {
@@ -127,7 +127,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
         }
         if (onPc)
             await humanCheck.WaitIfBlockedAsync(page, site!.Id, site.Name, ct);
-        return (await page.ContentAsync(), lease.Worker);
+        return (await page.ContentAsync(), lease.Worker, lease.Engine);
     }
 
     private static bool LooksLikeShopifyProduct(Uri url) => url.AbsolutePath.Contains("/products/", StringComparison.OrdinalIgnoreCase);

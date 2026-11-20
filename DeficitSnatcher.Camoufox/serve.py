@@ -16,6 +16,8 @@ from camoufox.server import launch_server
 options = {
     "port": int(os.environ.get("PORT", "4444")),
     "ws_path": os.environ.get("WS_PATH", "camoufox"),
+    # Every address, not only localhost (Playwright's default here): the API reaches it from another container.
+    "host": os.environ.get("HOST", "0.0.0.0"),
     # "virtual": a real (headed) Firefox on a virtual screen (Xvfb), like the API's Chromium. "true": headless.
     "headless": {"virtual": "virtual", "true": True, "false": False}.get(os.environ.get("HEADLESS", "virtual").lower(), "virtual"),
     "humanize": True,

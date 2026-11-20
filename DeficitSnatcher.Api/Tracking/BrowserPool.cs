@@ -232,6 +232,23 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
     {
         var engine = EngineFor(settings);
         var siteId = site?.Id ?? 0;
+        if (engine == Camoufox)
+            try
+            {
+                await CamoufoxBrowserAsync(settings.CamoufoxUrl, ct);
+            }
+            catch (BrowserEngineException e)
+            {
+                // Down (restarting, or not deployed): this job runs in Chromium rather than failing, without the page's
+                // session (that stays for Camoufox's return).
+                if (DateTimeOffset.UtcNow - _camoufoxWarnedAt > TimeSpan.FromMinutes(10))
+                {
+                    _camoufoxWarnedAt = DateTimeOffset.UtcNow;
+                    log.LogWarning("Camoufox unavailable, using Chromium meanwhile: {Error}", e.Message);
+                }
+                engine = Chromium;
+                siteId = 0;
+            }
         var state = await sessions.LoadAsync(siteId, engine, settings, ct);
         var context = engine == Camoufox ? await CamoufoxContextAsync(settings, state, ct) : await NewContextAsync(settings, state, ct);
         try
@@ -267,6 +284,7 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
 
     private IBrowser? _camoufox;
     private string? _camoufoxUrl;
+    private DateTimeOffset _camoufoxWarnedAt;
 
     private async Task<IBrowserContext> CamoufoxContextAsync(BotSettings settings, string? state, CancellationToken ct)
     {
