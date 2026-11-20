@@ -288,8 +288,8 @@ export function SiteEditor({ id, productId }: { id: number | null; productId?: n
           </div>
         )}
         <div className="fields">
-          <Field label="Check every (seconds)" hint={`Empty: the default (${settings.data?.defaultIntervalSeconds ?? 60} s).`}>
-            <NumberInput value={form.intervalSeconds} min={5} placeholder={String(settings.data?.defaultIntervalSeconds ?? 60)} onChange={(v) => set({ intervalSeconds: v })} />
+          <Field label="Check every (seconds)" hint={`At least 60 seconds. Empty: the default (${settings.data?.defaultIntervalSeconds ?? 60} s).`}>
+            <NumberInput value={form.intervalSeconds} min={60} placeholder={String(settings.data?.defaultIntervalSeconds ?? 60)} onChange={(v) => set({ intervalSeconds: v })} />
           </Field>
           <Field label={`Shipping (${currency})`} hint="Added to the price before it's compared with the range.">
             <NumberInput value={form.shippingCost} min={0} step={0.01} onChange={(v) => set({ shippingCost: v ?? 0 })} />

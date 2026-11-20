@@ -64,7 +64,7 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             // Blocked: the page rests for a while (each block in a row, longer).
             if (e is BlockedException)
             {
-                var rest = backoff.Blocked(site.Id);
+                var rest = backoff.Blocked(site.Id, (e as BlockedException)?.RetryAfter);
                 message += $" It rests for {(rest.TotalHours >= 1 ? $"{rest.TotalHours:0.#} h" : $"{rest.TotalMinutes:0} min")}.";
             }
             site.LastCheckedAt = now;

@@ -22,7 +22,9 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSe
         if (site.Kind == SiteKind.Shopify || site.Kind == SiteKind.Auto && LooksLikeShopifyProduct(url))
         {
             var jsonUrl = new UriBuilder(url) { Query = "", Fragment = "" }.Uri.ToString().TrimEnd('/') + ".js";
-            var (status, body) = await GetAsync(new Uri(jsonUrl), cookies, settings, "application/json", ct);
+            var (status, body, retryAfter) = await GetAsync(new Uri(jsonUrl), cookies, settings, "application/json", ct);
+            if (BlockDetector.Detect(body, (int)status) is { } jsonBlock)
+                throw new BlockedException($"The site answered {(int)status}: " + BlockDetector.Message(jsonBlock, browser: false), retryAfter);
             if (status == HttpStatusCode.OK && PageParser.ParseShopify(body, VariantFromUrl(url) ?? site.VariantId) is { } shopify)
                 return shopify with { Source = body, SourceType = "application/json" };
             if (site.Kind == SiteKind.Shopify)
@@ -32,26 +34,27 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSe
         var selectors = new PageParser.Selectors(site.PriceSelector, site.TitleSelector, site.InStockSelector, site.OutOfStockText);
         if (site.Kind == SiteKind.Browser)
         {
-            var (rendered, engine) = await RenderAsync(url, cookies, settings, ct, site);
-            if (BlockDetector.Detect(rendered) is { } vendor)
+            var (rendered, engine, status, retryAfter) = await RenderAsync(url, cookies, settings, ct, site);
+            if (BlockDetector.Detect(rendered, status ?? 200) is { } vendor)
             {
                 // The store has marked this session: the next check comes as someone new.
                 await sessions.ForgetAsync(site.Id, $"blocked by {vendor}");
-                throw new BlockedException($"In {BrowserPool.EngineName(engine)}: " + BlockDetector.Message(vendor, browser: true));
+                throw new BlockedException($"In {BrowserPool.EngineName(engine)}: " + BlockDetector.Message(vendor, browser: true), retryAfter);
             }
             return PageParser.ParseHtml(rendered, selectors) with { Source = rendered, SourceType = "text/html" };
         }
 
-        var (code, html) = await GetAsync(url, cookies, settings, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", ct);
+        var (code, html, httpRetryAfter) = await GetAsync(url, cookies, settings, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", ct);
         if (BlockDetector.Detect(html, (int)code) is { } blockedBy)
             throw new BlockedException($"The site answered {(int)code}: " + BlockDetector.Message(blockedBy, browser: false)
-                + " Or try the Browser kind.");
+                + " Or try the Browser kind.", httpRetryAfter);
         if (code != HttpStatusCode.OK)
             throw new HttpRequestException($"The site answered {(int)code} {code}.");
         return PageParser.ParseHtml(html, selectors) with { Source = html, SourceType = "text/html" };
     }
 
-    private async Task<(HttpStatusCode, string)> GetAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, string accept, CancellationToken ct)
+    private async Task<(HttpStatusCode Status, string Body, TimeSpan? RetryAfter)> GetAsync(Uri url, List<SiteCookie> cookies,
+        BotSettings settings, string accept, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(settings.RequestTimeoutSeconds));
@@ -66,10 +69,11 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSe
         var client = StoreProxy.Parse(settings.ProxyUrl) is { } proxy ? StoreProxy.Client(proxy) : http;
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
         var body = await response.Content.ReadAsStringAsync(timeout.Token);
-        return (response.StatusCode, body);
+        return (response.StatusCode, body, RetryAfter(response.Headers.RetryAfter));
     }
 
-    private async Task<(string Html, string Engine)> RenderAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site site)
+    private async Task<(string Html, string Engine, int? Status, TimeSpan? RetryAfter)> RenderAsync(Uri url,
+        List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site site)
     {
         try
         {
@@ -82,11 +86,22 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSe
         }
     }
 
-    private async Task<(string Html, string Engine)> RenderOnceAsync(Uri url, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site site)
+    private async Task<(string Html, string Engine, int? Status, TimeSpan? RetryAfter)> RenderOnceAsync(Uri url,
+        List<SiteCookie> cookies, BotSettings settings, CancellationToken ct, Site site)
     {
         await using var lease = await browsers.OpenAsync(settings, cookies, ct, site);
         var page = await lease.NewPageAsync();
-        await page.GotoAsync(url.ToString(), new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = settings.RequestTimeoutSeconds * 1000 });
+        // StreetMerchant's low-bandwidth mode skips images and fonts. A stock check only needs the document and its
+        // scripts/styles, so avoid downloading these large assets on checks (checkout pages keep their full resources).
+        await page.RouteAsync("**/*", async route =>
+        {
+            var type = route.Request.ResourceType;
+            if (type is "image" or "font" or "media")
+                await route.AbortAsync();
+            else
+                await route.ContinueAsync();
+        });
+        var response = await page.GotoAsync(url.ToString(), new() { WaitUntil = Microsoft.Playwright.WaitUntilState.DOMContentLoaded, Timeout = settings.RequestTimeoutSeconds * 1000 });
         try
         {
             await page.WaitForLoadStateAsync(Microsoft.Playwright.LoadState.NetworkIdle, new() { Timeout = 8000 });
@@ -95,7 +110,18 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSe
         {
             // Pages that keep polling never go idle; what's there by now is enough.
         }
-        return (await page.ContentAsync(), lease.Engine);
+        var retryAfter = response?.Headers.TryGetValue("retry-after", out var value) == true ? ParseRetryAfter(value) : null;
+        return (await page.ContentAsync(), lease.Engine, response?.Status, retryAfter);
+    }
+
+    private static TimeSpan? RetryAfter(System.Net.Http.Headers.RetryConditionHeaderValue? header) =>
+        header?.Delta is { } delta ? delta : header?.Date is { } date ? date - DateTimeOffset.UtcNow : null;
+
+    private static TimeSpan? ParseRetryAfter(string? value)
+    {
+        if (int.TryParse(value, out var seconds))
+            return TimeSpan.FromSeconds(seconds);
+        return DateTimeOffset.TryParse(value, out var date) ? date - DateTimeOffset.UtcNow : null;
     }
 
     private static bool LooksLikeShopifyProduct(Uri url) => url.AbsolutePath.Contains("/products/", StringComparison.OrdinalIgnoreCase);
@@ -105,4 +131,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, BrowserSe
 }
 
 /// <summary>The store's bot protection answered instead of the page.</summary>
-public sealed class BlockedException(string message) : HttpRequestException(message);
+public sealed class BlockedException(string message, TimeSpan? retryAfter = null) : HttpRequestException(message)
+{
+    public TimeSpan? RetryAfter { get; } = retryAfter is { } delay && delay > TimeSpan.Zero ? delay : null;
+}

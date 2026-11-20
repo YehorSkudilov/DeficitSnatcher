@@ -72,6 +72,12 @@ checkout carries on where the checks left off. A session starts afresh after 3 h
 **Blocks.** A page the store blocked rests: it isn't checked again for 15 minutes, doubling with each block in a row (up
 to 6 hours), until a check goes through. Checking again right away keeps a flag on; resting lets it wear off.
 
+**Pacing and traffic.** Scheduled checks run at least 60 seconds apart per page and per store host, with only one
+scheduled check for a host at a time. Intervals are jittered, and repeated failures slow that page down further. When a
+store sends a `Retry-After` header with a block, the app honors it (up to 7 days). Browser checks skip images, fonts and
+media; checkout pages still load normally. Browser jobs for the same page are serialized so saved cookies and local
+storage can't overwrite one another out of order. Manual **Check now** still runs immediately.
+
 ## Android app
 
 `DeficitSnatcher.Android` (.NET MAUI, Android 8+). Settings → **Download the APK** (the `android` release), open it on the
@@ -81,8 +87,9 @@ phone and allow installing from your browser; sign in with the site's address, u
   or an update. The site holds each request until there's an alarm (`GET /api/alarms?after=…&wait=…`), so it rings
   within a second or two.
 - A **match** (in stock, title fits, price + shipping in range) rings: the phone's alarm sound at full alarm volume,
-  looping, with vibration, and a full-screen page even on the lock screen. **Stop & open the store** silences it and opens
-  the store's product page to buy it. It stops by itself after 15 minutes.
+  looping, with vibration, and a full-screen page even on the lock screen. **Stop & open cart / store** silences it and
+  opens a populated cart for sites explicitly set to Shopify with a known variant; otherwise it opens the product page. It never places an
+  order. It stops by itself after 15 minutes.
 - **Test alarm** (in the app, or Settings → Ring my phone) rings once. **Allow running in the background** keeps Android
   from putting it to sleep.
 - It updates itself from the `android` release (`version.txt` there is the newest build). The first update asks you to

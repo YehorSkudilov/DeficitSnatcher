@@ -57,6 +57,7 @@ public sealed record SiteDto(
 
 public sealed record ProbeResponse(PageResult? Result, BuyRules.Verdict? Verdict, string? Error, string? BuyMessage);
 public sealed record BuyRequest(bool DryRun);
+public sealed record CartLinkDto(string? Url);
 public sealed record BrowserSessionDto(string Browser, DateTimeOffset StartedAt, DateTimeOffset SavedAt);
 public sealed record CheckAllItem(int SiteId, string Name, decimal? Price, bool? InStock, bool Match, string? Verdict, string? Error, string? BuyMessage);
 public sealed record HistoryPoint(DateTimeOffset At, decimal? Price, bool InStock);
@@ -198,6 +199,25 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
         return await buyer.BuyAsync(id, price, manual: true, forceDryRun: request.DryRun, trigger, ct);
     }
 
+    /// <summary>A Shopify cart permalink for the last matched variant. Other stores return no cart link.</summary>
+    [HttpGet("{id:int}/cart-link")]
+    public async Task<ActionResult<CartLinkDto>> CartLink(int id, CancellationToken ct)
+    {
+        var site = await db.Sites.AsNoTracking().Include(s => s.Product).FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (site == null)
+            return NotFound();
+        if (site.Kind != SiteKind.Shopify || !Uri.TryCreate(site.Url, UriKind.Absolute, out var productUri))
+            return new CartLinkDto(null);
+        var variant = site.LastVariantId ?? site.VariantId ?? System.Web.HttpUtility.ParseQueryString(productUri.Query)["variant"];
+        if (!long.TryParse(variant, out var variantId) || variantId <= 0)
+            return new CartLinkDto(null);
+        var cart = new UriBuilder(productUri.Scheme, productUri.Host, productUri.IsDefaultPort ? -1 : productUri.Port)
+        {
+            Path = $"/cart/{variantId}:{Math.Max(1, site.Product?.QuantityPerOrder ?? 1)}",
+        };
+        return new CartLinkDto(cart.Uri.ToString());
+    }
+
     [HttpGet("{id:int}/history")]
     public Task<List<HistoryPoint>> History(int id, [FromQuery] int days = 14, CancellationToken ct = default)
     {
@@ -217,8 +237,8 @@ public sealed class SitesController(AppDbContext db, SecretBox box, Tracker trac
             error = "The URL must be a full http(s) address.";
         else if (!await db.Products.AnyAsync(p => p.Id == i.ProductId, ct))
             error = "Pick the product it sells.";
-        else if (i.IntervalSeconds is < 5)
-            error = "Check at most every 5 seconds.";
+        else if (i.IntervalSeconds is < 60)
+            error = "Scheduled checks must be at least 60 seconds apart.";
         else if (i.ShippingCost < 0)
             error = "Shipping can't be negative.";
         else if (CheckoutStep.Validate(steps) is { } stepError)

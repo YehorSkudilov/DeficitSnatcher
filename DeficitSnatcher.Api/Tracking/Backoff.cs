@@ -12,11 +12,14 @@ public sealed class Backoff
     private readonly ConcurrentDictionary<int, (int Strikes, DateTimeOffset Until)> _sites = new();
 
     /// <summary>The store blocked this page's check: how long it rests.</summary>
-    public TimeSpan Blocked(int siteId)
+    public TimeSpan Blocked(int siteId, TimeSpan? retryAfter = null)
     {
         var strikes = _sites.TryGetValue(siteId, out var b) ? b.Strikes + 1 : 1;
         var minutes = Math.Min(15 * Math.Pow(2, strikes - 1), 360) * (0.85 + Random.Shared.NextDouble() * 0.3);
         var rest = TimeSpan.FromMinutes(minutes);
+        // Honor the store's explicit cooldown when it asks us to wait longer than our local backoff.
+        if (retryAfter is { } requested && requested > rest)
+            rest = requested > TimeSpan.FromDays(7) ? TimeSpan.FromDays(7) : requested;
         _sites[siteId] = (strikes, DateTimeOffset.UtcNow + rest);
         return rest;
     }

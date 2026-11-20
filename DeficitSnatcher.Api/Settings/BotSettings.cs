@@ -43,9 +43,9 @@ public sealed record BotSettings
     public bool TrackingEnabled => true;
     /// <summary>Each wait is randomly up to this much longer or shorter, so checks don't land on a fixed beat.</summary>
     public int JitterPercent => 25;
-    public bool SlowDownFailingPages => false;
+    public bool SlowDownFailingPages => true;
     /// <summary>Two checks of the same store are at least this far apart.</summary>
-    public int MinSecondsPerHost => 20;
+    public int MinSecondsPerHost => 60;
     public List<StoreInterval> StoreIntervals => [];
     public int MaxConcurrentChecks => 3;
     public int RequestTimeoutSeconds => 30;

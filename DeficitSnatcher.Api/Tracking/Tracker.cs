@@ -46,6 +46,7 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
     private readonly ConcurrentDictionary<int, DateTimeOffset> _nextDue = new();
     private readonly ConcurrentDictionary<int, byte> _running = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _hostLast = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> _hostRunning = new(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset _lastCleanup = DateTimeOffset.MinValue;
 
     /// <summary>When each site is checked next (the dashboard shows it).</summary>
@@ -137,17 +138,22 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
                 interval = Math.Min(interval, 60);
             if (settings.StoreIntervals.FirstOrDefault(x => x.Matches(site.Url)) is { } strict)
                 interval = Math.Max(interval, strict.Minutes * 60);
+            // Keep scheduled polling at or below one request per minute per page, even for older saved settings.
+            interval = Math.Max(interval, 60);
             var due = _nextDue.GetOrAdd(site.Id, _ => site.LastCheckedAt?.AddSeconds(interval) ?? now);
             if (due > now)
                 continue;
             // All slots busy: it's overdue, and goes first when one frees up (the loop runs every few seconds).
             if (_running.Count >= settings.MaxConcurrentChecks)
                 continue;
-            var host = Uri.TryCreate(site.Url, UriKind.Absolute, out var uri) ? uri.Host : site.Url;
+            var host = Uri.TryCreate(site.Url, UriKind.Absolute, out var uri) ? uri.IdnHost : site.Url;
+            if (_hostRunning.ContainsKey(host))
+                continue;
             if (_hostLast.TryGetValue(host, out var last) && now - last < TimeSpan.FromSeconds(settings.MinSecondsPerHost))
                 continue;
 
             _hostLast[host] = now;
+            _hostRunning[host] = 0;
             _running[site.Id] = 0;
             var id = site.Id;
             _ = Task.Run(async () =>
@@ -175,6 +181,7 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
                 {
                     _nextDue[id] = DateTimeOffset.UtcNow + NextWait(interval, settings.JitterPercent, settings.SlowDownFailingPages ? errors : 0);
                     _running.TryRemove(id, out _);
+                    _hostRunning.TryRemove(host, out _);
                 }
             }, CancellationToken.None);
         }

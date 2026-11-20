@@ -6,6 +6,7 @@ using System.Text.Json;
 namespace DeficitSnatcher.Phone;
 
 public sealed record AlarmDto(long Id, DateTimeOffset At, int? SiteId, string Product, string Store, decimal? Price, string Url, string Message, bool Test);
+public sealed record CartLinkDto(string? Url);
 
 /// <summary>New alarms; when the server last checked a page, how many it watches, and after how many seconds without a check
 /// something's wrong.</summary>
@@ -125,5 +126,15 @@ public static class Server
     {
         using var response = await SendAsync(() => new HttpRequestMessage(HttpMethod.Post, $"{Url}/api/alarms/test"), CancellationToken.None);
         response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>A supported store cart link for this alarm's site, or null when the store has no direct cart link.</summary>
+    public static async Task<string?> CartUrlAsync(int siteId, CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(4));
+        using var response = await SendAsync(() => new HttpRequestMessage(HttpMethod.Get, $"{Url}/api/sites/{siteId}/cart-link"), timeout.Token);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<CartLinkDto>(Json, ct))?.Url;
     }
 }

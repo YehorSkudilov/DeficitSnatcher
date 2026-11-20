@@ -1,6 +1,7 @@
 using DeficitSnatcher.Api.Settings;
 using DeficitSnatcher.Api.Data;
 using Microsoft.Playwright;
+using System.Collections.Concurrent;
 
 namespace DeficitSnatcher.Api.Tracking;
 
@@ -15,6 +16,9 @@ namespace DeficitSnatcher.Api.Tracking;
 public sealed class BrowserPool(BrowserSessions sessions, ILogger<BrowserPool> log) : IAsyncDisposable
 {
     private readonly SemaphoreSlim _lock = new(1, 1);
+    // StreetMerchant defaults to one lookup thread per store. Serialize browser contexts for a site as well:
+    // overlapping checks/checkouts can otherwise load and save the same storage state out of order.
+    private readonly ConcurrentDictionary<int, SemaphoreSlim> _siteLocks = new();
     private IPlaywright? _playwright;
     private IBrowser? _browser;
 
@@ -33,10 +37,27 @@ public sealed class BrowserPool(BrowserSessions sessions, ILogger<BrowserPool> l
     /// <summary>A browser to use and dispose: a fresh context in the app's browser (see <see cref="EngineFor"/>) with the
     /// page's saved session.</summary>
     /// <param name="site">The page it's for: its saved session is used and kept (null: none).</param>
-    public Task<BrowserLease> OpenAsync(BotSettings settings, IEnumerable<SiteCookie> cookies, CancellationToken ct, Site? site = null) =>
-        ServerLeaseAsync(settings, cookies.ToList(), site, ct);
+    public async Task<BrowserLease> OpenAsync(BotSettings settings, IEnumerable<SiteCookie> cookies, CancellationToken ct, Site? site = null)
+    {
+        SemaphoreSlim? siteLock = null;
+        if (site is { Id: > 0 })
+        {
+            siteLock = _siteLocks.GetOrAdd(site.Id, _ => new SemaphoreSlim(1, 1));
+            await siteLock.WaitAsync(ct);
+        }
+        try
+        {
+            return await ServerLeaseAsync(settings, cookies.ToList(), site, ct, siteLock);
+        }
+        catch
+        {
+            siteLock?.Release();
+            throw;
+        }
+    }
 
-    private async Task<BrowserLease> ServerLeaseAsync(BotSettings settings, List<SiteCookie> cookies, Site? site, CancellationToken ct)
+    private async Task<BrowserLease> ServerLeaseAsync(BotSettings settings, List<SiteCookie> cookies, Site? site, CancellationToken ct,
+        SemaphoreSlim? siteLock)
     {
         var engine = EngineFor(settings);
         var siteId = site?.Id ?? 0;
@@ -70,7 +91,7 @@ public sealed class BrowserPool(BrowserSessions sessions, ILogger<BrowserPool> l
         Func<IBrowserContext, Task>? save = siteId > 0 && settings.BrowserSessionMinutes > 0
             ? async c => await sessions.SaveAsync(siteId, engine, await c.StorageStateAsync())
             : null;
-        return new BrowserLease(context, engine, save, log);
+        return new BrowserLease(context, engine, save, log, siteLock);
     }
 
     /// <summary>The cookies pasted on the page. With a saved session, only the ones it doesn't have: the store may have
@@ -310,7 +331,7 @@ public sealed class BrowserPool(BrowserSessions sessions, ILogger<BrowserPool> l
 /// <summary>A browser borrowed for one job: its context is closed when it's disposed, after its session is saved
 /// (<paramref name="save"/>).</summary>
 public sealed class BrowserLease(IBrowserContext context, string engine = BrowserPool.Chromium, Func<IBrowserContext, Task>? save = null,
-    ILogger? log = null) : IAsyncDisposable
+    ILogger? log = null, SemaphoreSlim? siteLock = null) : IAsyncDisposable
 {
     public IBrowserContext Context => context;
     /// <summary>Which browser: chromium or camoufox (see BrowserPool).</summary>
@@ -320,26 +341,35 @@ public sealed class BrowserLease(IBrowserContext context, string engine = Browse
 
     public async ValueTask DisposeAsync()
     {
-        if (save != null)
-            try
-            {
-                await save(context).WaitAsync(TimeSpan.FromSeconds(10));
-            }
-            catch (Exception e)
-            {
-                log?.LogWarning("Browser session not saved: {Error}", e.Message.Split('\n')[0]);
-            }
         try
         {
-            await context.CloseAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            if (save != null)
+            {
+                try
+                {
+                    await save(context).WaitAsync(TimeSpan.FromSeconds(10));
+                }
+                catch (Exception e)
+                {
+                    log?.LogWarning("Browser session not saved: {Error}", e.Message.Split('\n')[0]);
+                }
+            }
+            try
+            {
+                await context.CloseAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (PlaywrightException)
+            {
+                // Already gone (the browser restarted).
+            }
+            catch (TimeoutException)
+            {
+                log?.LogWarning("Browser tab didn't close in 10 s; left behind");
+            }
         }
-        catch (PlaywrightException)
+        finally
         {
-            // Already gone (the browser restarted).
-        }
-        catch (TimeoutException)
-        {
-            log?.LogWarning("Browser tab didn't close in 10 s; left behind");
+            siteLock?.Release();
         }
     }
 }

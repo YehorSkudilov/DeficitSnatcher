@@ -132,12 +132,12 @@ public sealed class AlarmActivity : Activity
         Text(alarm?.Product ?? "", 26, "#F2F4F8", bold: true);
         Text($"{alarm?.Store}{(alarm?.Price is { } p ? $" · {p:0.00}" : "")}", 22, "#9AA3B5");
 
-        var open = new global::Android.Widget.Button(this) { Text = "STOP & OPEN THE STORE" };
+        var open = new global::Android.Widget.Button(this) { Text = "STOP & OPEN CART / STORE" };
         open.SetTextSize(global::Android.Util.ComplexUnitType.Sp, 22);
         open.SetBackgroundColor(global::Android.Graphics.Color.ParseColor("#2ED47A"));
         open.SetTextColor(global::Android.Graphics.Color.ParseColor("#0B0D12"));
         open.SetPadding(24, 48, 24, 48);
-        open.Click += (_, _) => StopAndOpen(alarm?.Url);
+        open.Click += async (_, _) => await StopAndOpenAsync(alarm);
         var openParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent) { TopMargin = 64 };
         layout.AddView(open, openParams);
 
@@ -149,9 +149,21 @@ public sealed class AlarmActivity : Activity
         SetContentView(layout);
     }
 
-    private void StopAndOpen(string? url)
+    private async Task StopAndOpenAsync(AlarmDto? alarm)
     {
         Alarm.Stop(this);
+        var url = alarm?.Url;
+        if (alarm is { Test: false, SiteId: { } siteId })
+        {
+            try
+            {
+                url = await Server.CartUrlAsync(siteId, CancellationToken.None) ?? url;
+            }
+            catch
+            {
+                // Keep the product-page fallback available if the app temporarily can't reach its server.
+            }
+        }
         if (!string.IsNullOrEmpty(url))
         {
             var view = new Intent(Intent.ActionView, global::Android.Net.Uri.Parse(url)).AddFlags(ActivityFlags.NewTask);
