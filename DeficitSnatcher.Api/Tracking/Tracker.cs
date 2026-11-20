@@ -10,9 +10,12 @@ namespace DeficitSnatcher.Api.Tracking;
 /// never two of the same host closer than the settings allow, and backing off a site that keeps failing.
 /// </summary>
 public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsStore, CheckService checks, Ai.RestockForecaster forecaster,
-    ILogger<Tracker> log)
+    BrowserPool browsers, ILogger<Tracker> log)
     : BackgroundService
 {
+    /// <summary>The most one check may take in all (page, reading it, saving): past it, the check is given up.</summary>
+    private static TimeSpan CheckLimit(Settings.BotSettings settings) => CheckService.FetchLimit(settings) + TimeSpan.FromSeconds(60);
+
     private DateTimeOffset _lastForecastLookup;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, (DateTimeOffset? Next, DateTimeOffset At)> _forecasts = new();
 
@@ -126,8 +129,6 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
         var now = DateTimeOffset.UtcNow;
         foreach (var site in sites.OrderBy(s => _nextDue.GetValueOrDefault(s.Id, s.LastCheckedAt ?? DateTimeOffset.MinValue)))
         {
-            if (_running.Count >= settings.MaxConcurrentChecks)
-                break;
             if (_running.ContainsKey(site.Id))
                 continue;
             var interval = site.IntervalSeconds ?? settings.DefaultIntervalSeconds;
@@ -139,6 +140,9 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
             var due = _nextDue.GetOrAdd(site.Id, _ => site.LastCheckedAt?.AddSeconds(interval) ?? now);
             if (due > now)
                 continue;
+            // All slots busy: it's overdue, and goes first when one frees up (the loop runs every few seconds).
+            if (_running.Count >= settings.MaxConcurrentChecks)
+                continue;
             var host = Uri.TryCreate(site.Url, UriKind.Absolute, out var uri) ? uri.Host : site.Url;
             if (_hostLast.TryGetValue(host, out var last) && now - last < TimeSpan.FromSeconds(settings.MinSecondsPerHost))
                 continue;
@@ -149,10 +153,19 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
             _ = Task.Run(async () =>
             {
                 var errors = 0;
+                // A hard limit per check: whatever hangs (browser, database), the slot comes back and other pages get checked.
+                using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                limit.CancelAfter(CheckLimit(settings));
                 try
                 {
-                    var outcome = await checks.CheckAsync(id, ct);
+                    var outcome = await checks.CheckAsync(id, limit.Token).WaitAsync(CheckLimit(settings) + TimeSpan.FromSeconds(15), ct);
                     errors = outcome.Error == null ? 0 : site.ConsecutiveErrors + 1;
+                }
+                catch (Exception e) when (!ct.IsCancellationRequested && e is TimeoutException or OperationCanceledException)
+                {
+                    log.LogWarning("Check of site {Id} took over {Limit} s; given up, next one as usual", id, CheckLimit(settings).TotalSeconds);
+                    browsers.ResetCamoufox();
+                    errors = site.ConsecutiveErrors + 1;
                 }
                 catch (Exception e)
                 {

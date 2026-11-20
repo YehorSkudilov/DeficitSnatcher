@@ -47,7 +47,7 @@ public sealed record BotSettings
     /// <summary>Two checks of the same store are at least this far apart.</summary>
     public int MinSecondsPerHost => 20;
     public List<StoreInterval> StoreIntervals => [];
-    public int MaxConcurrentChecks => 3;
+    public int MaxConcurrentChecks => 4;
     public int RequestTimeoutSeconds => 30;
     public string ProxyUrl => "";
     /// <summary>The Camoufox Playwright server (DeficitSnatcher.Camoufox) in Docker.</summary>

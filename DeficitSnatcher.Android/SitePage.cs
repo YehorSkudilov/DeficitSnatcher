@@ -11,6 +11,8 @@ public sealed class SitePage : ContentPage
 {
     private readonly Microsoft.Maui.Controls.WebView _web = new() { BackgroundColor = Theme.Background };
     private readonly Label _message = new() { TextColor = Theme.Muted, FontSize = 15, Margin = new Thickness(20) };
+    // Pull down at the top of the page to reload it, like in a browser.
+    private readonly RefreshView _refresh = new() { RefreshColor = Theme.Accent, BackgroundColor = Theme.Background };
     private string? _loadedFor;
     private bool _signedIn;
 
@@ -20,8 +22,11 @@ public sealed class SitePage : ContentPage
         BackgroundColor = Theme.Background;
         StatusBarSpace.Keep(this);
         _web.Navigating += OnNavigating;
+        _refresh.Content = _web;
+        _refresh.Command = new Command(() => _web.Reload());
         _web.Navigated += async (_, e) =>
         {
+            _refresh.IsRefreshing = false;
             if (e.Result != WebNavigationResult.Success || _signedIn)
                 return;
             // The site keeps its sign-in in localStorage (ds.token): put the app's there once, then reload into it.
@@ -54,7 +59,7 @@ public sealed class SitePage : ContentPage
         {
             _loadedFor = Server.Url;
             _signedIn = false;
-            Content = _web;
+            Content = _refresh;
             _web.Source = Server.Url + "/#dashboard";
         }
     }
@@ -73,7 +78,7 @@ public sealed class SitePage : ContentPage
 
     protected override bool OnBackButtonPressed()
     {
-        if (Content == _web && _web.CanGoBack)
+        if (Content == _refresh && _web.CanGoBack)
         {
             _web.GoBack();
             return true;

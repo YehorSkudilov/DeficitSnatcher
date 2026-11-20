@@ -114,6 +114,30 @@ public sealed class BrowserPool(BrowserSessions sessions, ILogger<BrowserPool> l
         }
     }
 
+    /// <summary>
+    /// Drops the Camoufox connection (a check hung on it): the next check connects afresh. The old one is closed in the
+    /// background, so a wedged connection can't hold anything up.
+    /// </summary>
+    public void ResetCamoufox()
+    {
+        var old = _camoufox;
+        _camoufox = null;
+        if (old == null)
+            return;
+        log.LogWarning("Dropping the Camoufox connection (a check hung); reconnecting on the next check");
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await old.CloseAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            }
+            catch (Exception)
+            {
+                // Gone or wedged either way.
+            }
+        });
+    }
+
     private async Task<IBrowser> CamoufoxBrowserAsync(string url, CancellationToken ct)
     {
         if (_camoufox is { IsConnected: true } && _camoufoxUrl == url)
@@ -289,7 +313,7 @@ public sealed class BrowserLease(IBrowserContext context, string engine = Browse
         if (save != null)
             try
             {
-                await save(context);
+                await save(context).WaitAsync(TimeSpan.FromSeconds(10));
             }
             catch (Exception e)
             {
@@ -297,11 +321,15 @@ public sealed class BrowserLease(IBrowserContext context, string engine = Browse
             }
         try
         {
-            await context.CloseAsync();
+            await context.CloseAsync().WaitAsync(TimeSpan.FromSeconds(10));
         }
         catch (PlaywrightException)
         {
             // Already gone (the browser restarted).
+        }
+        catch (TimeoutException)
+        {
+            log?.LogWarning("Browser tab didn't close in 10 s; left behind");
         }
     }
 }
