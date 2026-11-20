@@ -49,6 +49,19 @@ services:
       retries: 6
       start_period: 30s
 
+  # Camoufox (a Firefox that hides automation) for Camoufox-kind pages; the API reaches it at http://camoufox:8000
+  # (Settings → Checking → Camoufox service). Only runs with COMPOSE_PROFILES=camoufox in .env.
+  camoufox:
+    build:
+      context: DeficitSnatcher.Camoufox
+    profiles: ["camoufox"]
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      - MAX_PAGES=2
+    shm_size: "1gb"
+
   db:
     image: postgres:17
     restart: unless-stopped

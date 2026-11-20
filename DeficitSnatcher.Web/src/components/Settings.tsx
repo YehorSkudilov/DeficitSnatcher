@@ -165,6 +165,45 @@ function SettingsForm({ initial }: { initial: Settings }) {
         >
           <input type="text" autoComplete="off" value={s.proxyUrl} placeholder="http://user:password@proxy.example.com:8000" onChange={(e) => set({ proxyUrl: e.target.value })} />
         </Field>
+        <div className="small muted">
+          <b>Other ways in</b>, for stores that block the server even through the proxy: pick them as a page&apos;s <b>Kind</b>.
+        </div>
+        <div className="grid two">
+          <Field label="Bright Data API token" hint="For the Unlocker kind (Web Unlocker). Bright Data → Account settings → API tokens.">
+            <input type="password" autoComplete="off" value={s.brightDataApiToken} onChange={(e) => set({ brightDataApiToken: e.target.value })} />
+          </Field>
+          <Field label="Web Unlocker zone" hint="The zone's name in Bright Data, e.g. web_unlocker1.">
+            <input type="text" autoComplete="off" value={s.brightDataUnlockerZone} placeholder="web_unlocker1" onChange={(e) => set({ brightDataUnlockerZone: e.target.value })} />
+          </Field>
+          <Field label="Web Unlocker country" hint="Two letters (e.g. ca): stores are reached from there. Empty: Bright Data chooses.">
+            <input type="text" autoComplete="off" value={s.brightDataCountry} placeholder="ca" maxLength={2} onChange={(e) => set({ brightDataCountry: e.target.value })} />
+          </Field>
+          <Field label="Keep browser sessions (minutes)" hint="BrightData and Camoufox pages keep their cookies and storage from check to check this long, then start fresh (and at once when blocked). 0: never kept.">
+            <NumberInput value={s.remoteSessionMinutes} min={0} onChange={(v) => set({ remoteSessionMinutes: v ?? 0 })} />
+          </Field>
+        </div>
+        <Field
+          label="Bright Data browser"
+          hint={
+            <>
+              For the BrightData kind (Browser API, over CDP). The zone&apos;s Playwright address:{" "}
+              <code>wss://brd-customer-…-zone-…:password@brd.superproxy.io:9222</code>.
+            </>
+          }
+        >
+          <input type="password" autoComplete="off" value={s.brightDataBrowserUrl} placeholder="wss://brd-customer-…@brd.superproxy.io:9222" onChange={(e) => set({ brightDataBrowserUrl: e.target.value })} />
+        </Field>
+        <Field
+          label="Camoufox service"
+          hint={
+            <>
+              For the Camoufox kind. In Docker: <code>http://camoufox:8000</code>, with <code>COMPOSE_PROFILES=camoufox</code> in the server&apos;s .env so
+              it runs. Uses the proxy above when one is set.
+            </>
+          }
+        >
+          <input type="text" autoComplete="off" value={s.camoufoxUrl} placeholder="http://camoufox:8000" onChange={(e) => set({ camoufoxUrl: e.target.value })} />
+        </Field>
         <Field label="User agent" hint="What plain checks (not the browser) say they are.">
           <input type="text" value={s.userAgent} onChange={(e) => set({ userAgent: e.target.value })} />
         </Field>

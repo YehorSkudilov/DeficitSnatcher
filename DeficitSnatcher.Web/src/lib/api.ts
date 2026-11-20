@@ -92,7 +92,7 @@ export type Product = {
 
 export type ProductInput = Omit<Product, "id" | "bought" | "sites" | "createdAt">;
 
-export const SiteKinds = ["Auto", "Shopify", "Html", "Browser"] as const;
+export const SiteKinds = ["Auto", "Shopify", "Html", "Browser", "Unlocker", "BrightData", "Camoufox"] as const;
 export type SiteKind = (typeof SiteKinds)[number];
 
 export const StepActions = ["goto", "click", "fill", "type", "select", "check", "press", "wait", "waitFor", "waitForUrl", "expectText"] as const;
@@ -415,6 +415,12 @@ export type Settings = {
   maxConcurrentChecks: number;
   requestTimeoutSeconds: number;
   proxyUrl: string;
+  brightDataApiToken: string;
+  brightDataUnlockerZone: string;
+  brightDataCountry: string;
+  brightDataBrowserUrl: string;
+  camoufoxUrl: string;
+  remoteSessionMinutes: number;
   userAgent: string;
   historyDays: number;
   scanHistoryDays: number;

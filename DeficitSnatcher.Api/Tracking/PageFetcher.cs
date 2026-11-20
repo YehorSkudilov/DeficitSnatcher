@@ -5,7 +5,7 @@ using DeficitSnatcher.Api.Settings;
 namespace DeficitSnatcher.Api.Tracking;
 
 /// <summary>Fetches a site's product page and reads it (see PageParser), the way the site's kind says.</summary>
-public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanCheck humanCheck, Pc.WorkerPool workers)
+public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanCheck humanCheck, Pc.WorkerPool workers, RemoteRender remote)
 {
     public static SocketsHttpHandler CreateHandler() => new()
     {
@@ -43,6 +43,8 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
         }
 
         var selectors = new PageParser.Selectors(site.PriceSelector, site.TitleSelector, site.InStockSelector, site.OutOfStockText);
+        if (site.Kind is SiteKind.Unlocker or SiteKind.BrightData or SiteKind.Camoufox)
+            return await FetchRemoteAsync(site, url, cookies, settings, selectors, ct);
         if (site.Kind == SiteKind.Browser)
         {
             var (rendered, _) = await RenderAsync(url, cookies, settings, ct, site, Pc.WorkerPool.Server);
@@ -57,6 +59,35 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, Pc.HumanC
                 + " Or try the Browser kind.");
         if (code != HttpStatusCode.OK)
             throw new HttpRequestException($"The site answered {(int)code} {code}.");
+        return PageParser.ParseHtml(html, selectors) with { Source = html, SourceType = "text/html" };
+    }
+
+    /// <summary>Through Bright Data or Camoufox (see RemoteRender). A store that still blocks it loses the saved session,
+    /// so the next check comes as someone new.</summary>
+    private async Task<PageResult> FetchRemoteAsync(Site site, Uri url, List<SiteCookie> cookies, BotSettings settings, PageParser.Selectors selectors,
+        CancellationToken ct)
+    {
+        int status;
+        string html, how;
+        if (site.Kind == SiteKind.Unlocker)
+        {
+            var (code, body) = await remote.UnlockerAsync(url, settings, ct);
+            (status, html, how) = ((int)code, body, "Web Unlocker");
+        }
+        else if (site.Kind == SiteKind.BrightData)
+            (status, html, how) = (200, await remote.BrightDataAsync(site, url, cookies, settings, ct), "Bright Data's browser");
+        else
+        {
+            var (code, body) = await remote.CamoufoxAsync(site, url, cookies, settings, ct);
+            (status, html, how) = (code, body, "Camoufox");
+        }
+        if (BlockDetector.Detect(html, status) is { } vendor)
+        {
+            remote.Forget(site.Id);
+            throw new BlockedException($"Through {how}: " + BlockDetector.Message(vendor, browser: site.Kind != SiteKind.Unlocker));
+        }
+        if (status >= 400)
+            throw new HttpRequestException($"Through {how}, the site answered {status}.");
         return PageParser.ParseHtml(html, selectors) with { Source = html, SourceType = "text/html" };
     }
 

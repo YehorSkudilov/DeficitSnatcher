@@ -52,6 +52,23 @@ One page per store: a store (its domain, e.g. bestbuy.ca) that's already watched
 your country are added (from the checkout profile's country and province, or the currency): amazon.com or a `/en-us/`
 page is left out for someone in Canada, and so is a page priced in another currency.
 
+## Stores that block the server
+
+Besides the proxy (Settings → Checking), a page's **Kind** can send it another way. All three are set up in Settings →
+Checking, and the page is then read like any other (structured data, selectors, the AI's fixes):
+
+| Kind | What it is |
+|---|---|
+| **Unlocker** | [Bright Data Web Unlocker](https://docs.brightdata.com/scraping-automation/web-unlocker/introduction): one HTTP request to their API (`POST api.brightdata.com/request`, the zone, `format: raw`), which gets past the bot check and sends back the page's HTML. Needs an API token and the zone's name; optionally a country. No script runs, so it suits pages whose HTML has the price. |
+| **BrightData** | [Bright Data Browser API](https://docs.brightdata.com/scraping-automation/scraping-browser/introduction): a Chrome in their cloud, driven over CDP (Playwright's `ConnectOverCDP` to the zone's `wss://…@brd.superproxy.io:9222`). The page's script runs; their CAPTCHA solving is waited for. Each check is a new session there, closed when done. |
+| **Camoufox** | [Camoufox](https://camoufox.com), a Firefox that hides automation, run by `DeficitSnatcher.Camoufox` (a small Python service: `POST /render` gives the rendered HTML and the browser's storage). Started by `docker compose` with `COMPOSE_PROFILES=camoufox`; address `http://camoufox:8000`. Uses the proxy when one is set. |
+
+**Sessions**: BrightData and Camoufox pages keep their cookies and local storage from one check to the next (pasted
+cookies first, then what the store set), so the store sees a returning visitor. A session is dropped after Settings →
+"Keep browser sessions" (3 hours by default), when the store blocks it, and when the API restarts. Failures say which way
+failed and why (bad token or login, service unreachable, timed out, blocked); a Bright Data session that ends mid-check is
+retried once with a new one. Checkouts still run in the server's Chromium (or the PC helper's Chrome).
+
 ## Restock forecast
 
 Each page shows its **next restock**: from its own history (the times it came back into stock: usual weekday and time,

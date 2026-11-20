@@ -45,6 +45,12 @@ public enum SiteKind
     /// <summary>Like Html, but the page is rendered in Chromium first (sites that build the page in script or
     /// block plain HTTP clients).</summary>
     Browser,
+    /// <summary>Bright Data's Web Unlocker API fetches the page (it gets past the store's bot check), then it's read like Html.</summary>
+    Unlocker,
+    /// <summary>Rendered in a Bright Data cloud browser (Browser API, over CDP), for stores that block the server's Chromium.</summary>
+    BrightData,
+    /// <summary>Rendered in Camoufox (a Firefox that hides automation), the DeficitSnatcher.Camoufox service.</summary>
+    Camoufox,
 }
 
 /// <summary>A product page to watch on one site.</summary>

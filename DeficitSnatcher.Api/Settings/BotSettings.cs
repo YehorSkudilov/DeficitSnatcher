@@ -38,6 +38,20 @@ public sealed record BotSettings
     /// <summary>Stores are reached through this proxy (checks and checkouts; not ChatGPT): http://user:pass@host:port.
     /// A residential proxy gets past stores that block servers' addresses. Empty: direct.</summary>
     public string ProxyUrl { get; init; } = "";
+    // Other ways to reach stores that block the server (the Unlocker, BrightData and Camoufox kinds of page).
+    /// <summary>Bright Data API token (account settings → API tokens), for Web Unlocker.</summary>
+    public string BrightDataApiToken { get; init; } = "";
+    /// <summary>The Web Unlocker zone's name (e.g. web_unlocker1).</summary>
+    public string BrightDataUnlockerZone { get; init; } = "";
+    /// <summary>Two-letter country Web Unlocker reaches stores from (e.g. ca); empty: theirs to choose.</summary>
+    public string BrightDataCountry { get; init; } = "";
+    /// <summary>Bright Data Browser API address: wss://brd-customer-…-zone-…:password@brd.superproxy.io:9222.</summary>
+    public string BrightDataBrowserUrl { get; init; } = "";
+    /// <summary>The Camoufox service (DeficitSnatcher.Camoufox), e.g. http://camoufox:8000 in Docker.</summary>
+    public string CamoufoxUrl { get; init; } = "";
+    /// <summary>A page's browser session (cookies, local storage) is carried from check to check for this long, then
+    /// started afresh; 0: every check is a new visitor.</summary>
+    public int RemoteSessionMinutes { get; init; } = 180;
     public string UserAgent { get; init; } =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
     /// <summary>Price history and the activity log older than this are removed; 0 keeps it all.</summary>
@@ -160,6 +174,12 @@ public sealed record BotSettings
         SmtpPassword = SmtpPassword ?? "",
         EmailFrom = EmailFrom?.Trim() ?? "",
         ProxyUrl = ProxyUrl?.Trim() ?? "",
+        BrightDataApiToken = BrightDataApiToken?.Trim() ?? "",
+        BrightDataUnlockerZone = BrightDataUnlockerZone?.Trim() ?? "",
+        BrightDataCountry = (BrightDataCountry ?? "").Trim().ToLowerInvariant(),
+        BrightDataBrowserUrl = BrightDataBrowserUrl?.Trim() ?? "",
+        CamoufoxUrl = CamoufoxUrl?.Trim() ?? "",
+        RemoteSessionMinutes = Math.Clamp(RemoteSessionMinutes, 0, 7 * 24 * 60),
     };
 }
 
