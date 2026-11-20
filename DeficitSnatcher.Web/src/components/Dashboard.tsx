@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { api, type RestockForecast, type CheckAllItem, type Dashboard as DashboardData, type ProbeResponse, type Product, type Site } from "@/lib/api";
 import { ago, dateTime, host, money, until } from "@/lib/format";
-import { Check, ErrorNote, LevelDot, StockBadge, useAction, useCollapsed, useData, useNow, CollapseButton, PagesSummary } from "./ui";
+import { Check, ErrorNote, LevelDot, PurchaseBadge, StockBadge, useAction, useCollapsed, useData, useNow, CollapseButton, PagesSummary } from "./ui";
 import { go } from "./App";
 
 export function Dashboard() {
@@ -83,7 +83,8 @@ export function Dashboard() {
             <h2>Alerts</h2>
           </div>
           <div className="events">
-            {d?.recentEvents.length === 0 && <p className="muted">Nothing yet.</p>}
+            {d?.recentEvents.length === 0 && d?.recentPurchases.length === 0 && <p className="muted">No in-stock alerts or checkout runs yet.</p>}
+            {d?.recentEvents.length ? <div className="small muted">In stock</div> : null}
             {d?.recentEvents.map((e) => (
               <div className="event clickable" key={e.id} onClick={() => {
                 const checkoutId = Number(e.message.match(/checkout #(\d+)/i)?.[1]);
@@ -95,6 +96,14 @@ export function Dashboard() {
                 <span className="faint small" title={dateTime(e.at)}>
                   {ago(e.at, now)}
                 </span>
+              </div>
+            ))}
+            {d?.recentPurchases.length ? <div className="small muted" style={{ marginTop: 8 }}>Checkout runs</div> : null}
+            {d?.recentPurchases.map((p) => (
+              <div className="event clickable" key={`purchase-${p.id}`} onClick={() => go(`purchase/${p.id}`)} title="Open checkout details and screenshots">
+                <PurchaseBadge status={p.status} />
+                <span>{p.productName} at {p.siteName}, {money(p.price, d.currency)} Â· {p.message}</span>
+                <span className="faint small" title={dateTime(p.startedAt)}>{ago(p.startedAt, now)}</span>
               </div>
             ))}
           </div>

@@ -66,7 +66,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
         </div>
         {testResult && <pre className="log">{testResult}</pre>}
         <p className="muted small" style={{ margin: 0 }}>
-          Emailed: products in stock in your price range and completed checkouts. Set up for IONOS mail by default:
+          Emailed: in-range stock matches and checkout outcomes. Set up for IONOS mail by default:
           the mailbox&apos;s full address as the username and its password.
         </p>
         <div className="fields">

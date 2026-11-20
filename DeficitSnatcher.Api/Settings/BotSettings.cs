@@ -1,7 +1,7 @@
 namespace DeficitSnatcher.Api.Settings;
 
 /// <summary>
-/// The settings. Only a few can be changed (the Settings page: auto-buy, how often pages are checked, email alerts); the
+/// The settings. Only a few can be changed (the Settings page: checking cadence and email alerts); the
 /// rest are fixed here, with what works best. Kept encrypted in the database (see SettingsStore). Properties without a
 /// setter aren't saved or read back: they're always these values.
 /// </summary>

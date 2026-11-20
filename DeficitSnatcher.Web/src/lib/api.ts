@@ -360,6 +360,7 @@ export type Dashboard = {
   sitesFailing: number;
   checksLastHour: number;
   recentEvents: BotEvent[];
+  recentPurchases: Purchase[];
 };
 
 export type Settings = {

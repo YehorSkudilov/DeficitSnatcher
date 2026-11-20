@@ -53,7 +53,8 @@ public sealed record DashboardDto(
     int SitesInStock,
     int SitesFailing,
     int ChecksLastHour,
-    List<EventDto> RecentEvents);
+    List<EventDto> RecentEvents,
+    List<PurchaseDto> RecentPurchases);
 
 [ApiController]
 [Route("api")]
@@ -70,7 +71,7 @@ public sealed class ActivityController(AppDbContext db, SettingsStore settingsSt
             .Sum(p => p.Price * p.Quantity);
         var hourAgo = DateTimeOffset.UtcNow.AddHours(-1);
         var alerts = (await Events(new EventFilter { Limit = 100, Level = EventLevel.Good }, ct))
-            .Where(e => e.Message.StartsWith("BOUGHT ", StringComparison.Ordinal) || e.Message.Contains(" is IN STOCK at ", StringComparison.Ordinal))
+            .Where(e => e.Message.Contains(" is IN STOCK at ", StringComparison.Ordinal))
             .Take(15).ToList();
         return new DashboardDto(
             s.DryRun,
@@ -80,7 +81,8 @@ public sealed class ActivityController(AppDbContext db, SettingsStore settingsSt
             sites.Count(x => x.Enabled && x.LastInStock == true),
             sites.Count(x => x.Enabled && x.ConsecutiveErrors > 0),
             await db.Scans.CountAsync(x => x.At >= hourAgo, ct),
-            alerts);
+            alerts,
+            await Purchases(new PurchaseFilter { Limit = 8 }, ct));
     }
 
     // ---- Activity log ----

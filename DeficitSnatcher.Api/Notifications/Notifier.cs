@@ -58,8 +58,8 @@ public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settings
     /// <param name="detailsUrl">The page on this site (a checkout's details); default: the store page's own page here.</param>
     public async Task NotifyAsync(NotifyKind kind, EventLevel level, string message, int? siteId = null, string? url = null, string? detailsUrl = null)
     {
-        // Only send user-facing alerts for a qualifying in-stock match or a completed purchase.
-        if (kind is not (NotifyKind.InStock or NotifyKind.Purchase))
+        // Only send user-facing alerts for a qualifying in-stock match or a checkout outcome.
+        if (kind is not (NotifyKind.InStock or NotifyKind.Purchase or NotifyKind.NotBought or NotifyKind.DryRun))
             return;
         await LogAsync(level, message, siteId);
         var s = await settingsStore.GetAsync();
@@ -67,6 +67,8 @@ public sealed class Notifier(IServiceScopeFactory scopes, SettingsStore settings
         {
             NotifyKind.InStock => s.NotifyInStock,
             NotifyKind.Purchase => s.NotifyPurchase,
+            NotifyKind.NotBought => s.NotifyNotBought,
+            NotifyKind.DryRun => s.NotifyDryRun,
             _ => false,
         };
         if (wanted)

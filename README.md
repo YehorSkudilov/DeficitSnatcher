@@ -114,7 +114,7 @@ sooner one is shown and the other mentioned. A guess, labelled with how sure it 
 ## Email alerts
 
 Email (SMTP; IONOS by default: `smtp.ionos.com`, port 587, the mailbox's full address and password), set in Settings:
-matches, purchases, failed checkouts (with what went wrong) and pages that keep failing. Never for going out of stock.
+in-range stock matches and checkout outcomes. Never for out-of-range stock, price changes, or routine page errors.
 
 **Amazon** has built-in settings (its buy box price, Add to Cart for stock, "See All Buying Options" counts as out of
 stock so resellers' markups aren't bought); the AI is only asked when those don't read the page.
@@ -122,11 +122,11 @@ stock so resellers' markups aren't bought); the AI is only asked when those don'
 ## How buying works
 
 A site is a **match** when it's in stock, the title fits the keywords, and price + shipping is within the range. A match
-is reported once (the app rings), and if the site has **auto-buy** on and auto-buy is **on** (the Dashboard switch), its
+is reported once (the phone alarm rings), and if **auto-buy** is enabled for the product, its
 **checkout steps** run in the browser (goto, click, fill, select, type, wait, expectText…), filling in the checkout profile (`{{email}}`,
 `{{card.number}}`, …). The step that places the order is marked **final**.
 
-- Before every purchase, under one lock: auto-buy on, units left for the product, a 10-minute wait per site after a
+- Before every purchase, under one lock: product auto-buy on, units left for the product, a 10-minute wait per site after a
   failed try.
 - Before the saved steps place a real order, the AI reads the order review page: only
   this product, at most the units per order, total within the maximum plus tax. A cart still holding the console from
