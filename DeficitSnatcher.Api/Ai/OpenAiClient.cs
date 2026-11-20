@@ -129,7 +129,8 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
     /// Asks with OpenAI's web search (the Responses API's web_search tool) and returns the JSON object in the answer. For
     /// finding a product's pages at stores; logged like every other call.
     /// </summary>
-    public async Task<JsonElement> SearchWebJsonAsync(string purpose, string instructions, string question, CancellationToken ct)
+    public async Task<JsonElement> SearchWebJsonAsync(string purpose, string instructions, string question, CancellationToken ct,
+        SearchLocation? near = null)
     {
         if (!HasKey)
             throw new AiException("The AI is off: set the OPENAI_API_KEY secret.");
@@ -144,7 +145,24 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
             ["model"] = settings.AiModel,
             ["instructions"] = instructions,
             ["input"] = question,
-            ["tools"] = new object[] { new { type = "web_search" } },
+            // With the owner's rough whereabouts (city, region, country), so results lean local: their stores, their trackers.
+            ["tools"] = new object[]
+            {
+                near == null
+                    ? new { type = "web_search" }
+                    : new
+                    {
+                        type = "web_search",
+                        user_location = new Dictionary<string, string?>
+                        {
+                            ["type"] = "approximate",
+                            ["country"] = near.Country,
+                            ["region"] = near.Region,
+                            ["city"] = near.City,
+                            ["timezone"] = near.TimeZone,
+                        }.Where(kv => !string.IsNullOrWhiteSpace(kv.Value)).ToDictionary(kv => kv.Key, kv => kv.Value),
+                    },
+            },
         };
         // Web search doesn't take "minimal".
         if (settings.AiReasoningEffort.Length > 0)
@@ -258,3 +276,6 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
 
     public static string Short(string s, int n) => s.Length > n ? s[..n] + "…" : s;
 }
+
+/// <summary>Roughly where the owner is, for a web search: two-letter country code, province or state, city, IANA time zone.</summary>
+public sealed record SearchLocation(string? Country, string? Region, string? City, string? TimeZone);

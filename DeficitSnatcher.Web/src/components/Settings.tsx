@@ -405,7 +405,7 @@ function AiSettings({ s, set }: { s: Settings; set: (patch: Partial<Settings>) =
         <Check label="Pages without checkout steps are bought by the AI going through the checkout itself" checked={s.aiCheckoutWithoutSteps} onChange={(aiCheckoutWithoutSteps) => set({ aiCheckoutWithoutSteps })} />
         <Check label="Fix reading: when a page keeps failing or showing no price or stock, the AI re-learns it (at most every 6 hours)" checked={s.aiAutofixReading} onChange={(aiAutofixReading) => set({ aiAutofixReading })} />
         <Check
-          label="Restock forecasts: look up each store's restock pattern online about once a week (one web search per store)"
+          label="Restock forecasts: look up each store's restock pattern online about once a week (one web search per store: trackers like NowInStock, forums, Reddit, and stores near your city and postal area, never your street)"
           checked={s.aiRestockForecast}
           onChange={(aiRestockForecast) => set({ aiRestockForecast })}
         />

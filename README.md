@@ -55,8 +55,11 @@ page is left out for someone in Canada, and so is a page priced in another curre
 ## Restock forecast
 
 Each page shows its **next restock**: from its own history (the times it came back into stock: usual weekday and time,
-or the usual gap) and from what ChatGPT finds online about the store (web search: restock reports, trackers, patterns;
-with links), looked up about once a week per store (Settings → AI) or with *Look online now*. When the two disagree the
+or the usual gap) and from what ChatGPT finds online about the store (web search across several kinds of source:
+restock trackers such as NowInStock and StockTrack with their stock history logs, restock alert accounts, deal forums
+like RedFlagDeals, Reddit, the store's own announcements; with links). The search is localised to your city, province and
+postal area from the checkout profile (never the street), so it also looks at the chain's stores near you and regional
+patterns, shown as *Near you*. Looked up about once a week per store (Settings → AI) or with *Look online now*. When the two disagree the
 sooner one is shown and the other mentioned. A guess, labelled with how sure it is; times in Settings → Time zone.
 
 ## Notifications
@@ -108,7 +111,7 @@ Chromium (goto, click, fill, select, type, wait, expectText…), filling in the 
 **Bot protection.** Big retailers (Best Buy, Walmart, Amazon) use bot protection (Akamai, Cloudflare, HUMAN, DataDome),
 captchas and 3-D Secure. A blocked check says "Blocked by …" in its scan. Most of these block servers' addresses
 outright, however real the browser looks (the browser always runs as full Chrome with a window, never headless: on the server
-its window is on a virtual screen, Xvfb), so the fix is a **residential proxy**: Settings → Checking → Proxy (`http://user:password@host:port`); all
+its window is on a virtual screen, Xvfb, which the API starts), so the fix is a **residential proxy**: Settings → Checking → Proxy (`http://user:password@host:port`); all
 store traffic goes through it, ChatGPT's doesn't. Your own signed-in cookies on the page help too. A checkout can still
 stop at a captcha or bank prompt; its screenshots and error show where. Shopify and smaller stores work best.
 
@@ -128,7 +131,7 @@ cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
 cd DeficitSnatcher.Api
 dotnet run -- install-browser   # once: Chromium
-dotnet run                      # http://localhost:5210, reads ../.env   (Linux with no desktop: xvfb-run dotnet run, Chromium needs a screen)
+dotnet run                      # http://localhost:5210, reads ../.env   (Linux with no desktop: install xvfb, Chromium's window goes on a virtual screen)
 ```
 
 ```bash

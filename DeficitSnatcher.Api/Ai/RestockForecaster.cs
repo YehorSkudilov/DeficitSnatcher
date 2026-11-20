@@ -33,8 +33,9 @@ public sealed record RestockForecast(
 
 /// <summary>
 /// A guess at a page's next restock: from its own history (when it came back into stock: weekday, time of day, the gap
-/// between restocks) and from what ChatGPT finds online about the store (web search, kept a week per store). Guesses,
-/// shown as such.
+/// between restocks) and from what ChatGPT finds online about the store (web search, kept a week per store): restock
+/// trackers such as NowInStock, forums, Reddit, restock accounts, the store's own news, and stores near the owner's
+/// address. Guesses, shown as such.
 /// </summary>
 public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient ai, SettingsStore settingsStore, ILogger<RestockForecaster> log)
 {
@@ -164,17 +165,28 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
     }
 
     private const string Instructions = """
-        You research when an online store restocks a product, using web search: recent restock reports (news, deal sites,
-        Reddit, restock trackers), the store's own announcements, and patterns (usual weekdays and times, how often). Answer
-        with JSON only:
+        You research when an online store restocks a product, using web search. Search several kinds of source, not just
+        one, and weigh them together:
+        - Restock trackers, first: NowInStock (nowinstock.net: the product's tracker page for the owner's country, and its
+          stock history log with dates and times), StockTrack (stocktrack.ca in Canada), HotStock, and similar trackers.
+        - Restock alert accounts and groups: X/Twitter, Discord and Telegram restock alerts, as reported or archived publicly.
+        - Forums and Reddit: deal forums (RedFlagDeals in Canada, Slickdeals in the US, HotUKDeals in the UK) and the
+          product's and store's subreddits, for recent "it's back" posts with times.
+        - The store itself: its announcements, launch or drop dates, flyers, and how it releases stock (online drops, queues).
+        - Near the owner: stores of this chain near the owner's area (given below) and whether they restock in store or for
+          local pickup, and regional patterns (e.g. a province's stores getting stock on another day).
+        Prefer recent reports (the last few months) over old ones, and dated tracker logs over hearsay. Convert times to the
+        owner's time zone. Answer with JSON only:
         {
           "pattern": "the usual pattern in a few words, e.g. 'Thursdays around 11 am ET, every 1–2 weeks', or null if none is known",
           "nextLikely": "ISO 8601 date and time of the next likely restock (with its UTC offset), or null if nothing points to one",
-          "confidence": "low | medium | high",
-          "summary": "two or three sentences: what the recent reports say, and how sure that is",
+          "confidence": "low | medium | high (high only when several independent sources agree)",
+          "summary": "two or three sentences: what the recent reports say, which kinds of source, and how sure that is",
+          "nearYou": "one or two sentences about stores near the owner's area (in-store or pickup restocks), or null if nothing found",
           "sources": [ { "title": "…", "url": "https://…" } ]
         }
-        Only real reports you found, with their links (up to 6). If there's little to go on, say so with low confidence.
+        Only real reports you found, with their links (up to 10, from as many different kinds of source as you can). If
+        there's little to go on, say so with low confidence.
         """;
 
     /// <summary>Looks the store's restock pattern up online (one web search) and keeps it for the product and store.</summary>
@@ -188,10 +200,20 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         var home = StoreRegion.For(profile.Country, settings.Currency);
         var domain = FindPagesController.Domain(url);
         var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, Zone(settings.TimeZone));
+        // Where the owner is: the city, province and the start of the postal code (its area), never the street.
+        var city = profile.City.Trim();
+        var province = profile.Province.Trim();
+        var postalArea = PostalArea(profile.PostalCode, home);
+        var area = string.Join(", ", new[] { city, province, postalArea is null ? "" : $"postal area {postalArea}", home?.Name ?? "" }
+            .Where(x => x.Length > 0));
         var question = $"""
             Store: {FindPagesController.NameFor(url)} ({domain}){(home != null ? $", in {home.Name}" : "")}. Product: {product.Name} (the product page: {url}).
-            Now: {now:dddd yyyy-MM-dd HH:mm} ({settings.TimeZone}). When does this store usually restock it, and when is the next restock likely?
+            The owner is in: {(area.Length > 0 ? area : "(not set)")}.
+            Now: {now:dddd yyyy-MM-dd HH:mm} ({settings.TimeZone}). When does this store usually restock it, and when is the next restock likely,
+            online and at its stores near the owner?
             """;
+        var near = new SearchLocation(home?.Code switch { null => null, "uk" => "GB", var c => c.ToUpperInvariant() },
+            province.Length > 0 ? province : null, city.Length > 0 ? city : null, settings.TimeZone);
         var row = await db.RestockInsights.FirstOrDefaultAsync(x => x.ProductId == productId && x.Domain == domain, ct);
         if (row == null)
         {
@@ -201,14 +223,16 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         row.FetchedAt = DateTimeOffset.UtcNow;
         try
         {
-            var a = await ai.SearchWebJsonAsync("restock-forecast", Instructions, question, ct);
+            var a = await ai.SearchWebJsonAsync("restock-forecast", Instructions, question, ct, near);
             row.Pattern = Str(a, "pattern");
             row.NextLikely = Str(a, "nextLikely") is { } next && DateTimeOffset.TryParse(next, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var d) ? d.ToUniversalTime() : null;
             row.Confidence = Str(a, "confidence") is "medium" or "high" ? Str(a, "confidence")! : "low";
             row.Summary = Str(a, "summary") ?? "";
+            if (Str(a, "nearYou") is { } local)
+                row.Summary = (row.Summary + $" Near you{(city.Length > 0 ? $" ({city})" : "")}: {local}").Trim();
             var sources = new List<RestockSource>();
             if (a.TryGetProperty("sources", out var src) && src.ValueKind == JsonValueKind.Array)
-                foreach (var s in src.EnumerateArray().Take(6))
+                foreach (var s in src.EnumerateArray().Take(10))
                     if (Str(s, "url") is { } u && Uri.TryCreate(u, UriKind.Absolute, out _))
                         sources.Add(new RestockSource(Str(s, "title") ?? u, u));
             row.Sources = JsonSerializer.Serialize(sources, Buying.Buyer.JsonOptions);
@@ -241,6 +265,21 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
     }
 
     // ---- Helpers ----
+
+    /// <summary>The area part of a postal code: Canada's first three characters (M5V), the UK's outward code (SW1A), a US
+    /// ZIP's first three digits. Null when there's none.</summary>
+    private static string? PostalArea(string postalCode, StoreRegion.Country? home)
+    {
+        var p = postalCode.Trim().ToUpperInvariant();
+        if (p.Length < 3)
+            return null;
+        return home?.Code switch
+        {
+            "uk" => p.Contains(' ') ? p[..p.IndexOf(' ')] : p.Length > 3 ? p[..^3] : p,
+            "us" => p[..3],
+            _ => p.Replace(" ", "")[..3],
+        };
+    }
 
     public static TimeZoneInfo Zone(string id) =>
         TimeZoneInfo.TryFindSystemTimeZoneById(id, out var z) ? z : TimeZoneInfo.TryFindSystemTimeZoneById("America/Toronto", out var t) ? t : TimeZoneInfo.Utc;
