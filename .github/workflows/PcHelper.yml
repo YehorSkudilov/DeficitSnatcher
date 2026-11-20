@@ -35,6 +35,11 @@ jobs:
             (cd out/$rid && zip -qr ../../dist/DeficitSnatcher-PC-helper-$rid.zip .)
           done
           ls -la dist
+      # The Windows build, for the installer job (Inno Setup needs Windows; building it again there needs the .NET SDK there).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-x64
+          path: out/win-x64
       - name: Publish to the pc-helper release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,16 +56,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/download-artifact@v4
         with:
-          global-json-file: global.json
+          name: win-x64
+          path: out/win-x64
       - name: Build the installer
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $version = '${{ needs.build.outputs.version }}'
-          dotnet publish DeficitSnatcher.Runner/DeficitSnatcher.Runner.csproj -c Release -r win-x64 --self-contained -p:Version=$version -o out/win-x64
-          if ($LASTEXITCODE -ne 0) { exit 1 }
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
           if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
