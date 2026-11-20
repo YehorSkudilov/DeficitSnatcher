@@ -10,8 +10,77 @@ made once per start; the container restarts it if the browser dies. Only reachab
 """
 
 import os
+import json
+import queue
+import sys
+import threading
+import urllib.request
 
 from camoufox.server import launch_server
+
+
+class ForwardingStream:
+    """Mirror each stdout/stderr line to the API while retaining normal container output."""
+
+    def __init__(self, original, forward):
+        self.original = original
+        self.forward = forward
+        self.buffer = ""
+        self.lock = threading.Lock()
+        self.encoding = getattr(original, "encoding", "utf-8")
+
+    def write(self, text):
+        written = self.original.write(text)
+        self.original.flush()
+        with self.lock:
+            self.buffer += text
+            while "\n" in self.buffer:
+                line, self.buffer = self.buffer.split("\n", 1)
+                if line.strip():
+                    self.forward(line.rstrip("\r"))
+        return len(text) if written is None else written
+
+    def flush(self):
+        self.original.flush()
+
+    def isatty(self):
+        return self.original.isatty()
+
+    def fileno(self):
+        return self.original.fileno()
+
+
+class LogForwarder:
+    def __init__(self, url):
+        self.url = url
+        self.lines = queue.Queue(maxsize=500)
+        threading.Thread(target=self.run, name="log-forwarder", daemon=True).start()
+
+    def __call__(self, line):
+        try:
+            self.lines.put_nowait(line)
+        except queue.Full:
+            pass
+
+    def run(self):
+        while True:
+            line = self.lines.get()
+            payload = json.dumps({"line": line}).encode("utf-8")
+            request = urllib.request.Request(self.url, data=payload, headers={"Content-Type": "application/json"})
+            for attempt in range(3):
+                try:
+                    with urllib.request.urlopen(request, timeout=3):
+                        break
+                except Exception:
+                    if attempt < 2:
+                        threading.Event().wait(1)
+
+
+log_url = os.environ.get("LOG_FORWARD_URL", "")
+if log_url:
+    forward = LogForwarder(log_url)
+    sys.stdout = ForwardingStream(sys.stdout, forward)
+    sys.stderr = ForwardingStream(sys.stderr, forward)
 
 options = {
     "port": int(os.environ.get("PORT", "4444")),

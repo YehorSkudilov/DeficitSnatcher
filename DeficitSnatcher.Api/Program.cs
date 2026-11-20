@@ -1,9 +1,11 @@
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
+using System.Net;
 using DeficitSnatcher.Api;
 using DeficitSnatcher.Api.Auth;
 using DeficitSnatcher.Api.Buying;
 using DeficitSnatcher.Api.Data;
+using DeficitSnatcher.Api.Diagnostics;
 using DeficitSnatcher.Api.Notifications;
 using DeficitSnatcher.Api.Settings;
 using DeficitSnatcher.Api.Tracking;
@@ -23,6 +25,8 @@ DotEnv.Load(Path.Combine(Directory.GetCurrentDirectory(), ".env"));
 DotEnv.Load(Path.Combine(Directory.GetCurrentDirectory(), "..", ".env"));
 
 var builder = WebApplication.CreateBuilder(args);
+var diagnosticsLogs = new DiagnosticsLogBuffer();
+builder.Logging.AddProvider(diagnosticsLogs);
 
 var auth = builder.Configuration.GetSection("Auth").Get<AuthOptions>() ?? new AuthOptions();
 auth.SigningKey = builder.Configuration["Jwt:SigningKey"] ?? "";
@@ -65,6 +69,7 @@ var corsOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "").Split(','
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod()));
 
 builder.Services.AddSingleton<SecretBox>();
+builder.Services.AddSingleton(diagnosticsLogs);
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddHttpClient(nameof(Notifier), c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<Notifier>();
@@ -161,5 +166,40 @@ app.MapGet("/api/health", async (AppDbContext db, CancellationToken ct) =>
     }
 }).AllowAnonymous().DisableRateLimiting();
 
+app.MapGet("/api/diagnostics/logs", (int? limit, DiagnosticsLogBuffer logs) =>
+    Results.Ok(new { entries = logs.Recent(limit ?? 1000) }));
+
+// Camoufox is a separate container. Accept its forwarded stdout/stderr only from loopback/private container networks;
+// the browser container has no Docker socket or API credentials. All other diagnostics routes use normal signed-in auth.
+app.MapPost("/internal/diagnostics/camoufox-log", (HttpContext context, CamoufoxLogLine input, DiagnosticsLogBuffer logs) =>
+{
+    if (!IsPrivateAddress(context.Connection.RemoteIpAddress))
+        return Results.NotFound();
+    var line = input.Line?.TrimEnd();
+    if (string.IsNullOrWhiteSpace(line))
+        return Results.NoContent();
+    logs.AddCamoufox(line);
+    return Results.NoContent();
+}).AllowAnonymous().DisableRateLimiting().WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(8192));
+
 app.Run();
 return 0;
+
+static bool IsPrivateAddress(IPAddress? address)
+{
+    if (address == null)
+        return false;
+    if (address.IsIPv4MappedToIPv6)
+        address = address.MapToIPv4();
+    if (IPAddress.IsLoopback(address))
+        return true;
+    var bytes = address.GetAddressBytes();
+    if (bytes.Length == 4)
+        return bytes[0] == 10
+            || bytes[0] == 172 && bytes[1] is >= 16 and <= 31
+            || bytes[0] == 192 && bytes[1] == 168
+            || bytes[0] == 169 && bytes[1] == 254;
+    return bytes.Length == 16 && (bytes[0] & 0xfe) == 0xfc;
+}
+
+public sealed record CamoufoxLogLine(string? Line);

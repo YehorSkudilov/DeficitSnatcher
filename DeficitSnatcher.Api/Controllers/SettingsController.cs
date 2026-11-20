@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace DeficitSnatcher.Api.Controllers;
 
 public sealed record ArmRequest(bool Armed);
+public sealed record TrackingRequest(bool Enabled, int CooldownMinutes = 30);
 public sealed record NotificationTestResponse(bool Sent, List<string> Problems);
 
 /// <summary>The checkout profile as the web sees it: the card number and CVV are never sent back.</summary>
@@ -40,11 +41,23 @@ public sealed class SettingsController(SettingsStore store, Notifier notifier) :
     [HttpPut]
     public async Task<ActionResult<BotSettings>> Save(BotSettings settings, CancellationToken ct)
     {
-        if (Tracking.StoreProxy.Validate(settings.ProxyUrl) is { } proxyError)
+        if (DeficitSnatcher.Api.Tracking.StoreProxy.Validate(settings.ProxyUrl) is { } proxyError)
             return Problem(proxyError, statusCode: 400);
         var before = await store.GetAsync(ct);
+        // General settings edits must not overwrite the separate auto-check pause control.
+        settings = settings with { TrackingEnabled = before.TrackingEnabled, TrackingResumeAt = before.TrackingResumeAt };
         var saved = await store.SaveAsync(settings, ct);
         await LogArmChange(before, saved);
+        return saved;
+    }
+
+    [HttpPost("tracking")]
+    public async Task<BotSettings> Tracking(TrackingRequest request, CancellationToken ct)
+    {
+        DateTimeOffset? resumeAt = request.Enabled ? null : DateTimeOffset.UtcNow.AddMinutes(Math.Clamp(request.CooldownMinutes, 1, 10080));
+        var saved = await store.UpdateAsync(s => s with { TrackingEnabled = request.Enabled, TrackingResumeAt = resumeAt }, ct);
+        await notifier.LogAsync(request.Enabled ? EventLevel.Info : EventLevel.Warning,
+            request.Enabled ? "Automatic checking resumed." : $"Automatic checking paused until {resumeAt:yyyy-MM-dd HH:mm} UTC.");
         return saved;
     }
 

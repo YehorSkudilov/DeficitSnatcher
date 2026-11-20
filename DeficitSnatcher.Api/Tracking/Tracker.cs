@@ -120,7 +120,15 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
         }
 
         if (!settings.TrackingEnabled)
-            return;
+        {
+            if (settings.TrackingResumeAt is { } resumeAt && resumeAt <= DateTimeOffset.UtcNow)
+            {
+                settings = await settingsStore.UpdateAsync(s => s with { TrackingEnabled = true, TrackingResumeAt = null }, ct);
+                log.LogInformation("Scheduled checking resumed after its cooldown");
+            }
+            else
+                return;
+        }
 
         var sites = await db.Sites.AsNoTracking()
             .Where(s => s.Enabled && s.Product!.Enabled)

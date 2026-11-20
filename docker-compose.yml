@@ -58,6 +58,8 @@ services:
     restart: unless-stopped
     expose:
       - "4444"
+    environment:
+      - LOG_FORWARD_URL=http://api:8080/internal/diagnostics/camoufox-log
     shm_size: "1gb"
 
   db:

@@ -40,7 +40,10 @@ public sealed record BotSettings
     /// <summary>After a failed checkout, the same site isn't tried again for this long.</summary>
     public int BuyRetryMinutes => 10;
     public bool AiRestockForecast => true;
-    public bool TrackingEnabled => true;
+    /// <summary>Scheduled checks can be paused; manual checks remain available.</summary>
+    public bool TrackingEnabled { get; init; } = true;
+    /// <summary>Automatic checking resumes at this time after a timed pause.</summary>
+    public DateTimeOffset? TrackingResumeAt { get; init; }
     /// <summary>Each wait is randomly up to this much longer or shorter, so checks don't land on a fixed beat.</summary>
     public int JitterPercent => 25;
     public bool SlowDownFailingPages => true;

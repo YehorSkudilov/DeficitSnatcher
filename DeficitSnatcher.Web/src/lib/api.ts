@@ -374,6 +374,7 @@ export type Settings = {
   timeZone: string;
   aiRestockForecast: boolean;
   trackingEnabled: boolean;
+  trackingResumeAt: string | null;
   defaultIntervalSeconds: number;
   jitterPercent: number;
   slowDownFailingPages: boolean;

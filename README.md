@@ -24,8 +24,9 @@ One account, no sign-ups: the username and password come from the environment (G
 | **Scans** | Every check of every site, found or not: price, stock, verdict, error, and what was done (checkout started, or why not). Filter by product, site, result (in stock / out / in range / checkout ran / errors), time, price, search. |
 | **Checkouts** | Every checkout. Each one has: why it ran (the scan, price, limits at that moment), a step-by-step timeline with timing and a screenshot after each step, the full error (Playwright's call log), the browser's console and network errors, a full-page screenshot of where it ended, the page's HTML, and the raw log. |
 | **Activity** | Everything that happened (alerts, price drops, checkouts, failing sites, settings changes), filterable. |
-| **Settings** | The Android app (download, Ring my phone), how often pages are checked, email alerts, checkout profile (address, card). Everything else is fixed in code. |
+| **Settings** | The Android app (download, Ring my phone), how often pages are checked, timed pause/resume for scheduled checks, email alerts, checkout profile (address, card). |
 | **Deploy** | What's running (commit, build time), commits on `main` not deployed yet, Deploy button, live progress of each step, cancel, links to the full GitHub logs. |
+| **Diagnostics** | Recent API and Camoufox logs, with redaction and **Copy all** for support. |
 
 ## AI (ChatGPT)
 
@@ -77,6 +78,9 @@ scheduled check for a host at a time. Intervals are jittered, and repeated failu
 store sends a `Retry-After` header with a block, the app honors it (up to 7 days). Browser checks skip images, fonts and
 media; checkout pages still load normally. Browser jobs for the same page are serialized so saved cookies and local
 storage can't overwrite one another out of order. Manual **Check now** still runs immediately.
+
+**Diagnostics.** The Diagnostics page keeps the most recent 3,000 redacted API and Camoufox log lines in memory and can
+copy them together. They start collecting after deployment and are cleared when the API restarts.
 
 ## Android app
 

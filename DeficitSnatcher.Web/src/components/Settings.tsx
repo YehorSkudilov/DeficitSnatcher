@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api, type Profile, type Settings } from "@/lib/api";
-import { ErrorNote, Field, NumberInput, useAction, useData } from "./ui";
+import { Check, ErrorNote, Field, NumberInput, useAction, useData } from "./ui";
 
 export function SettingsPage() {
   const loaded = useData(() => api.get<Settings>("/api/settings"), []);
@@ -13,8 +13,41 @@ export function SettingsPage() {
       </div>
       <ErrorNote error={loaded.error} />
       <AndroidApp />
+      {loaded.data && <AutomaticChecking />}
       {loaded.data && <SettingsForm initial={loaded.data} />}
       <ProfileForm />
+    </div>
+  );
+}
+
+function AutomaticChecking() {
+  const loaded = useData(() => api.get<Settings>("/api/settings"), [], 5000);
+  const action = useAction();
+  const [cooldown, setCooldown] = useState(30);
+  const s = loaded.data;
+
+  const setEnabled = async (enabled: boolean) => {
+    const result = await action.run(() => api.post<Settings>("/api/settings/tracking", { enabled, cooldownMinutes: cooldown }));
+    if (result) loaded.setData(result);
+  };
+
+  return (
+    <div className="card stack">
+      <h2>Automatic checking</h2>
+      <Check
+        label="Check pages on schedule"
+        checked={s?.trackingEnabled ?? true}
+        onChange={(enabled) => void setEnabled(enabled)}
+      />
+      <Field label="Pause for (minutes)" hint="When switched off, automatic checking resumes after this cooldown. Manual Check now remains available.">
+        <NumberInput value={cooldown} min={1} onChange={(v) => setCooldown(Math.max(1, Math.min(10080, v ?? 30)))} />
+      </Field>
+      {s && !s.trackingEnabled && (
+        <div className="small muted">
+          Paused{s.trackingResumeAt ? ` until ${new Date(s.trackingResumeAt).toLocaleString()}; it will resume automatically.` : "."}
+        </div>
+      )}
+      <ErrorNote error={action.error || loaded.error} />
     </div>
   );
 }
