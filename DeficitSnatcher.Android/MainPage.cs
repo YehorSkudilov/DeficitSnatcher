@@ -9,6 +9,8 @@ public sealed class MainPage : ContentPage
     private readonly Label _status = Small("", Theme.Text);
     private readonly Label _note = Small("", Theme.Muted);
     private readonly VerticalStackLayout _recent = new() { Spacing = 6 };
+    private readonly VerticalStackLayout _ready = new() { Spacing = 8 };
+    private string _readyKey = "";
     private IDispatcherTimer? _timer;
 
     private static Context Ctx => global::Android.App.Application.Context;
@@ -62,6 +64,9 @@ public sealed class MainPage : ContentPage
                 await Server.SignInAsync(url.Text ?? "", user.Text ?? "", password.Text ?? "");
                 WatchService.Start(Ctx);
                 Show();
+                // What it needs to wake you: asked for right away (each opens Android's own screen for it).
+                if (Problems().FirstOrDefault() is { } first)
+                    first.Fix();
                 await LoadRecentAsync();
             }
             catch (Exception e)
@@ -88,20 +93,6 @@ public sealed class MainPage : ContentPage
             _note.Text = "Rung: it should go off within a few seconds.";
         });
 
-        var battery = Button("Allow running in the background", Theme.Surface);
-        battery.Clicked += (_, _) =>
-        {
-            var power = (PowerManager)Ctx.GetSystemService(Context.PowerService)!;
-            if (power.IsIgnoringBatteryOptimizations(Ctx.PackageName))
-            {
-                _note.Text = "Already allowed: Android won't put it to sleep.";
-                return;
-            }
-            var ask = new Intent(global::Android.Provider.Settings.ActionRequestIgnoreBatteryOptimizations,
-                global::Android.Net.Uri.Parse("package:" + Ctx.PackageName)).AddFlags(ActivityFlags.NewTask);
-            Ctx.StartActivity(ask);
-        };
-
         var update = Button("Check for update", Theme.Surface);
         update.Clicked += async (_, _) =>
         {
@@ -126,7 +117,8 @@ public sealed class MainPage : ContentPage
             Small($"{Server.Url} · {Server.Username} · build {Updater.CurrentVersion(Ctx)}", Theme.Muted),
             Small("When something is in stock in your range, it rings loudly (even on silent); turn it off and the store's page opens.",
                 Theme.Muted),
-            test, battery, update, _note,
+            Heading("Ready to wake you"), _ready,
+            test, update, _note,
             Heading("Recent alarms"), _recent,
             signOut);
     }
@@ -135,10 +127,78 @@ public sealed class MainPage : ContentPage
     {
         if (!Server.SignedIn)
             return;
-        var power = (PowerManager)Ctx.GetSystemService(Context.PowerService)!;
-        var asleep = power.IsIgnoringBatteryOptimizations(Ctx.PackageName) ? "" : "\nAndroid may put it to sleep: tap \"Allow running in the background\".";
-        _status.Text = (WatchService.Running ? WatchService.Status : "Not running") + asleep;
+        _status.Text = WatchService.Running ? WatchService.Status : "Not running";
         _status.TextColor = WatchService.Running && WatchService.Status.StartsWith("Watching") ? Theme.Good : Theme.Bad;
+        if (!WatchService.Running)
+            WatchService.Start(Ctx);
+        ShowReadiness();
+    }
+
+    // ---- What the alarm needs to wake you ----
+
+    private sealed record Need(string Name, bool Ok, string Why, Action Fix);
+
+    private static void OpenSettings(string action, bool withPackage = true)
+    {
+        var intent = withPackage ? new Intent(action, global::Android.Net.Uri.Parse("package:" + Ctx.PackageName)) : new Intent(action);
+        // The notification settings screen wants the app this way instead.
+        intent.PutExtra(global::Android.Provider.Settings.ExtraAppPackage, Ctx.PackageName);
+        intent.AddFlags(ActivityFlags.NewTask);
+        try
+        {
+            Ctx.StartActivity(intent);
+        }
+        catch (ActivityNotFoundException)
+        {
+            // This phone hasn't got that screen: the app's own settings instead.
+            Ctx.StartActivity(new Intent(global::Android.Provider.Settings.ActionApplicationDetailsSettings,
+                global::Android.Net.Uri.Parse("package:" + Ctx.PackageName)).AddFlags(ActivityFlags.NewTask));
+        }
+    }
+
+    private static List<Need> Needs()
+    {
+        var notifications = (global::Android.App.NotificationManager)Ctx.GetSystemService(Context.NotificationService)!;
+        var power = (PowerManager)Ctx.GetSystemService(Context.PowerService)!;
+        var list = new List<Need>
+        {
+            new("Notifications allowed", notifications.AreNotificationsEnabled(), "Without them the alarm can't show.",
+                () => OpenSettings(global::Android.Provider.Settings.ActionAppNotificationSettings, withPackage: false)),
+            new("No battery restrictions", power.IsIgnoringBatteryOptimizations(Ctx.PackageName),
+                "Otherwise Android puts it to sleep when the screen is off, and nothing comes through.",
+                () => OpenSettings(global::Android.Provider.Settings.ActionRequestIgnoreBatteryOptimizations)),
+        };
+        if (OperatingSystem.IsAndroidVersionAtLeast(34))
+            list.Add(new("Full-screen alarm allowed", notifications.CanUseFullScreenIntent(),
+                "So the alarm turns the screen on over the lock screen, like an alarm clock.",
+                () => OpenSettings(global::Android.Provider.Settings.ActionManageAppUseFullScreenIntent)));
+        return list;
+    }
+
+    private static List<Need> Problems() => Needs().Where(n => !n.Ok).ToList();
+
+    private void ShowReadiness()
+    {
+        var needs = Needs();
+        var key = string.Join(",", needs.Select(n => n.Ok));
+        if (key == _readyKey)
+            return;
+        _readyKey = key;
+        _ready.Children.Clear();
+        foreach (var n in needs)
+        {
+            if (n.Ok)
+            {
+                _ready.Children.Add(Small("✓ " + n.Name, Theme.Good));
+                continue;
+            }
+            _ready.Children.Add(Small("✗ " + n.Name + ": " + n.Why, Theme.Bad));
+            var fix = Button("Fix: " + n.Name, Theme.Accent);
+            fix.Clicked += (_, _) => n.Fix();
+            _ready.Children.Add(fix);
+        }
+        _ready.Children.Add(Small("It rings on silent too (the alarm volume, set to full). Do Not Disturb lets alarms through unless "
+            + "you've turned that off. A phone that's switched off can't ring.", Theme.Muted));
     }
 
     private async Task LoadRecentAsync()

@@ -13,6 +13,32 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
     ILogger<Tracker> log)
     : BackgroundService
 {
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, (DateTimeOffset? Next, DateTimeOffset At)> _forecasts = new();
+
+    /// <summary>A restock looks likely now for this page: from 30 minutes before its forecast to 90 after (forecasts are
+    /// looked at every 10 minutes).</summary>
+    private async Task<bool> RestockLikelyAsync(int siteId, DateTimeOffset now, CancellationToken ct)
+    {
+        if (!_forecasts.TryGetValue(siteId, out var f) || now - f.At > TimeSpan.FromMinutes(10))
+        {
+            try
+            {
+                f = ((await forecaster.ForecastAsync(siteId, ct))?.NextAt, now);
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                f = (null, now);
+            }
+            _forecasts[siteId] = f;
+        }
+        return f.Next is { } next && now >= next.AddMinutes(-30) && now <= next.AddMinutes(90);
+    }
+
+    /// <summary>Is this page in its likely-restock window (checked every minute)?</summary>
+    public bool RestockWindow(int siteId) =>
+        _forecasts.TryGetValue(siteId, out var f) && f.Next is { } next && DateTimeOffset.UtcNow >= next.AddMinutes(-30)
+        && DateTimeOffset.UtcNow <= next.AddMinutes(90);
+
     private readonly ConcurrentDictionary<int, DateTimeOffset> _nextDue = new();
     private readonly ConcurrentDictionary<int, byte> _running = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _hostLast = new(StringComparer.OrdinalIgnoreCase);
@@ -99,6 +125,9 @@ public sealed class Tracker(IServiceScopeFactory scopes, SettingsStore settingsS
             if (_running.ContainsKey(site.Id))
                 continue;
             var interval = site.IntervalSeconds ?? settings.DefaultIntervalSeconds;
+            // Around a likely restock (its forecast): every minute, so a drop isn't missed; the rest of the time, the usual pace.
+            if (await RestockLikelyAsync(site.Id, now, ct))
+                interval = Math.Min(interval, 60);
             if (settings.StoreIntervals.FirstOrDefault(x => x.Matches(site.Url)) is { } strict)
                 interval = Math.Max(interval, strict.Minutes * 60);
             var due = _nextDue.GetOrAdd(site.Id, _ => site.LastCheckedAt?.AddSeconds(interval) ?? now);

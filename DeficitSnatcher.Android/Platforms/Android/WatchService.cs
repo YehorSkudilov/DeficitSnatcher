@@ -71,6 +71,7 @@ public sealed class WatchService : Service
     private async Task LoopAsync(CancellationToken ct)
     {
         var failures = 0;
+        var lastOk = DateTimeOffset.UtcNow;
         var nextUpdateCheck = DateTimeOffset.UtcNow.AddMinutes(1);
         while (!ct.IsCancellationRequested)
         {
@@ -84,7 +85,12 @@ public sealed class WatchService : Service
                 var reply = await Server.WaitForAlarmsAsync(Server.LastAlarmId, 40, ct);
                 Server.LastAlarmId = reply.Latest;
                 LastContact = DateTimeOffset.Now;
+                lastOk = DateTimeOffset.UtcNow;
                 failures = 0;
+                // The watchdog: the site is up but has stopped checking its pages.
+                Watchdog.Report(this, reply.Watched > 0 && reply.LastCheck is { } checkedAt && DateTimeOffset.UtcNow - checkedAt > TimeSpan.FromSeconds(reply.StaleAfter)
+                    ? $"The site hasn't checked any page since {checkedAt.ToLocalTime():HH:mm}: it isn't watching for stock. Check it (Deploy, or the server)."
+                    : null);
                 // The newest match rings; an old one (the phone was offline for a while) doesn't: it's too late for it.
                 if (reply.Alarms.LastOrDefault(a => DateTimeOffset.UtcNow - a.At < TimeSpan.FromMinutes(15)) is { } alarm)
                     Alarm.Ring(this, alarm);
@@ -98,6 +104,9 @@ public sealed class WatchService : Service
             {
                 failures++;
                 Update($"Can't reach the site: {Short(e.Message)} (trying again)");
+                // The watchdog: no alarm can come through while the site can't be reached.
+                if (DateTimeOffset.UtcNow - lastOk > TimeSpan.FromMinutes(10))
+                    Watchdog.Report(this, $"Can't reach your site since {lastOk.ToLocalTime():HH:mm}: no alarm can come through. ({Short(e.Message)})");
                 try
                 {
                     await Task.Delay(TimeSpan.FromSeconds(Math.Min(60, 3 * failures)), ct);
@@ -154,5 +163,43 @@ public sealed class StartReceiver : BroadcastReceiver
     {
         if (context != null)
             WatchService.Start(context);
+    }
+}
+
+/// <summary>
+/// Tells you, with an ordinary (loud) notification, when the alarm can't work: the site can't be reached, or it has stopped
+/// checking pages. Cleared when it's fine again.
+/// </summary>
+public static class Watchdog
+{
+    private const int NotificationId = 4;
+    private static string? _shown;
+
+    public static void Report(Context context, string? problem)
+    {
+        var manager = (NotificationManager)context.GetSystemService(Context.NotificationService)!;
+        if (problem == null)
+        {
+            if (_shown != null)
+                manager.Cancel(NotificationId);
+            _shown = null;
+            return;
+        }
+        // Once per problem (not every 40 seconds).
+        if (_shown != null && _shown[..Math.Min(30, _shown.Length)] == problem[..Math.Min(30, problem.Length)])
+            return;
+        _shown = problem;
+        manager.CreateNotificationChannel(new NotificationChannel("problems", "Problems", NotificationImportance.High)
+        {
+            Description = "When the alarm can't work: the site can't be reached, or it stopped checking.",
+        });
+        var open = PendingIntent.GetActivity(context, 4, new Intent(context, typeof(MainActivity)), PendingIntentFlags.Immutable);
+        manager.Notify(NotificationId, new Notification.Builder(context, "problems")
+            .SetContentTitle("Deficit Snatcher isn't watching")!
+            .SetContentText(problem)!
+            .SetStyle(new Notification.BigTextStyle().BigText(problem))!
+            .SetSmallIcon(global::Android.Resource.Drawable.StatSysWarning)!
+            .SetContentIntent(open)!
+            .Build()!);
     }
 }

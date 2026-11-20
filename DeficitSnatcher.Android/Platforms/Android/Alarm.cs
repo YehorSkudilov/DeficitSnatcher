@@ -10,7 +10,7 @@ namespace DeficitSnatcher.Phone;
 
 /// <summary>
 /// The alarm: the phone's alarm sound at full alarm volume, looping, with vibration, and a full-screen page (over the lock
-/// screen) until it's turned off. Turning it off opens the store's page. It stops by itself after 15 minutes.
+/// screen) until it's turned off. Turning it off opens the store's page. It stops by itself after 30 minutes.
 /// </summary>
 public static class Alarm
 {
@@ -77,7 +77,7 @@ public static class Alarm
 
         _timeout = new CancellationTokenSource();
         var token = _timeout.Token;
-        _ = Task.Delay(TimeSpan.FromMinutes(15), token).ContinueWith(_ => Stop(context), token, TaskContinuationOptions.OnlyOnRanToCompletion,
+        _ = Task.Delay(TimeSpan.FromMinutes(30), token).ContinueWith(_ => Stop(context), token, TaskContinuationOptions.OnlyOnRanToCompletion,
             TaskScheduler.Default);
     }
 

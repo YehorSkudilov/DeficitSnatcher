@@ -7,7 +7,9 @@ namespace DeficitSnatcher.Phone;
 
 public sealed record AlarmDto(long Id, DateTimeOffset At, int? SiteId, string Product, string Store, decimal? Price, string Url, string Message, bool Test);
 
-public sealed record AlarmsReply(long Latest, List<AlarmDto> Alarms);
+/// <summary>New alarms; when the server last checked a page, how many it watches, and after how many seconds without a check
+/// something's wrong.</summary>
+public sealed record AlarmsReply(long Latest, List<AlarmDto> Alarms, DateTimeOffset? LastCheck = null, int Watched = 0, int StaleAfter = 900);
 
 /// <summary>
 /// The site: signing in (the username and password are kept in the phone's secure storage, so it signs in again by itself

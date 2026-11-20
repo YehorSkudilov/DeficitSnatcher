@@ -108,11 +108,17 @@ public static class AlarmEndpoints
     public static void Map(WebApplication app)
     {
         // Long poll: alarms after ?after=id, waiting up to ?wait= seconds (at most 45) when there are none yet.
-        app.MapGet("/api/alarms", async (long? after, int? wait, AlarmService alarms, CancellationToken ct) =>
+        // With it, when the server last checked a page: the app warns you when that stops (the watchdog).
+        app.MapGet("/api/alarms", async (long? after, int? wait, AlarmService alarms, AppDbContext db, Settings.SettingsStore settingsStore,
+            CancellationToken ct) =>
         {
             var from = after ?? await alarms.LatestIdAsync(ct);
             var list = await alarms.AfterAsync(from, TimeSpan.FromSeconds(Math.Clamp(wait ?? 0, 0, 45)), ct);
-            return new { latest = list.Count > 0 ? list[^1].Id : from, alarms = list };
+            var lastCheck = await db.Scans.MaxAsync(s => (DateTimeOffset?)s.At, ct);
+            var watched = await db.Sites.CountAsync(s => s.Enabled && s.Product!.Enabled, ct);
+            // Longer than this without a check: something's wrong (15 minutes, or 3 check intervals when that's longer).
+            var staleAfter = Math.Max(15 * 60, 3 * (await settingsStore.GetAsync(ct)).DefaultIntervalSeconds);
+            return new { latest = list.Count > 0 ? list[^1].Id : from, alarms = list, lastCheck, watched, staleAfter };
         });
         app.MapGet("/api/alarms/recent", (AlarmService alarms, CancellationToken ct) => alarms.RecentAsync(20, ct));
         // Rings the app once, to check it's set up.
