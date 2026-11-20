@@ -82,7 +82,12 @@ while the helper isn't connected they're checked from the server as usual (Walma
    background and again at every login; its Chrome opens once to sign in to the stores, then stays minimised.
 
 Commands, in a new terminal: `deficitsnatcher status | stop | start | restart | window show | window hide |
-autostart on|off | setup <code> | logs | uninstall`.
+autostart on|off | setup <code> | reset | logs | uninstall`.
+
+**A store flagged the browser?** Helpers tab → **Reset** next to that store wipes its cookies, site data and cache in the
+helper's Chrome (you're signed out of it); **Reset browser** (or `deficitsnatcher reset`) wipes the whole Chrome profile and
+starts a clean one (signed out of every store). If the store still blocks it, it's flagging your internet address or
+account, not the browser: wait a few hours, check less often (Settings → Checking → Stricter stores) or use another network.
 
 It only connects out to the site (WebSocket through `/api`); nothing on the PC listens to the network. If a store shows
 its human check (Walmart's Press & Hold), you get an alert, do it in that window, and the bot carries on (it waits 2

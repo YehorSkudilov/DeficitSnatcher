@@ -25,7 +25,8 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
     /// <summary>The loopback endpoint's secret path part, new each start: only this process knows it.</summary>
     public string Secret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 
-    private sealed class Live(int id, string name, WebSocket control, string? machine, string? browser, bool canShow, bool canUpdate, string? version)
+    private sealed class Live(int id, string name, WebSocket control, string? machine, string? browser, bool canShow, bool canUpdate, string? version,
+        bool canReset = false)
     {
         /// <summary>The helper updates itself when asked (newer helpers).</summary>
         public bool CanUpdate { get; } = canUpdate;
@@ -34,6 +35,8 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
         public volatile bool SigningIn;
         /// <summary>The helper can open a page in a window of its own, in front (newer helpers).</summary>
         public bool CanShow { get; } = canShow;
+        /// <summary>The helper can wipe its Chrome profile and start a clean one (newer helpers).</summary>
+        public bool CanReset { get; } = canReset;
         public int Id { get; } = id;
         public string Name { get; set; } = name;
         public WebSocket Control { get; } = control;
@@ -191,12 +194,12 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
 
     /// <summary>A helper's control socket: kept until it closes. The same helper connecting again replaces itself.</summary>
     public async Task RunControlAsync(WebSocket ws, RunnerKey key, string? machine, string? browser, CancellationToken ct, bool canShow = false,
-        bool canUpdate = false, string? version = null, bool signingIn = false)
+        bool canUpdate = false, string? version = null, bool signingIn = false, bool canReset = false)
     {
         if (_live.TryRemove(key.Id, out var old))
             await CloseAsync(old.Control, "The same helper connected again.");
         _prefs[key.Id] = PrefsOf(key);
-        var live = new Live(key.Id, key.Name, ws, machine, browser, canShow, canUpdate, version) { SigningIn = signingIn };
+        var live = new Live(key.Id, key.Name, ws, machine, browser, canShow, canUpdate, version, canReset) { SigningIn = signingIn };
         _live[key.Id] = live;
         Changed?.Invoke(key.Id);
         await SeenAsync(key.Id, machine, browser);
@@ -287,6 +290,11 @@ public sealed class RunnerHub(IServiceScopeFactory scopes, Notifier notifier, IL
         _live.TryGetValue(runnerId, out var live) && live.CanShow && (live.SigningIn = true) && await SendAsync(live, new { show = url });
 
     /// <summary>Asks the helper to install a new version now, if there is one. False: not connected, or too old to.</summary>
+    /// <summary>Asks the helper to wipe its Chrome profile (cookies, site data, cache, sign-ins) and start a clean one.
+    /// False: not connected, or too old to.</summary>
+    public async Task<bool> ResetBrowserAsync(int runnerId) =>
+        _live.TryGetValue(runnerId, out var live) && live.CanReset && await SendAsync(live, new { reset = true });
+
     public async Task<bool> UpdateAsync(int runnerId) =>
         _live.TryGetValue(runnerId, out var live) && live.CanUpdate && await SendAsync(live, new { update = true });
 

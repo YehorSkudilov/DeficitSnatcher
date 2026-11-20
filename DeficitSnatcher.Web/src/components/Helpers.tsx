@@ -190,6 +190,21 @@ function HelperCard({ h, reload, latest, saved }: { h: WorkerInfo; reload: () =>
     });
     if (ok) setOpened(l.domain);
   };
+  const [resetDone, setResetDone] = useState<string | null>(null);
+  // A fresh start for a browser a store has flagged: one store's cookies, site data and cache, or (no store) the whole profile.
+  const reset = async (domain?: string) => {
+    const what = domain
+      ? `Reset ${domain} in ${h.name}'s Chrome? Its cookies, site data and cache for that store are wiped, so the store sees a browser it hasn't met. You'll be signed out of ${domain}.`
+      : `Reset ${h.name}'s whole Chrome? Its profile is wiped (cookies, site data, cache) and a clean one starts. You'll be signed out of every store and need to Log in again.`;
+    if (!confirm(what)) return;
+    setResetDone(null);
+    let ok = false;
+    await act.run(async () => {
+      await api.post(`/api/runners/${id}/reset`, { domain: domain ?? null });
+      ok = true;
+    });
+    if (ok) setResetDone(domain ?? "");
+  };
   const checkNow = async () => {
     let ok = false;
     await act.run(async () => {
@@ -310,6 +325,15 @@ function HelperCard({ h, reload, latest, saved }: { h: WorkerInfo; reload: () =>
                           </button>
                         )}
                         <button
+                          className="btn small ghost"
+                          style={{ marginRight: 6 }}
+                          disabled={!h.connected || act.busy}
+                          title="Wipes this store's cookies, site data and cache in this helper's Chrome: a fresh start if the store has flagged it"
+                          onClick={() => reset(l.domain)}
+                        >
+                          Reset
+                        </button>
+                        <button
                           className={`btn small ${(l.status === "signedOut" || l.status === "humanCheck") && !saved.includes(l.domain) ? "primary" : ""}`}
                           disabled={!h.connected || act.busy}
                           title={h.connected ? "Opens the store in this helper's Chrome, in front" : "Not connected"}
@@ -323,6 +347,15 @@ function HelperCard({ h, reload, latest, saved }: { h: WorkerInfo; reload: () =>
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {resetDone !== null && (
+          <div className="notice good small">
+            {resetDone
+              ? `${resetDone} is reset in ${h.name}'s Chrome: the store sees a browser it hasn't met. Log in to it again.`
+              : `${h.name} is resetting its Chrome: it closes, its profile is wiped and a clean one starts in a few seconds. Log in to the stores again.`}{" "}
+            If the store still blocks it, it&apos;s flagging your internet address or account, not the browser: give it a few hours, check
+            less often (Settings → Checking → Stricter stores), or use another network.
           </div>
         )}
         {opened && (
@@ -341,6 +374,14 @@ function HelperCard({ h, reload, latest, saved }: { h: WorkerInfo; reload: () =>
       <div className="row">
         <button className="btn small" onClick={rename} disabled={act.busy}>
           Rename
+        </button>
+        <button
+          className="btn small"
+          onClick={() => reset()}
+          disabled={!h.connected || act.busy}
+          title="Wipes this helper's whole Chrome profile and starts a clean one (signed out of every store)"
+        >
+          Reset browser
         </button>
         <button className="btn small danger" onClick={revoke} disabled={act.busy}>
           Remove

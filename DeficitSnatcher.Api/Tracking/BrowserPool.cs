@@ -135,6 +135,29 @@ public sealed class BrowserPool(Pc.RunnerHub runner, Pc.WorkerPool workers, ISer
         return page;
     }
 
+    /// <summary>
+    /// Forgets one store in this browser: its cookies (every subdomain), its site data (local storage, IndexedDB, service
+    /// workers, cache storage) and the HTTP cache, so the store sees a browser it hasn't met. It's signed out of that store.
+    /// </summary>
+    public static async Task ClearStoreAsync(IBrowserContext context, string domain)
+    {
+        domain = domain.StartsWith("www.") ? domain[4..] : domain;
+        await context.ClearCookiesAsync(new() { DomainRegex = new System.Text.RegularExpressions.Regex(
+            $@"(^|\.){System.Text.RegularExpressions.Regex.Escape(domain)}$", System.Text.RegularExpressions.RegexOptions.IgnoreCase) });
+        var page = context.Pages.FirstOrDefault(p => !p.IsClosed) ?? await context.NewPageAsync();
+        var cdp = await context.NewCDPSessionAsync(page);
+        try
+        {
+            foreach (var origin in new[] { $"https://{domain}", $"https://www.{domain}", $"http://{domain}", $"http://www.{domain}" })
+                await cdp.SendAsync("Storage.clearDataForOrigin", new Dictionary<string, object> { ["origin"] = origin, ["storageTypes"] = "all" });
+            await cdp.SendAsync("Network.clearBrowserCache");
+        }
+        finally
+        {
+            await cdp.DetachAsync();
+        }
+    }
+
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IPage, string> TargetIds = new();
 
     private static async Task<string?> TargetIdAsync(IPage page)

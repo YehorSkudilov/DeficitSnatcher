@@ -93,6 +93,7 @@ static partial class Helper
                 "autoupdate" => AutoUpdate(args.Length > 1 ? args[1] : ""),
                 "logs" => Logs(args.Length > 1 && int.TryParse(args[1], out var n) ? n : 40),
                 "uninstall" => Uninstall(),
+                "reset" => Reset(args.Skip(1).Contains("--yes")),
                 "version" => Print($"Deficit Snatcher PC helper {MyVersion}"),
                 _ => Help(),
             };
@@ -262,6 +263,43 @@ static partial class Helper
         return Print(c.Autostart ? "It starts at every login." : "It no longer starts at login (deficitsnatcher start to run it now).");
     }
 
+    static int Reset(bool yes)
+    {
+        if (!yes)
+        {
+            Console.WriteLine("This wipes the helper's Chrome profile: cookies, site data, cache and every store sign-in.");
+            Console.WriteLine("Stores see a browser they haven't met. You'll need to sign in to them again (Helpers tab → Log in).");
+            Console.Write("Reset it? [y/N] ");
+            if (!(Console.ReadLine() ?? "").Trim().StartsWith("y", StringComparison.OrdinalIgnoreCase))
+                return Print("Nothing changed.");
+        }
+        if (IsRunning())
+            return SendCommand("reset", "Resetting: Chrome closes, its profile is wiped and a clean one starts (deficitsnatcher logs to see it).");
+        return WipeProfileAsync().GetAwaiter().GetResult()
+            ? Print("Chrome's profile is wiped. deficitsnatcher start, then sign in to the stores again.")
+            : Fail($"Couldn't delete all of {ProfileDir}: is Chrome still open? Close it and try again.");
+    }
+
+    /// <summary>Deletes the helper's Chrome profile (Chrome must be closed: it's retried for a while as it lets go of files).</summary>
+    static async Task<bool> WipeProfileAsync()
+    {
+        File.Delete(Path.Combine(Home, "started-before"));
+        for (var i = 0; i < 20; i++)
+        {
+            try
+            {
+                if (Directory.Exists(ProfileDir))
+                    Directory.Delete(ProfileDir, recursive: true);
+                return true;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(500);
+            }
+        }
+        return false;
+    }
+
     static int Logs(int lines)
     {
         if (!File.Exists(LogFile))
@@ -300,6 +338,8 @@ static partial class Helper
               deficitsnatcher autoupdate off  don't update by itself (on: it does, the default)
               deficitsnatcher version         which version this is
               deficitsnatcher logs [lines]    what it's been doing
+              deficitsnatcher reset           a fresh Chrome: wipes its cookies, site data, cache and sign-ins (for a
+                                              browser a store has flagged); sign in to the stores again after
               deficitsnatcher uninstall       stop it and don't start it again
             """);
         return 0;
@@ -475,6 +515,21 @@ static partial class Helper
             }
             await Chrome.OpenWindowAsync(browser, url);
         };
+        // A fresh start (a store has flagged this browser): Chrome is closed, its profile wiped, and a clean one started.
+        var wipeProfile = false;
+        Func<Task> reset = async () =>
+        {
+            Log("Resetting Chrome: closing it, wiping its profile (cookies, site data, cache, sign-ins) and starting a clean one.");
+            wipeProfile = true;
+            if (browser is { } b)
+                try
+                {
+                    await b.CloseAsync();
+                }
+                catch (Exception)
+                {
+                }
+        };
         _ = Task.Run(async () =>
         {
             while (!stop.IsCancellationRequested)
@@ -497,6 +552,8 @@ static partial class Helper
                     stop.Cancel();
                 else if (cmd == "update")
                     await tryUpdate();
+                else if (cmd == "reset")
+                    await reset();
                 else if (browser != null && cmd is "show" or "hide")
                     await Chrome.SetWindowAsync(browser, cmd == "show" ? "normal" : "minimized");
             }
@@ -522,6 +579,12 @@ static partial class Helper
             try
             {
                 c = LoadConfig();
+                if (wipeProfile)
+                {
+                    wipeProfile = false;
+                    Log(await WipeProfileAsync() ? "Chrome's profile is wiped: starting a clean one. Sign in to the stores again (Helpers tab → Log in)."
+                        : "Couldn't wipe all of Chrome's profile (a file is still in use): deficitsnatcher stop, then deficitsnatcher reset.");
+                }
                 var (context, cdpUrl, name) = await Chrome.StartAsync(Log);
                 browser = context;
                 state = state with { Browser = name };
@@ -530,7 +593,7 @@ static partial class Helper
                 context.Close += (_, _) => chromeClosed.Cancel();
                 while (pendingUrls.TryDequeue(out var url))
                     await Chrome.OpenWindowAsync(context, url);
-                await ConnectLoopAsync(c, cdpUrl, name, change => WriteState(state = change(state)), show, tryUpdate, chromeClosed.Token);
+                await ConnectLoopAsync(c, cdpUrl, name, change => WriteState(state = change(state)), show, tryUpdate, reset, chromeClosed.Token);
                 browser = null;
                 if (!stop.IsCancellationRequested)
                     Log("Chrome was closed: starting it again in 5 s (deficitsnatcher stop to stop the helper).");
@@ -564,7 +627,7 @@ static partial class Helper
 
     /// <summary>Stays connected to the site (reconnecting when it drops), lending Chrome when the site asks.</summary>
     static async Task ConnectLoopAsync(Config c, string cdpUrl, string browserName, Action<Func<State, State>> update, Func<string, Task> show,
-        Func<Task> tryUpdate, CancellationToken ct)
+        Func<Task> tryUpdate, Func<Task> reset, CancellationToken ct)
     {
         var wsBase = new Uri(c.Site!.Replace("https://", "wss://").Replace("http://", "ws://").TrimEnd('/'));
         var delay = TimeSpan.FromSeconds(2);
@@ -573,7 +636,7 @@ static partial class Helper
             try
             {
                 using var control = Socket(c.Key!);
-                var query = $"?machine={Uri.EscapeDataString(Environment.MachineName)}&browser={Uri.EscapeDataString(browserName)}&can=show,update"
+                var query = $"?machine={Uri.EscapeDataString(Environment.MachineName)}&browser={Uri.EscapeDataString(browserName)}&can=show,update,reset"
                             + $"&version={MyVersion}&signin={(BusyNow || Chrome.OpenSignIns > 0 ? 1 : 0)}";
                 await control.ConnectAsync(new Uri(wsBase, "/api/runner/connect" + query), ct);
                 Control = control;
@@ -605,6 +668,12 @@ static partial class Helper
                     {
                         Log("The site asked to update.");
                         _ = Task.Run(tryUpdate);
+                    }
+                    // Reset browser (the site's button).
+                    else if (msg.RootElement.TryGetProperty("reset", out _))
+                    {
+                        Log("The site asked to reset Chrome.");
+                        _ = Task.Run(reset);
                     }
                 }
             }

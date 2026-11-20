@@ -10,6 +10,7 @@ public sealed record NewHelperRequest(string? Name);
 public sealed record NewHelperResponse(int Id, string Key);
 public sealed record RenameRequest(string Name);
 public sealed record OpenLoginRequest(string Domain);
+public sealed record ResetRequest(string? Domain);
 public sealed record ChecksRequest(bool On, string? Domain);
 public sealed record HelperVersionsDto(string? Latest, string? Error);
 public sealed record WorkerDto(string Worker, int? Id, string Name, bool Connected, string? Machine, string? Browser, DateTimeOffset? Since,
@@ -33,7 +34,7 @@ public static class RunnerEndpoints
             using var ws = await http.WebSockets.AcceptWebSocketAsync();
             var can = http.Request.Query["can"].ToString().Split(',');
             await hub.RunControlAsync(ws, key, http.Request.Query["machine"], http.Request.Query["browser"], http.RequestAborted,
-                canShow: can.Contains("show"), canUpdate: can.Contains("update"), version: http.Request.Query["version"].ToString() is { Length: > 0 and < 40 } v ? v : null,
+                canShow: can.Contains("show"), canUpdate: can.Contains("update"), canReset: can.Contains("reset"), version: http.Request.Query["version"].ToString() is { Length: > 0 and < 40 } v ? v : null,
                 signingIn: http.Request.Query["signin"] == "1");
             return Results.Empty;
         }).AllowAnonymous().DisableRateLimiting();
@@ -148,6 +149,32 @@ public static class RunnerEndpoints
             {
                 return Results.Conflict(new { error = e.Message });
             }
+        });
+        // A fresh start for a browser a store has flagged. With a store: that store's cookies, site data and cache in this
+        // helper's Chrome (it's signed out of that store). Without: the helper wipes its whole Chrome profile and starts a
+        // clean one (signed out of every store).
+        app.MapPost("/api/runners/{id:int}/reset", async (int id, ResetRequest? request, Tracking.BrowserPool browsers, LoginWatcher logins,
+            CancellationToken ct) =>
+        {
+            if (!hub.IsConnected(id))
+                return Results.Conflict(new { error = $"{hub.NameOf(id)} isn't connected. Start it on that computer first." });
+            if (request?.Domain is { Length: > 0 } d)
+            {
+                try
+                {
+                    await Tracking.BrowserPool.ClearStoreAsync(await browsers.GetPcContextAsync(id, ct), d.Trim().ToLowerInvariant());
+                }
+                catch (Exception e) when (e is Tracking.PcHelperException or Microsoft.Playwright.PlaywrightException)
+                {
+                    return Results.Conflict(new { error = $"Couldn't reset it: {e.Message.Split('\n')[0]}" });
+                }
+                logins.CheckSoon(id);
+                return Results.NoContent();
+            }
+            if (!await hub.ResetBrowserAsync(id))
+                return Results.Conflict(new { error = $"{hub.NameOf(id)} is too old to reset its whole browser: update it first (Update now), "
+                    + "or reset one store at a time, or on that computer run: deficitsnatcher reset" });
+            return Results.Accepted();
         });
         app.MapPost("/api/runner/key", async (NewHelperRequest? request) =>
         {
