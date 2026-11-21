@@ -76,7 +76,18 @@ public static class StockChannels
         var online = rules.Online is { IsEmpty: false } o ? Read(html, o) : null;
         var pickup = rules.Pickup is { IsEmpty: false } p ? Read(pickupHtml ?? html, p) : null;
         if (online == null && pickup == null)
-            return result with { Notes = [.. result.Notes, "online/pickup: their elements weren't found on the page"] };
+        {
+            // The page didn't show its delivery / pickup boxes (still drawing, or a different layout): its hidden product data
+            // alone isn't trusted to say "in stock" (Staples' said so while the page said Out of Stock). Out of stock stands.
+            return result.InStock == true
+                ? result with
+                {
+                    InStock = null,
+                    StockDetail = "online and pickup not shown on the page",
+                    Notes = [.. result.Notes.Where(n => !n.StartsWith("stock:")), "stock: the page's data said in stock, but its online/pickup boxes weren't found; not trusted"],
+                }
+                : result with { Notes = [.. result.Notes, "online/pickup: their elements weren't found on the page"] };
+        }
         bool? inStock = online == true || pickup == true ? true : online == false || pickup == false ? false : null;
         var detail = $"online: {Word(online, rules.Online)} · pickup: {Word(pickup, rules.Pickup)}";
         var notes = result.Notes.Where(n => !n.StartsWith("stock:") && n != "stock unknown").ToList();
