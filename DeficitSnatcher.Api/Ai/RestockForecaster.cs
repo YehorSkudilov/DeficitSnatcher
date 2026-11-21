@@ -183,7 +183,7 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         else if (online?.NextLikely is { } past && Math.Max(1, Math.Ceiling((now - past).TotalDays / 7)) is var weeks && weeks <= 8)
         {
             // Online reports pointed to a time that's gone (and its window): the same time the next week, until it's looked
-            // up again (which happens soon after a prediction passes, see RefreshOneStaleAsync).
+            // up again (at most once a day per store, see RefreshOneStaleAsync).
             nextAt = past.AddDays(7 * weeks);
             basis = "online";
             confidence = "low";
@@ -270,7 +270,9 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         """;
 
     /// <summary>Looks the store's restock pattern up online (one web search) and keeps it for the product and store.</summary>
-    public async Task<string?> RefreshOnlineAsync(int productId, string url, CancellationToken ct)
+    /// <param name="thorough">Two deep searches (the first lookup of a store, or "Look online now"); otherwise one normal one,
+    /// to keep the AI's use low on routine refreshes.</param>
+    public async Task<string?> RefreshOnlineAsync(int productId, string url, CancellationToken ct, bool thorough = true)
     {
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -305,7 +307,7 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         {
             // First a deep, broad search; then, when it comes back thin (no date, low confidence or few dated restocks), a
             // second one that digs into specific places for dated restocks of this store.
-            var a = await ai.SearchWebJsonAsync("restock-forecast", Instructions, question, ct, near, deep: true);
+            var a = await ai.SearchWebJsonAsync("restock-forecast", Instructions, question, ct, near, deep: thorough);
             var pattern = Str(a, "pattern");
             var nextLikely = Date(Str(a, "nextLikely"));
             var confidence = Str(a, "confidence") is "medium" or "high" ? Str(a, "confidence")! : "low";
@@ -314,7 +316,7 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
             var events = Dates(a, "restocks");
             var sources = Sources(a);
 
-            if (nextLikely == null || confidence == "low" || events.Count < 3)
+            if (thorough && (nextLikely == null || confidence == "low" || events.Count < 3))
             {
                 var dig = $"""
                     {question}
@@ -373,9 +375,9 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         return row.Error;
     }
 
-    /// <summary>The background part, one store per call (every few minutes): one never looked up first, then one whose
-    /// predicted restock has passed (looked up again after 6 hours), then one with no date (again after a day), then one
-    /// a week old.</summary>
+    /// <summary>The background part, one store per call (every few minutes): one never looked up first (thorough), then
+    /// one whose predicted restock has passed (again after a day), then one with no date (after 3 days), then one a week
+    /// old. Refreshes are a single normal search.</summary>
     public async Task RefreshOneStaleAsync(CancellationToken ct)
     {
         var settings = await settingsStore.GetAsync(ct);
@@ -389,15 +391,17 @@ public sealed class RestockForecaster(IServiceScopeFactory scopes, OpenAiClient 
         bool Fresh(int productId, string url, Func<DateTimeOffset, DateTimeOffset?, bool> ok) =>
             rows.Any(r => r.ProductId == productId && r.Domain == FindPagesController.Domain(url) && ok(r.FetchedAt, r.NextLikely));
         var stale = sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (_, _) => true))
-            // A prediction whose window has passed, looked up before it did: looked up again right away (once).
-            ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, next) => !(next + Window < now && at < next + Window)))
-            ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, next) => !(next < now && now - at > TimeSpan.FromHours(6))))
-            ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, next) => !(next == null && now - at > TimeSpan.FromDays(1))))
+            // A prediction whose window has passed: looked up again, at most once a day per store (the AI's web searches are
+            // the app's biggest use of it).
+            ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, next) => !(next + Window < now && now - at > TimeSpan.FromDays(1))))
+            ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, next) => !(next == null && now - at > TimeSpan.FromDays(3))))
             ?? sites.FirstOrDefault(s => !Fresh(s.ProductId, s.Url, (at, _) => now - at < TimeSpan.FromDays(7)));
         if (stale == null)
             return;
-        log.LogInformation("Looking up {Store}'s restock pattern online", FindPagesController.Domain(stale.Url));
-        await RefreshOnlineAsync(stale.ProductId, stale.Url, ct);
+        // Thorough only for a store never looked up (or never answered): a refresh is one normal search.
+        var known = rows.Any(r => r.ProductId == stale.ProductId && r.Domain == FindPagesController.Domain(stale.Url) && r.NextLikely != null);
+        log.LogInformation("Looking up {Store}'s restock pattern online ({How})", FindPagesController.Domain(stale.Url), known ? "refresh" : "first, thorough");
+        await RefreshOnlineAsync(stale.ProductId, stale.Url, ct, thorough: !known);
     }
 
     // ---- Helpers ----

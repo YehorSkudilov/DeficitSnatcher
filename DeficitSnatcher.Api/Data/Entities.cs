@@ -109,6 +109,9 @@ public class Site
     public int UnreadableCount { get; set; }
     /// <summary>When the AI last re-learned how to read this page (at most every few hours).</summary>
     public DateTimeOffset? LastAiFixAt { get; set; }
+    /// <summary>The layout of the page the AI last looked at to re-learn it (PageFingerprint): not asked again while the
+    /// page is the same.</summary>
+    public string? AiLookedAtFingerprint { get; set; }
     /// <summary>When the AI last failed to get through this page's checkout: automatic checkouts don't ask it again for a
     /// while (Settings → AI cooldown). Cleared when it succeeds.</summary>
     public DateTimeOffset? AiCheckoutFailedAt { get; set; }

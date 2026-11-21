@@ -97,7 +97,9 @@ public sealed class ScanFollowUp(IServiceScopeFactory scopes, BrowserPool browse
     /// The page kept failing or showing no price or stock: the AI looks at it again and, when what it suggests reads the
     /// page, the page's settings are changed to it. At most every 6 hours per page.
     /// </summary>
-    public async Task MaybeRelearnAsync(int siteId, string why)
+    /// <param name="fingerprint">The page's layout now (PageFingerprint), when it was read: the AI isn't asked again about a
+    /// page it already looked at as it is.</param>
+    public async Task MaybeRelearnAsync(int siteId, string why, string? fingerprint = null)
     {
         var settings = await settingsStore.GetAsync();
         if (!settings.AiAutofixReading || !await ai.AvailableAsync())
@@ -115,7 +117,14 @@ public sealed class ScanFollowUp(IServiceScopeFactory scopes, BrowserPool browse
                 var site = await db.Sites.Include(s => s.Product).FirstOrDefaultAsync(s => s.Id == siteId);
                 if (site?.Product == null || site.LastAiFixAt is { } last && DateTimeOffset.UtcNow - last < TimeSpan.FromHours(Math.Max(1, settings.AiCooldownHours)))
                     return;
+                // The same page the AI already looked at: it would only say the same again. Asked again once the page changes.
+                if (fingerprint != null && site.AiLookedAtFingerprint == fingerprint)
+                {
+                    log.LogInformation("{Site}: {Why}, but the page is the same as when the AI last looked; not asking again", site.Name, why);
+                    return;
+                }
                 site.LastAiFixAt = DateTimeOffset.UtcNow;
+                site.AiLookedAtFingerprint = fingerprint;
                 await db.SaveChangesAsync();
 
                 await notifier.LogAsync(EventLevel.Info, $"{site.Name}: {why}. The AI is looking at the page again…", site.Id);

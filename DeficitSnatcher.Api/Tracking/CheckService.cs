@@ -190,7 +190,8 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
             followUp.Snapshot(scan.Id, site.Url, site.CookiesEncrypted, reason, result.Source, result.SourceType,
                 new Site { Id = site.Id, Url = site.Url });
         if (site.UnreadableCount >= 3)
-            await followUp.MaybeRelearnAsync(site.Id, $"{site.UnreadableCount} checks in a row found {(result.Price == null ? "no price" : "no stock")}");
+            await followUp.MaybeRelearnAsync(site.Id, $"{site.UnreadableCount} checks in a row found {(result.Price == null ? "no price" : "no stock")}",
+                PageFingerprint.Of(result.Source));
 
         var money = $"{settings.Currency}";
         Task? stockAlert = null;

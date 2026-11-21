@@ -561,6 +561,9 @@ namespace DeficitSnatcher.Api.Data.Migrations
                     b.Property<DateTimeOffset?>("AiCheckoutFailedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("AiLookedAtFingerprint")
+                        .HasColumnType("text");
+
                     b.Property<bool>("AutoBuy")
                         .HasColumnType("boolean");
 
