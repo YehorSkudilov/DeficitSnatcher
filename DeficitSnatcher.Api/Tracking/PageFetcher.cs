@@ -150,6 +150,29 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
             // Pages that keep polling never go idle; what's there by now is enough.
             log.LogInformation("Browser check for {Site} continued after the network-idle wait timed out", site.Name);
         }
+        // Stock drawn in script after the page loads (a "Sold out" message or the Add to cart button appearing late): wait a
+        // little for the page's own stock signs before reading it, so its hidden product data doesn't answer alone.
+        var outWords = (site.OutOfStockText ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (!string.IsNullOrWhiteSpace(site.InStockSelector) || outWords.Length > 0)
+        {
+            try
+            {
+                await page.WaitForFunctionAsync(
+                    """
+                    ([sel, words]) => {
+                      try { if (sel && document.querySelector(sel)) return true; } catch { }
+                      const t = (document.body?.innerText || '').toLowerCase();
+                      return words.some(w => t.includes(w.toLowerCase()));
+                    }
+                    """,
+                    new object[] { site.InStockSelector ?? "", outWords },
+                    new() { Timeout = 6000, PollingInterval = 500 });
+            }
+            catch (TimeoutException)
+            {
+                // Neither showed up: read what's there.
+            }
+        }
         var retryAfter = response?.Headers.TryGetValue("retry-after", out var value) == true ? ParseRetryAfter(value) : null;
         var html = await page.ContentAsync();
         int? status = response?.Status;

@@ -114,6 +114,29 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
 
         var before = BuyRules.Evaluate(product, site, new PageResult { Price = site.LastPrice, InStock = site.LastInStock, Title = site.LastTitle });
         var verdict = BuyRules.Evaluate(product, site, result);
+        // Just became a match: a second look before alerting or buying. Pages that draw their stock in script can read
+        // "in stock" from their hidden product data before the "Out of stock" message appears; a page that flips back and
+        // forth would otherwise alert over and over. A second look that fails (blocked, timed out) keeps the first reading.
+        if (verdict.Match && !before.Match)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(4 + Random.Shared.Next(4)), ct);
+                var cookies = site.CookiesEncrypted == null ? [] : SiteCookies.Parse(box.Decrypt(site.CookiesEncrypted), site.Url);
+                var second = await fetcher.FetchAsync(site, cookies, settings, ct).WaitAsync(FetchLimit(settings, site), ct);
+                if (!BuyRules.Evaluate(product, site, second).Match)
+                {
+                    log.LogInformation("Check of {Site}: an in-stock reading wasn't confirmed by a second look ({Verdict}); kept the second",
+                        site.Name, BuyRules.Evaluate(product, site, second).Reason);
+                    result = second with { Notes = [.. second.Notes, "a first look read in stock; a second look didn't confirm it"] };
+                    verdict = BuyRules.Evaluate(product, site, result);
+                }
+            }
+            catch (Exception e) when (!ct.IsCancellationRequested)
+            {
+                log.LogInformation("Check of {Site}: second look failed ({Error}); keeping the in-stock reading", site.Name, e.Message.Split('\n')[0]);
+            }
+        }
         var inStock = result.InStock == true;
         var previousPrice = site.LastPrice;
         var previousInStock = site.LastInStock;
@@ -173,7 +196,8 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         Task? stockAlert = null;
         if (verdict.Match && !before.Match)
         {
-            var text = $"{product.Name} is IN STOCK at {site.Name} for {verdict.TotalPrice:0.00} {money} (your range {product.MinPrice:0.00}–{product.MaxPrice:0.00}).";
+            var text = $"{product.Name} is IN STOCK at {site.Name} for {verdict.TotalPrice:0.00} {money} (your range {product.MinPrice:0.00}–{product.MaxPrice:0.00})"
+                + (result.StockDetail is { Length: > 0 } how ? $": {how}." : ".");
             // The phone rings first: every second counts.
             stockAlert = notifier.NotifyAsync(NotifyKind.InStock, EventLevel.Good, text, site.Id, site.Url);
             await alarms.RaiseAsync(product.Name, site.Name, verdict.TotalPrice, site.Url, text, site.Id);
