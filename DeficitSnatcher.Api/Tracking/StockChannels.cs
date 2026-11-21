@@ -115,12 +115,17 @@ public static class StockChannels
             return null;
         }
         text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
-        if (Words(rule.OutOfStockText).Any(w => text.Contains(w, StringComparison.OrdinalIgnoreCase)))
+        // Sold-out words win, and the usual ones always count, whatever words the rule has: an AI-picked rule without "Out of
+        // Stock" read Staples' box as available from another word in it while the box said Out of Stock.
+        if (Words(rule.OutOfStockText).Concat(AlwaysSoldOut).Any(w => text.Contains(w, StringComparison.OrdinalIgnoreCase)))
             return false;
         if (Words(rule.InStockText).Any(w => text.Contains(w, StringComparison.OrdinalIgnoreCase)))
             return true;
         return null;
     }
+
+    private static readonly string[] AlwaysSoldOut =
+        ["out of stock", "sold out", "unavailable", "not available", "no longer available", "coming soon", "back order", "backorder"];
 
     private static IEnumerable<string> Words(string? list) =>
         (list ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
