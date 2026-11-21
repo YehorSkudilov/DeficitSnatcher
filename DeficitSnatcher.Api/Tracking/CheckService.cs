@@ -12,7 +12,7 @@ namespace DeficitSnatcher.Api.Tracking;
 /// range, a lower price, a site that keeps failing) and buy when it's a match and auto-buy is on.
 /// </summary>
 public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetcher, SettingsStore settingsStore, SecretBox box,
-    Notifier notifier, Buyer buyer, ScanFollowUp followUp, Backoff backoff, Alarms.AlarmService alarms, BrowserPool browsers, ILogger<CheckService> log)
+    Notifier notifier, Buyer buyer, StockConfirmer confirmer, ScanFollowUp followUp, Backoff backoff, Alarms.AlarmService alarms, BrowserPool browsers, ILogger<CheckService> log)
 {
     /// <summary>The most one page fetch may take, whatever happens in the browser (room for a new session's home-page
     /// visit and a Cloudflare wait on top of the page's own timeout).</summary>
@@ -114,28 +114,37 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
 
         var before = BuyRules.Evaluate(product, site, new PageResult { Price = site.LastPrice, InStock = site.LastInStock, Title = site.LastTitle });
         var verdict = BuyRules.Evaluate(product, site, result);
-        // Just became a match: a second look before alerting or buying. Pages that draw their stock in script can read
-        // "in stock" from their hidden product data before the "Out of stock" message appears; a page that flips back and
-        // forth would otherwise alert over and over. A second look that fails (blocked, timed out) keeps the first reading.
+        // Just became a match: before any alarm or buy, the page is looked at as a person would (StockConfirmer: opened
+        // fresh, the visible product area and a screenshot, the AI's yes or no). Rules and hidden page data were wrong too
+        // often. No: it isn't a match. Couldn't look (blocked): a quiet notice only, no alarm, no buy.
+        bool? confirmed = null;
+        string? confirmWhy = null;
         if (verdict.Match && !before.Match)
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(4 + Random.Shared.Next(4)), ct);
                 var cookies = site.CookiesEncrypted == null ? [] : SiteCookies.Parse(box.Decrypt(site.CookiesEncrypted), site.Url);
-                var second = await fetcher.FetchAsync(site, cookies, settings, ct).WaitAsync(FetchLimit(settings, site), ct);
-                if (!BuyRules.Evaluate(product, site, second).Match)
-                {
-                    log.LogInformation("Check of {Site}: an in-stock reading wasn't confirmed by a second look ({Verdict}); kept the second",
-                        site.Name, BuyRules.Evaluate(product, site, second).Reason);
-                    result = second with { Notes = [.. second.Notes, "a first look read in stock; a second look didn't confirm it"] };
-                    verdict = BuyRules.Evaluate(product, site, result);
-                }
+                var c = await confirmer.ConfirmAsync(site, product, cookies, settings, ct).WaitAsync(FetchLimit(settings, site), ct);
+                (confirmed, confirmWhy) = (c.Buyable, c.Why);
             }
             catch (Exception e) when (!ct.IsCancellationRequested)
             {
-                log.LogInformation("Check of {Site}: second look failed ({Error}); keeping the in-stock reading", site.Name, e.Message.Split('\n')[0]);
+                confirmWhy = $"couldn't double-check ({e.Message.Split('\n')[0]})";
             }
+            log.LogInformation("Check of {Site}: read as buyable; double-check says {Confirmed} ({Why})", site.Name,
+                confirmed switch { true => "yes", false => "no", null => "unknown" }, confirmWhy);
+            if (confirmed == false)
+            {
+                result = result with
+                {
+                    InStock = false,
+                    StockDetail = $"not confirmed: {confirmWhy}",
+                    Notes = [.. result.Notes, $"read as in stock, but the double-check said no: {confirmWhy}"],
+                };
+                verdict = BuyRules.Evaluate(product, site, result);
+            }
+            else
+                result = result with { Notes = [.. result.Notes, $"double-check: {(confirmed == true ? "yes" : "unknown")}, {confirmWhy}"] };
         }
         var inStock = result.InStock == true;
         var previousPrice = site.LastPrice;
@@ -199,9 +208,15 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
         {
             var text = $"{product.Name} is IN STOCK at {site.Name} for {verdict.TotalPrice:0.00} {money} (your range {product.MinPrice:0.00}–{product.MaxPrice:0.00})"
                 + (result.StockDetail is { Length: > 0 } how ? $": {how}." : ".");
-            // The phone rings first: every second counts.
-            stockAlert = notifier.NotifyAsync(NotifyKind.InStock, EventLevel.Good, text, site.Id, site.Url);
-            await alarms.RaiseAsync(product.Name, site.Name, verdict.TotalPrice, site.Url, text, site.Id);
+            if (confirmed == true)
+            {
+                // The phone rings first: every second counts.
+                stockAlert = notifier.NotifyAsync(NotifyKind.InStock, EventLevel.Good, text, site.Id, site.Url);
+                await alarms.RaiseAsync(product.Name, site.Name, verdict.TotalPrice, site.Url, text, site.Id);
+            }
+            else
+                // Read as in stock, but the page couldn't be double-checked: worth a look, not a ringing phone or a buy.
+                await notifier.LogAsync(EventLevel.Warning, $"{text} Not double-checked ({confirmWhy}): no alarm, not bought. Have a look.", site.Id);
         }
         // Came into stock, but not in the range: worth knowing (e.g. the price went up). Never for going out of stock.
         else if (inStock && previousInStock != true && !firstScan)
@@ -217,7 +232,9 @@ public sealed class CheckService(IServiceScopeFactory scopes, PageFetcher fetche
 
         string? buyMessage = null;
         int? purchaseId = null;
-        if (verdict.Match && !product.AutoBuyEnabled)
+        if (verdict.Match && !before.Match && confirmed != true)
+            scan.Action = $"Not buying: the page couldn't be double-checked ({confirmWhy}).";
+        else if (verdict.Match && !product.AutoBuyEnabled)
             scan.Action = "Auto-buy is off for this product: only notified.";
         else if (verdict.Match && product.AutoBuyEnabled && product.Enabled)
         {

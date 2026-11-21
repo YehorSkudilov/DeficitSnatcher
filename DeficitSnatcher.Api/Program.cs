@@ -75,6 +75,7 @@ builder.Services.AddHttpClient(nameof(Notifier), c => c.Timeout = TimeSpan.FromS
 builder.Services.AddSingleton<Notifier>();
 builder.Services.AddSingleton<Backoff>();
 builder.Services.AddSingleton<Captchas>();
+builder.Services.AddSingleton<DeficitSnatcher.Api.Ai.StockConfirmer>();
 builder.Services.AddSingleton<DeficitSnatcher.Api.Alarms.AlarmService>();
 builder.Services.AddSingleton<BrowserPool>();
 builder.Services.AddSingleton<BrowserSessions>();
