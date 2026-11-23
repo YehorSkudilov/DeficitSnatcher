@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, type Product, type ProductInput, type RestockForecast, type Settings, type Site } from "@/lib/api";
+import { api, type AiStatus, type Product, type ProductInput, type RestockForecast, type Settings, type Site } from "@/lib/api";
 import { money } from "@/lib/format";
 import { Check, ErrorNote, Field, NumberInput, useAction, useCollapsed, useData, useNow, CollapseButton, PagesSummary } from "./ui";
 import { CheckAllButton, rowResults, SiteTable } from "./Dashboard";
@@ -241,7 +241,25 @@ function ProductForm({
   });
   const [saved, setSaved] = useState(false);
   const save = useAction();
-  const set = (patch: Partial<ProductInput>) => (setP({ ...p, ...patch }), setSaved(false));
+  const set = (patch: Partial<ProductInput>) => (setP((old) => ({ ...old, ...patch })), setSaved(false));
+  const ai = useData(() => api.get<AiStatus>("/api/ai/status"), []);
+  const aiOn = !!ai.data?.hasKey && !!ai.data?.enabled;
+  const fill = useAction();
+  const [fillNote, setFillNote] = useState<string | null>(null);
+
+  const aiFill = async () => {
+    setFillNote(null);
+    const r = await fill.run(() => api.post<AiFill>("/api/ai/product-fill", { name: p.name }));
+    if (!r) return;
+    set({
+      name: r.name || p.name,
+      ...(r.minPrice != null ? { minPrice: r.minPrice } : {}),
+      ...(r.maxPrice != null ? { maxPrice: r.maxPrice } : {}),
+      ...(r.requiredKeywords ? { requiredKeywords: r.requiredKeywords } : {}),
+      ...(r.excludedKeywords ? { excludedKeywords: r.excludedKeywords } : {}),
+    });
+    setFillNote(r.note ?? "Filled in. Check the values before saving.");
+  };
 
   const submit = async () => {
     const r = await save.run(() => (id ? api.put<Product>(`/api/products/${id}`, p) : api.post<Product>("/api/products", p)));
@@ -274,8 +292,16 @@ function ProductForm({
       <p className="small muted">When this product matches, checkout starts automatically. The phone alarm still rings at the same time; dismissing it opens the store or cart.</p>
 
       <div className="fields">
-        <Field label="Name">
-          <input type="text" value={p.name} onChange={(e) => set({ name: e.target.value })} placeholder="PS5 Pro" />
+        <Field
+          label="Name"
+          hint={aiOn ? "Type the name, then ✨ AI fill searches the web and fills in the price range and keywords." : ai.data ? "AI fill needs the AI (Settings → AI)." : undefined}
+        >
+          <div className="row" style={{ flexWrap: "nowrap" }}>
+            <input type="text" value={p.name} onChange={(e) => set({ name: e.target.value })} placeholder="PS5 Pro" style={{ flex: 1, minWidth: 0 }} />
+            <button type="button" className="btn small" disabled={!aiOn || fill.busy || !p.name.trim()} onClick={aiFill} title="Fill the price range and keywords with AI">
+              {fill.busy ? "Filling…" : "✨ AI fill"}
+            </button>
+          </div>
         </Field>
         <Field label={`Minimum price (${currency})`} hint="Anything cheaper is taken as a wrong listing (accessory, scam) and never bought.">
           <NumberInput value={p.minPrice} min={0} step={0.01} onChange={(v) => set({ minPrice: v ?? 0 })} />
@@ -290,6 +316,9 @@ function ProductForm({
           <NumberInput value={p.quantityPerOrder} min={1} onChange={(v) => set({ quantityPerOrder: v ?? 1 })} />
         </Field>
       </div>
+
+      <ErrorNote error={fill.error} />
+      {fillNote && <p className="small muted" style={{ margin: 0 }}>✨ {fillNote}</p>}
 
       <RangeBar min={p.minPrice} max={p.maxPrice} currency={currency} />
 
@@ -322,6 +351,8 @@ function ProductForm({
     </div>
   );
 }
+
+type AiFill = { name: string; minPrice: number | null; maxPrice: number | null; requiredKeywords: string; excludedKeywords: string; note: string | null };
 
 function RangeBar({ min, max, currency }: { min: number; max: number; currency: string }) {
   if (!(max > 0) || min > max) return null;
