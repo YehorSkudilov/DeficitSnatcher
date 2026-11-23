@@ -23,6 +23,8 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
         { "buyable": true or false, "online": true/false/null, "pickup": true/false/null, "reason": "a few words" }
         buyable is true only when THIS product (not a recommended or related one) can be added to the cart or bought now,
         delivered or picked up: an enabled Add to cart / Buy now / Pick up button, or "In stock" / "Available" for it.
+        Some stores (Staples) show an Add to cart button even when it can't be delivered or picked up: then the delivery and
+        pickup wording decides, and "Delivery currently unavailable" with no store pickup is false.
         It is false when the page says Out of stock, Sold out, Unavailable, Coming soon, Notify me, Pre-order closed, the
         buy button is missing or disabled, or the page isn't the product (an error, a search page, a captcha).
         When unsure, false.
@@ -103,14 +105,36 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
                 try
                 {
                     await page.Locator(online.Container).First.WaitForAsync(new() { Timeout = 8000 });
-                    await page.WaitForTimeoutAsync(1500);
-                    html = await page.ContentAsync();
                 }
                 catch (Exception e) when (e is PlaywrightException or TimeoutException)
                 {
                 }
-                var read = StockChannels.Apply(new PageResult(), html, null, rules with { Pickup = rules.Pickup?.Click is { Length: > 0 } ? null : rules.Pickup });
-                (channels, channelDetail) = (read.InStock, read.StockDetail);
+                // Staples draws "Delivers by…" first and only later swaps in "Delivery currently unavailable": the box is
+                // watched for about 10 seconds, and any sold-out reading, or none saying available at the end, is a no.
+                var texts = new List<string>();
+                for (var i = 0; i < 4; i++)
+                {
+                    if (i > 0)
+                        await page.WaitForTimeoutAsync(3000);
+                    try
+                    {
+                        html = await page.ContentAsync();
+                    }
+                    catch (PlaywrightException)
+                    {
+                        continue;
+                    }
+                    var (said, text) = StockChannels.ReadOne(html, online);
+                    if (text != null && (texts.Count == 0 || texts[^1] != text))
+                        texts.Add(text.Length > 160 ? text[..160] + "…" : text);
+                    if (said == false)
+                    {
+                        channels = false;
+                        break;
+                    }
+                    channels = said;
+                }
+                channelDetail = texts.Count == 0 ? "the delivery box wasn't found" : "the delivery box said " + string.Join(" → ", texts.Select(t => $"\"{t}\""));
             }
             main = await page.EvaluateAsync<string>(MainText);
             buyButton = await page.EvaluateAsync<string?>(BuyButton);
@@ -122,8 +146,9 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
         }
 
         // The delivery box was read as available in the check, and now (looked at fresh, after it's drawn) it says it isn't.
-        if (channels == false)
-            return new(false, $"looked at again, the page says {channelDetail}");
+        // The check went by this box: looked at fresh for 10 s, it must say available at the end, not sold out or nothing.
+        if (channelDetail != null && channels != true)
+            return new(false, $"looked at again for 10 s, {channelDetail}");
 
         var soldOutWord = SoldOut.FirstOrDefault(w => main.Contains(w, StringComparison.OrdinalIgnoreCase));
         if (soldOutWord != null && _lastNo.TryGetValue(site.Id, out var no) && DateTimeOffset.UtcNow - no.At < TimeSpan.FromMinutes(30))
@@ -135,7 +160,7 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
                 var answer = await ai.AskJsonAsync("confirm-stock", site.Id, null, System,
                 [
                     OpenAiClient.Text($"Product wanted: {product.Name}. Page: {site.Url}\n"
-                        + $"Enabled buy button found: {buyButton ?? "none"}. Delivery/pickup boxes: {channelDetail ?? "not read"}.\n\n"
+                        + $"Enabled buy button found: {buyButton ?? "none"}. Delivery: {channelDetail ?? "not read"}.\n\n"
                         + $"Visible text of the product's area:\n{main}"),
                     OpenAiClient.Image(shot, "image/jpeg", detail: "high"),
                 ], ct, ignoreDailyLimit: true);
@@ -147,7 +172,7 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
                         _lastNo[site.Id] = (DateTimeOffset.UtcNow, why);
                     else
                         _lastNo.TryRemove(site.Id, out _);
-                    return new(b.ValueKind == JsonValueKind.True, why);
+                    return new(b.ValueKind == JsonValueKind.True, why + (channelDetail == null ? "" : $"; {channelDetail}"));
                 }
             }
             catch (OpenAiClient.AiException e)

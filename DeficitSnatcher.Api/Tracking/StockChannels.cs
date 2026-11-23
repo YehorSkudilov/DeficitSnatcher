@@ -40,7 +40,7 @@ public static class StockChannels
         // Staples: a Shopify store whose product data says "available" while the page says Out of Stock. Its delivery box and
         // its store-pickup box (after choosing a store) are drawn by the page's scripts, so it's read in the browser.
         ("staples.ca", new ChannelRules(
-            new ChannelRule("div.switch-to-get-in-stock__delivery", "Delivers by, available", "Delivery currently unavailable"),
+            new ChannelRule("div.switch-to-get-in-stock__delivery", "Delivers by", "Delivery currently unavailable"),
             new ChannelRule("div.product-bopis-accordion__content.product-bopis-accordion__content--open", "Pickup in store",
                 "0 in stock, Out of stock at your store", "a.change_store"))),
     ];
@@ -83,8 +83,8 @@ public static class StockChannels
     {
         if (rules == null)
             return result;
-        var online = rules.Online is { IsEmpty: false } o ? Read(html, o) : null;
-        var pickup = rules.Pickup is { IsEmpty: false } p ? Read(pickupHtml ?? html, p) : null;
+        var (online, onlineText) = rules.Online is { IsEmpty: false } o ? Read(html, o) : (null, null);
+        var (pickup, pickupText) = rules.Pickup is { IsEmpty: false } p ? Read(pickupHtml ?? html, p) : (null, null);
         if (online == null && pickup == null)
         {
             // The page didn't show its delivery / pickup boxes (still drawing, or a different layout): its hidden product data
@@ -102,6 +102,11 @@ public static class StockChannels
         var detail = $"online: {Word(online, rules.Online)} · pickup: {Word(pickup, rules.Pickup)}";
         var notes = result.Notes.Where(n => !n.StartsWith("stock:") && n != "stock unknown").ToList();
         notes.Add($"stock: {detail}");
+        // What the boxes actually said, so a wrong read can be seen in the logs.
+        if (onlineText != null)
+            notes.Add($"online box: \"{Short(onlineText)}\"");
+        if (pickupText != null)
+            notes.Add($"pickup box: \"{Short(pickupText)}\"");
         return result with { InStock = inStock ?? result.InStock, StockDetail = detail, Notes = notes };
     }
 
@@ -109,7 +114,12 @@ public static class StockChannels
         rule is null or { IsEmpty: true } ? "not set up" : value switch { true => "yes", false => "no", null => "?" };
 
     /// <summary>One channel: sold-out words win; then available words; an element with neither is unknown.</summary>
-    private static bool? Read(string html, ChannelRule rule)
+    private static string Short(string s) => s.Length > 160 ? s[..160] + "…" : s;
+
+    /// <summary>One channel's verdict on a page, and its box's text (null when the box isn't there).</summary>
+    public static (bool? InStock, string? Text) ReadOne(string html, ChannelRule rule) => Read(html, rule);
+
+    private static (bool?, string?) Read(string html, ChannelRule rule)
     {
         using var document = Html.ParseDocument(html);
         string text;
@@ -117,21 +127,21 @@ public static class StockChannels
         {
             var elements = document.QuerySelectorAll(rule.Container);
             if (elements.Length == 0)
-                return null;
+                return (null, null);
             text = string.Join(" ", elements.Select(e => e.TextContent));
         }
         catch (AngleSharp.Dom.DomException)
         {
-            return null;
+            return (null, null);
         }
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
         // Sold-out words win, and the usual ones always count, whatever words the rule has: an AI-picked rule without "Out of
         // Stock" read Staples' box as available from another word in it while the box said Out of Stock.
         if (Words(rule.OutOfStockText).Concat(AlwaysSoldOut).Any(w => text.Contains(w, StringComparison.OrdinalIgnoreCase)))
-            return false;
+            return (false, text);
         if (Words(rule.InStockText).Any(w => text.Contains(w, StringComparison.OrdinalIgnoreCase)))
-            return true;
-        return null;
+            return (true, text);
+        return (null, text);
     }
 
     private static readonly string[] AlwaysSoldOut =

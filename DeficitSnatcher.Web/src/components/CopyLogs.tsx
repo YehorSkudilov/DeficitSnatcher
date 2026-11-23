@@ -61,9 +61,9 @@ async function buildReport(productId?: number, siteId?: number): Promise<string>
   const [products, sites, recentScans, inStockScans, events, purchases, aiCalls] = await Promise.all([
     api.get<Product[]>("/api/products"),
     api.get<Site[]>(`/api/sites${query({ productId })}`),
-    api.get<ScansPage>(`/api/scans${query({ ...scope, limit: 300 })}`),
-    api.get<ScansPage>(`/api/scans${query({ ...scope, outcome: "InStock", limit: 200 })}`),
-    api.get<BotEvent[]>(`/api/events${query({ ...scope, limit: 300 })}`),
+    api.get<ScansPage>(`/api/scans${query({ ...scope, limit: 100 })}`),
+    api.get<ScansPage>(`/api/scans${query({ ...scope, outcome: "InStock", limit: 60 })}`),
+    api.get<BotEvent[]>(`/api/events${query({ ...scope, limit: 150 })}`),
     api.get<Purchase[]>(`/api/purchases${query({ ...scope, limit: 50 })}`),
     api.get<AiCall[]>(`/api/ai/calls${query({ ...scope, limit: 100 })}`),
   ]);
@@ -94,14 +94,6 @@ async function buildReport(productId?: number, siteId?: number): Promise<string>
       s.match && "MATCH", s.verdict, s.lastError && `error: ${s.lastError}`, s.consecutiveErrors > 0 && `${s.consecutiveErrors} errors in a row`])}`);
   }
 
-  out.push("", `== Scans (${scanList.length}: the latest 300 and the latest 200 in stock, newest first) ==`);
-  for (const s of scanList) {
-    out.push(line([`#${s.id}`, s.at, s.siteName, s.outcome, s.match && "MATCH", s.price != null && `price ${s.price}`, s.totalPrice != null && `total ${s.totalPrice}`,
-      s.title && `title "${s.title}"`, s.verdict, s.action && `action: ${s.action}`, s.error && `error: ${s.error}`, s.manual && "manual",
-      `${s.durationMs}ms`, s.worker, s.hasSnapshot && "snapshot"]));
-    if (s.notes) out.push(`  notes: ${s.notes.replace(/\n/g, "\n  ")}`);
-  }
-
   out.push("", `== Activity (${events.length}, newest first) ==`);
   for (const e of events) out.push(line([e.at, e.level, e.siteName, e.message]));
 
@@ -114,5 +106,13 @@ async function buildReport(productId?: number, siteId?: number): Promise<string>
     out.push(line([`#${c.id}`, c.at, c.purpose, c.siteName, c.ok ? "ok" : "FAILED", `${c.inputTokens}+${c.outputTokens} tokens`, `${c.durationMs}ms`]));
     out.push(`  ${c.summary.replace(/\n/g, "\n  ")}`);
   }
+  out.push("", `== Scans (${scanList.length}: the latest 100 and the latest 60 in stock, newest first) ==`);
+  for (const s of scanList) {
+    out.push(line([`#${s.id}`, s.at, s.siteName, s.outcome, s.match && "MATCH", s.price != null && `price ${s.price}`, s.totalPrice != null && `total ${s.totalPrice}`,
+      s.title && `title "${s.title}"`, s.verdict, s.action && `action: ${s.action}`, s.error && `error: ${s.error}`, s.manual && "manual",
+      `${s.durationMs}ms`, s.worker, s.hasSnapshot && "snapshot"]));
+    if (s.notes) out.push(`  notes: ${s.notes.replace(/\n/g, "\n  ")}`);
+  }
+
   return out.join("\n");
 }
