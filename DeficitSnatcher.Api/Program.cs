@@ -99,7 +99,19 @@ builder.Services.AddSingleton(builder.Configuration.GetSection("Deploy").Get<Def
 builder.Services.AddSingleton<DeficitSnatcher.Api.Deploy.ServerVersion>();
 builder.Services.AddHttpClient(DeficitSnatcher.Api.Deploy.DeployController.ClientName, DeficitSnatcher.Api.Deploy.DeployController.Configure);
 
-builder.Services.AddProblemDetails();
+// An unexpected error says what went wrong (its innermost message), not just "Internal Server Error": the site is the
+// owner's own, signed in, and the reason is what's needed to fix it.
+builder.Services.AddProblemDetails(o => o.CustomizeProblemDetails = c =>
+{
+    if (c.HttpContext.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error is { } error)
+    {
+        var inner = error;
+        while (inner.InnerException != null)
+            inner = inner.InnerException;
+        var message = inner.Message.Split('\n')[0].Trim();
+        c.ProblemDetails.Detail = $"Server error: {(message.Length > 300 ? message[..300] + "…" : message)}";
+    }
+});
 builder.Services.AddControllers(o => o.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true)
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 

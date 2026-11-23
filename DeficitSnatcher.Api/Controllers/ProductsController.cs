@@ -119,6 +119,10 @@ public sealed class ProductsController(AppDbContext db) : ControllerBase
         string? error = null;
         if (string.IsNullOrWhiteSpace(i.Name))
             error = "Give it a name.";
+        else if (i.Name.Trim().Length > 200)
+            error = "The name is too long (200 characters at most).";
+        else if ((i.RequiredKeywords ?? "").Trim().Length > 1000 || (i.ExcludedKeywords ?? "").Trim().Length > 1000)
+            error = $"The keywords are too long: {Math.Max((i.RequiredKeywords ?? "").Trim().Length, (i.ExcludedKeywords ?? "").Trim().Length)} characters, 1,000 at most.";
         else if (i.MinPrice < 0 || i.MaxPrice <= 0)
             error = "Prices must be positive.";
         else if (i.MinPrice > i.MaxPrice)
