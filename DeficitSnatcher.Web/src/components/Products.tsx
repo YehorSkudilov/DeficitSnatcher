@@ -8,6 +8,7 @@ import { CheckAllButton, rowResults, SiteTable } from "./Dashboard";
 import { go } from "./App";
 import { Logs } from "./Logs";
 import { FindPages } from "./FindPages";
+import { InStockNow } from "./InStockNow";
 
 const blank: ProductInput = {
   name: "",
@@ -55,6 +56,7 @@ export function Products() {
         keywords, and its price plus shipping is within the range. Only matches are ever bought.
       </p>
       <ErrorNote error={products.error} />
+      <InStockNow currency={currency} />
       {products.data?.length === 0 && <div className="card muted">No products yet.</div>}
       {(products.data?.length ?? 0) > 1 && (
         <div className="row" style={{ justifyContent: "flex-end" }}>

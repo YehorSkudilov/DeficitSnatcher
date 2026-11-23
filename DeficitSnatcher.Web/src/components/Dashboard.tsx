@@ -5,6 +5,7 @@ import { api, restockWhen, type RestockForecast, type CheckAllItem, type Dashboa
 import { ago, dateTime, host, money, storeIconSources, until } from "@/lib/format";
 import { Check, ErrorNote, LevelDot, PurchaseBadge, StockBadge, useAction, useCollapsed, useData, useNow, CollapseButton, PagesSummary } from "./ui";
 import { go } from "./App";
+import { InStockNow } from "./InStockNow";
 
 export function Dashboard() {
   const dash = useData(() => api.get<DashboardData>("/api/dashboard"), [], 5000);
@@ -35,6 +36,7 @@ export function Dashboard() {
         </div>
       </div>
       <ErrorNote error={dash.error || autoBuyAction.error} />
+      <InStockNow currency={d?.currency} />
 
       {d && (
         <div className="grid stats">
