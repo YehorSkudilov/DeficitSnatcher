@@ -67,6 +67,32 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
         }
         """;
 
+    // Shopify stores (Staples): the truest test there is. The store is asked to add this exact item to the cart, from the
+    // page itself (same session, past the bot check), and it's taken straight back out. A store that won't add it can't sell
+    // it, whatever the page's widgets say. Null when the page isn't a Shopify product.
+    private const string CartTest = """
+        async () => {
+          if (!window.Shopify && !document.querySelector('script[src*="cdn.shopify"], link[href*="cdn.shopify"]')) return null;
+          const m = location.pathname.match(/\/products\/[^/?#]+/);
+          if (!m) return null;
+          const product = await fetch(m[0] + '.js', { credentials: 'include', headers: { Accept: 'application/json' } })
+            .then(r => r.ok ? r.json() : null).catch(() => null);
+          if (!product || !product.variants || !product.variants.length) return null;
+          const wanted = new URLSearchParams(location.search).get('variant');
+          const v = product.variants.find(x => String(x.id) === wanted) || product.variants[0];
+          const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+          const r = await fetch('/cart/add.js', { method: 'POST', credentials: 'include', headers, body: JSON.stringify({ items: [{ id: v.id, quantity: 1 }] }) });
+          const text = (await r.text()).replace(/\s+/g, ' ');
+          if (r.ok)
+            await fetch('/cart/change.js', { method: 'POST', credentials: 'include', headers, body: JSON.stringify({ id: String(v.id), quantity: 0 }) }).catch(() => {});
+          let said = '';
+          try { const j = JSON.parse(text); said = j.description || j.message || ''; } catch { said = text.slice(0, 200); }
+          return JSON.stringify({ ok: r.ok, status: r.status, said: String(said).slice(0, 200), variant: String(v.id), available: !!v.available });
+        }
+        """;
+
+    private sealed record CartAnswer(bool Ok, int Status, string Said, string Variant, bool Available);
+
     // The AI's last "no" per page: while the page still shows sold-out wording, it isn't asked again for 30 minutes (a page
     // that keeps misreading as in stock would otherwise cost an AI call every check).
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, (DateTimeOffset At, string Why)> _lastNo = new();
@@ -79,6 +105,7 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
         string main;
         byte[] shot;
         string? buyButton;
+        CartAnswer? cart = null;
         bool? channels = null;
         string? channelDetail = null;
         try
@@ -138,6 +165,15 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
             }
             main = await page.EvaluateAsync<string>(MainText);
             buyButton = await page.EvaluateAsync<string?>(BuyButton);
+            try
+            {
+                if (await page.EvaluateAsync<string?>(CartTest) is { Length: > 0 } cartJson)
+                    cart = JsonSerializer.Deserialize<CartAnswer>(cartJson, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            }
+            catch (Exception e) when (e is PlaywrightException or JsonException)
+            {
+                log.LogInformation("Stock confirmation for {Site}: cart test failed ({Error})", site.Name, e.Message.Split('\n')[0]);
+            }
             shot = await page.ScreenshotAsync(new() { Type = ScreenshotType.Jpeg, Quality = 60 });
         }
         catch (Exception e) when (!ct.IsCancellationRequested && e is PlaywrightException or TimeoutException or BrowserEngineException)
@@ -147,6 +183,12 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
 
         // The delivery box was read as available in the check, and now (looked at fresh, after it's drawn) it says it isn't.
         // The check went by this box: looked at fresh for 10 s, it must say available at the end, not sold out or nothing.
+        // The store wouldn't put it in a cart: not buyable, whatever the page shows.
+        if (cart is { Ok: false })
+            return new(false, $"the store refused to add it to a cart ({cart.Status}: {(cart.Said.Length > 0 ? cart.Said : "no reason given")})"
+                + (channelDetail == null ? "" : $"; {channelDetail}"));
+        var cartNote = cart == null ? "" : $"; the store added it to a cart (and it was taken out again)";
+
         if (channelDetail != null && channels != true)
             return new(false, $"looked at again for 10 s, {channelDetail}");
 
@@ -156,13 +198,13 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
         var soldOutWord = SoldOut.FirstOrDefault(w => main.Contains(w, StringComparison.OrdinalIgnoreCase));
         string proof;
         if (channelDetail != null)
-            proof = channelDetail;
+            proof = channelDetail + cartNote;
         else if (soldOutWord != null)
             return new(false, $"the page shows \"{soldOutWord}\"");
         else if (buyButton == null)
             return new(false, "no enabled Add to cart / Buy now button for this product on the page");
         else
-            proof = $"an enabled \"{buyButton}\" button and no sold-out wording";
+            proof = $"an enabled \"{buyButton}\" button and no sold-out wording{cartNote}";
 
         // Then the AI can only say no (a veto, never the reason for an alarm): it looks at the screenshot for what the rules
         // can't see. Its no is reused for 30 min while the page still shows sold-out wording.
