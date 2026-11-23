@@ -22,7 +22,9 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
     public async Task<PageResult> FetchAsync(Site site, List<SiteCookie> cookies, BotSettings settings, CancellationToken ct)
     {
         var url = new Uri(site.Url);
-        if (site.Kind == SiteKind.Shopify || site.Kind == SiteKind.Auto && LooksLikeShopifyProduct(url))
+        // Staples' Shopify data said "available" for weeks while its page said Out of Stock: those stores are read in the browser.
+        var browserOnly = StockChannels.BrowserOnly(url);
+        if (!browserOnly && (site.Kind == SiteKind.Shopify || site.Kind == SiteKind.Auto && LooksLikeShopifyProduct(url)))
         {
             var jsonUrl = new UriBuilder(url) { Query = "", Fragment = "" }.Uri.ToString().TrimEnd('/') + ".js";
             var (status, body, retryAfter) = await GetAsync(new Uri(jsonUrl), cookies, settings, "application/json", ct);
@@ -35,7 +37,7 @@ public sealed class PageFetcher(HttpClient http, BrowserPool browsers, SettingsS
         }
 
         var selectors = new PageParser.Selectors(site.PriceSelector, site.TitleSelector, site.InStockSelector, site.OutOfStockText);
-        var useBrowser = site.Kind == SiteKind.Browser
+        var useBrowser = site.Kind == SiteKind.Browser || browserOnly
             || site.Kind == SiteKind.Auto && NeedsBrowser.TryGetValue(site.Id, out var since) && DateTimeOffset.UtcNow - since < TimeSpan.FromDays(1);
         if (useBrowser)
         {

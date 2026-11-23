@@ -37,7 +37,17 @@ public static class StockChannels
         ("canadacomputers.com", new ChannelRules(
             new ChannelRule("#onlineinfo", "available, in stock, ships, delivery by, get it", "sold out, not available, unavailable, coming soon, back order"),
             new ChannelRule("#storeinfo", "available, in stock, pick up, pickup, ready", "sold out, not available, unavailable, coming soon"))),
+        // Staples: a Shopify store whose product data says "available" while the page says Out of Stock. Its delivery box and
+        // its store-pickup box (after choosing a store) are drawn by the page's scripts, so it's read in the browser.
+        ("staples.ca", new ChannelRules(
+            new ChannelRule("div.switch-to-get-in-stock__delivery", "Delivers by, available", "Delivery currently unavailable"),
+            new ChannelRule("div.product-bopis-accordion__content.product-bopis-accordion__content--open", "Pickup in store",
+                "0 in stock, Out of stock at your store", "a.change_store"))),
     ];
+
+    /// <summary>Stores whose stock only shows on the drawn page: never read from their hidden product data (Shopify JSON) or a plain
+    /// request, always in the browser.</summary>
+    public static bool BrowserOnly(Uri url) => url.Host.EndsWith("staples.ca", StringComparison.OrdinalIgnoreCase);
 
     public static ChannelRules? Parse(string? json)
     {

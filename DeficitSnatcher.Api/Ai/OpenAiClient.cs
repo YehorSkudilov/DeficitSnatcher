@@ -31,15 +31,17 @@ public sealed class OpenAiClient(HttpClient http, IConfiguration config, Setting
     public sealed class AiException(string message) : Exception(message);
 
     /// <summary>Asks and returns the answer's JSON object. Throws AiException when the AI is off or the call fails.</summary>
+    /// <param name="ignoreDailyLimit">For the stock double-check: rare, and the only thing standing between a misread page and a
+    /// ringing phone or a buy, so it isn't skipped once the day's tokens are used up.</param>
     public async Task<JsonElement> AskJsonAsync(string purpose, int? siteId, int? purchaseId, string system, IEnumerable<object> userParts,
-        CancellationToken ct)
+        CancellationToken ct, bool ignoreDailyLimit = false)
     {
         if (!HasKey)
             throw new AiException("The AI is off: set the OPENAI_API_KEY secret.");
         var settings = await settingsStore.GetAsync(ct);
         if (!settings.AiEnabled)
             throw new AiException("The AI is turned off in Settings.");
-        if (settings.AiDailyTokenLimit > 0 && await TokensTodayAsync(ct) >= settings.AiDailyTokenLimit)
+        if (!ignoreDailyLimit && settings.AiDailyTokenLimit > 0 && await TokensTodayAsync(ct) >= settings.AiDailyTokenLimit)
             throw new AiException($"Today's AI limit of {settings.AiDailyTokenLimit:N0} tokens is used up; it starts again at {NextTokenReset()} "
                 + "(Settings → AI). Checks and saved steps carry on without it.");
 

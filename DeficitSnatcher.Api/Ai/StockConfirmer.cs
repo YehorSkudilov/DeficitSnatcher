@@ -42,6 +42,29 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
         }
         """;
 
+    // A visible, enabled "Add to cart" / "Buy now" button, in the product's area when it can be found: what a person would
+    // need to see to buy it. Its text, or null when there's none.
+    private const string BuyButton = """
+        () => {
+          const vis = el => { const r = el.getBoundingClientRect(); const st = getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0.3; };
+          const words = /add\s*to\s*(cart|bag|basket)|buy\s*(it\s*)?now|add\s*for\s*(delivery|shipping)/i;
+          const h1 = [...document.querySelectorAll('h1')].find(vis);
+          // From the heading up to the nearest ancestor holding a buy button (not past the main content); no heading: the page.
+          let scope = h1 ? null : document;
+          for (let area = h1, i = 0; area && i < 8; i++) {
+            area = area.parentElement;
+            if (!area || area === document.body || area.matches('main, [role=main]')) break;
+            if ([...area.querySelectorAll('button, input[type=submit], a[role=button]')].some(b => words.test(b.innerText || b.value || ''))) { scope = area; break; }
+          }
+          if (!scope) return null;
+          const off = b => b.disabled || b.getAttribute('aria-disabled') === 'true' || /(^|[\s_-])disabled/i.test(b.className || '');
+          const b = [...scope.querySelectorAll('button, input[type=submit], a[role=button]')]
+            .find(b => words.test(b.innerText || b.value || '') && vis(b) && !off(b));
+          return b ? (b.innerText || b.value || '').trim().slice(0, 60) : null;
+        }
+        """;
+
     // The AI's last "no" per page: while the page still shows sold-out wording, it isn't asked again for 30 minutes (a page
     // that keeps misreading as in stock would otherwise cost an AI call every check).
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, (DateTimeOffset At, string Why)> _lastNo = new();
@@ -53,6 +76,9 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
     {
         string main;
         byte[] shot;
+        string? buyButton;
+        bool? channels = null;
+        string? channelDetail = null;
         try
         {
             await using var lease = await browsers.OpenAsync(settings, cookies, ct, site);
@@ -70,7 +96,24 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
             var html = await page.ContentAsync();
             if (BlockDetector.Detect(html, 200) is { } vendor)
                 return new(null, $"blocked by {vendor}");
+            // The page's own delivery / pickup boxes, read again on this fresh copy: they must still say available.
+            var rules = StockChannels.For(site.StockChannels, new Uri(site.Url));
+            if (rules?.Online is { IsEmpty: false } online)
+            {
+                try
+                {
+                    await page.Locator(online.Container).First.WaitForAsync(new() { Timeout = 8000 });
+                    await page.WaitForTimeoutAsync(1500);
+                    html = await page.ContentAsync();
+                }
+                catch (Exception e) when (e is PlaywrightException or TimeoutException)
+                {
+                }
+                var read = StockChannels.Apply(new PageResult(), html, null, rules with { Pickup = rules.Pickup?.Click is { Length: > 0 } ? null : rules.Pickup });
+                (channels, channelDetail) = (read.InStock, read.StockDetail);
+            }
             main = await page.EvaluateAsync<string>(MainText);
+            buyButton = await page.EvaluateAsync<string?>(BuyButton);
             shot = await page.ScreenshotAsync(new() { Type = ScreenshotType.Jpeg, Quality = 60 });
         }
         catch (Exception e) when (!ct.IsCancellationRequested && e is PlaywrightException or TimeoutException or BrowserEngineException)
@@ -78,17 +121,24 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
             return new(null, $"the page didn't open ({e.Message.Split('\n')[0]})");
         }
 
+        // The delivery box was read as available in the check, and now (looked at fresh, after it's drawn) it says it isn't.
+        if (channels == false)
+            return new(false, $"looked at again, the page says {channelDetail}");
+
         var soldOutWord = SoldOut.FirstOrDefault(w => main.Contains(w, StringComparison.OrdinalIgnoreCase));
         if (soldOutWord != null && _lastNo.TryGetValue(site.Id, out var no) && DateTimeOffset.UtcNow - no.At < TimeSpan.FromMinutes(30))
             return new(false, $"the page still shows \"{soldOutWord}\" ({no.Why}, {(int)(DateTimeOffset.UtcNow - no.At).TotalMinutes} min ago)");
+        var noAi = "the AI is off";
         if (await ai.AvailableAsync(ct))
             try
             {
                 var answer = await ai.AskJsonAsync("confirm-stock", site.Id, null, System,
                 [
-                    OpenAiClient.Text($"Product wanted: {product.Name}. Page: {site.Url}\n\nVisible text of the product's area:\n{main}"),
-                    OpenAiClient.Image(shot, "image/jpeg", detail: "low"),
-                ], ct);
+                    OpenAiClient.Text($"Product wanted: {product.Name}. Page: {site.Url}\n"
+                        + $"Enabled buy button found: {buyButton ?? "none"}. Delivery/pickup boxes: {channelDetail ?? "not read"}.\n\n"
+                        + $"Visible text of the product's area:\n{main}"),
+                    OpenAiClient.Image(shot, "image/jpeg", detail: "high"),
+                ], ct, ignoreDailyLimit: true);
                 var reason = answer.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() ?? "" : "";
                 if (answer.TryGetProperty("buyable", out var b) && b.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 {
@@ -103,9 +153,14 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
             catch (OpenAiClient.AiException e)
             {
                 log.LogInformation("Stock confirmation for {Site}: the AI couldn't answer ({Error}); using the page's words", site.Name, e.Message);
+                noAi = "the AI couldn't answer: " + e.Message;
             }
-        return soldOutWord != null
-            ? new(false, $"the page shows \"{soldOutWord}\"")
-            : new(true, "no sold-out wording on the product's area (the AI wasn't asked)");
+        // Without the AI: no sold-out words isn't enough (Staples rang that way while its page said Out of Stock); a person
+        // would need an enabled buy button for this product.
+        if (soldOutWord != null)
+            return new(false, $"the page shows \"{soldOutWord}\" ({noAi})");
+        return buyButton != null
+            ? new(true, $"an enabled \"{buyButton}\" button and no sold-out wording ({noAi})")
+            : new(false, $"no enabled Add to cart / Buy now button on the page ({noAi})");
     }
 }
