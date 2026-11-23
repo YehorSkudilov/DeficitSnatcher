@@ -56,6 +56,39 @@ async function copyText(text: string) {
 const line = (fields: (string | number | boolean | null | undefined)[]) =>
   fields.filter((f) => f !== null && f !== undefined && f !== "").join(" | ");
 
+/** The page's boxes named by its stock rules, and every short bit of text about delivery, pickup, stock or the cart. */
+function stockWording(source: string, site: Site | undefined): string[] {
+  if (source.trimStart().startsWith("{")) return [`(product data, not a page) ${source.slice(0, 1500)}`];
+  const doc = new DOMParser().parseFromString(source, "text/html");
+  doc.querySelectorAll("script, style, noscript, svg, template").forEach((e) => e.remove());
+  const squash = (t: string | null) => (t ?? "").replace(/\s+/g, " ").trim();
+  const out: string[] = [];
+  for (const [name, rule] of [["online", site?.channels?.online], ["pickup", site?.channels?.pickup]] as const) {
+    if (!rule?.container) continue;
+    try {
+      const boxes = [...doc.querySelectorAll(rule.container)].map((e) => squash(e.textContent)).filter(Boolean);
+      out.push(`${name} box (${rule.container}): ${boxes.length ? boxes.map((b) => `"${b.slice(0, 300)}"`).join(" + ") : "not on the page"}`);
+    } catch {
+      out.push(`${name} box: bad selector ${rule.container}`);
+    }
+  }
+  const words = /deliver|ship|pick ?up|in stock|out of stock|sold out|unavailable|available|add to cart|notify|backorder|coming soon/i;
+  const seen = new Set<string>();
+  for (const el of doc.body?.querySelectorAll("*") ?? []) {
+    if (el.children.length > 0) continue;
+    const t = squash(el.textContent);
+    if (t.length < 3 || t.length > 160 || !words.test(t) || seen.has(t)) continue;
+    seen.add(t);
+    const cls = typeof el.className === "string" && el.className ? "." + el.className.trim().split(/\s+/).slice(0, 2).join(".") : "";
+    const parent = el.parentElement;
+    const pcls = parent && typeof parent.className === "string" && parent.className ? "." + parent.className.trim().split(/\s+/)[0] : "";
+    out.push(`  ${parent?.tagName.toLowerCase() ?? ""}${pcls} > ${el.tagName.toLowerCase()}${cls}: ${t}`);
+    if (seen.size >= 60) break;
+  }
+  if (seen.size === 0) out.push("  (no stock wording found in the saved page)");
+  return out;
+}
+
 async function buildReport(productId?: number, siteId?: number): Promise<string> {
   const scope = { productId, siteId };
   const [products, sites, recentScans, inStockScans, events, purchases, aiCalls] = await Promise.all([
@@ -106,6 +139,19 @@ async function buildReport(productId?: number, siteId?: number): Promise<string>
     out.push(line([`#${c.id}`, c.at, c.purpose, c.siteName, c.ok ? "ok" : "FAILED", `${c.inputTokens}+${c.outputTokens} tokens`, `${c.durationMs}ms`]));
     out.push(`  ${c.summary.replace(/\n/g, "\n  ")}`);
   }
+  // What the page itself said in the latest in-stock scan that kept its source: the stock wording, to see why it read as in stock.
+  const latest = scanList.find((s) => s.outcome === "InStock" && s.hasSnapshot);
+  if (latest) {
+    out.push("", `== Page wording of in-stock scan #${latest.id} (${latest.siteName}, ${latest.at}) ==`);
+    try {
+      const blob = await api.get<Blob>(`/api/scans/${latest.id}/source`);
+      const site = shownSites.find((x) => x.id === latest.siteId);
+      out.push(...stockWording(await blob.text(), site));
+    } catch (e) {
+      out.push(`(couldn't load its source: ${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
+
   out.push("", `== Scans (${scanList.length}: the latest 100 and the latest 60 in stock, newest first) ==`);
   for (const s of scanList) {
     out.push(line([`#${s.id}`, s.at, s.siteName, s.outcome, s.match && "MATCH", s.price != null && `price ${s.price}`, s.totalPrice != null && `total ${s.totalPrice}`,

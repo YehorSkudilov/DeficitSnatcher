@@ -7,10 +7,10 @@ using Microsoft.Playwright;
 namespace DeficitSnatcher.Api.Ai;
 
 /// <summary>
-/// The last word before an alarm or a buy: the page is opened fresh in the browser and looked at as a person would, not
-/// read from its hidden data or rules. The AI gets a screenshot and the visible text of the product's own area and says
-/// whether this product can be bought right now (online or pickup). Without the AI, sold-out wording in that visible area
-/// is enough to say no. Only called when a page has just become a match, which is rare.
+/// The last word before an alarm or a buy: the page is opened fresh in the browser and looked at as a person would. A yes
+/// needs proof from the page itself: its delivery box still saying available after 10 s (pages with online/pickup rules), or
+/// an enabled buy button for this product and no sold-out wording. The AI then only gets a veto: it looks at a screenshot
+/// and can say no, but never causes an alarm on its own. Only called when a page has just become a match, which is rare.
 /// </summary>
 public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogger<StockConfirmer> log)
 {
@@ -150,42 +150,49 @@ public sealed class StockConfirmer(BrowserPool browsers, OpenAiClient ai, ILogge
         if (channelDetail != null && channels != true)
             return new(false, $"looked at again for 10 s, {channelDetail}");
 
+        // Proof first, from the page itself, without the AI: the page's delivery box said available all along (checked
+        // above), or, for pages without such rules, an enabled buy button for this product and no sold-out wording. No proof:
+        // no alarm, and the AI isn't asked.
         var soldOutWord = SoldOut.FirstOrDefault(w => main.Contains(w, StringComparison.OrdinalIgnoreCase));
+        string proof;
+        if (channelDetail != null)
+            proof = channelDetail;
+        else if (soldOutWord != null)
+            return new(false, $"the page shows \"{soldOutWord}\"");
+        else if (buyButton == null)
+            return new(false, "no enabled Add to cart / Buy now button for this product on the page");
+        else
+            proof = $"an enabled \"{buyButton}\" button and no sold-out wording";
+
+        // Then the AI can only say no (a veto, never the reason for an alarm): it looks at the screenshot for what the rules
+        // can't see. Its no is reused for 30 min while the page still shows sold-out wording.
         if (soldOutWord != null && _lastNo.TryGetValue(site.Id, out var no) && DateTimeOffset.UtcNow - no.At < TimeSpan.FromMinutes(30))
             return new(false, $"the page still shows \"{soldOutWord}\" ({no.Why}, {(int)(DateTimeOffset.UtcNow - no.At).TotalMinutes} min ago)");
-        var noAi = "the AI is off";
-        if (await ai.AvailableAsync(ct))
-            try
+        if (!await ai.AvailableAsync(ct))
+            return new(true, $"{proof} (the AI is off, so no second opinion)");
+        try
+        {
+            var answer = await ai.AskJsonAsync("confirm-stock", site.Id, null, System,
+            [
+                OpenAiClient.Text($"Product wanted: {product.Name}. Page: {site.Url}\n"
+                    + $"Enabled buy button found: {buyButton ?? "none"}. Delivery: {channelDetail ?? "not read"}.\n\n"
+                    + $"Visible text of the product's area:\n{main}"),
+                OpenAiClient.Image(shot, "image/jpeg", detail: "high"),
+            ], ct, ignoreDailyLimit: true);
+            var reason = answer.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() ?? "" : "";
+            if (answer.TryGetProperty("buyable", out var b) && b.ValueKind == JsonValueKind.False)
             {
-                var answer = await ai.AskJsonAsync("confirm-stock", site.Id, null, System,
-                [
-                    OpenAiClient.Text($"Product wanted: {product.Name}. Page: {site.Url}\n"
-                        + $"Enabled buy button found: {buyButton ?? "none"}. Delivery: {channelDetail ?? "not read"}.\n\n"
-                        + $"Visible text of the product's area:\n{main}"),
-                    OpenAiClient.Image(shot, "image/jpeg", detail: "high"),
-                ], ct, ignoreDailyLimit: true);
-                var reason = answer.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() ?? "" : "";
-                if (answer.TryGetProperty("buyable", out var b) && b.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                {
-                    var why = $"the AI looked at the page: {reason}";
-                    if (b.ValueKind == JsonValueKind.False)
-                        _lastNo[site.Id] = (DateTimeOffset.UtcNow, why);
-                    else
-                        _lastNo.TryRemove(site.Id, out _);
-                    return new(b.ValueKind == JsonValueKind.True, why + (channelDetail == null ? "" : $"; {channelDetail}"));
-                }
+                var why = $"{proof}, but the AI looked at the page and said no: {reason}";
+                _lastNo[site.Id] = (DateTimeOffset.UtcNow, why);
+                return new(false, why);
             }
-            catch (OpenAiClient.AiException e)
-            {
-                log.LogInformation("Stock confirmation for {Site}: the AI couldn't answer ({Error}); using the page's words", site.Name, e.Message);
-                noAi = "the AI couldn't answer: " + e.Message;
-            }
-        // Without the AI: no sold-out words isn't enough (Staples rang that way while its page said Out of Stock); a person
-        // would need an enabled buy button for this product.
-        if (soldOutWord != null)
-            return new(false, $"the page shows \"{soldOutWord}\" ({noAi})");
-        return buyButton != null
-            ? new(true, $"an enabled \"{buyButton}\" button and no sold-out wording ({noAi})")
-            : new(false, $"no enabled Add to cart / Buy now button on the page ({noAi})");
+            _lastNo.TryRemove(site.Id, out _);
+            return new(true, $"{proof}; the AI agreed: {reason}");
+        }
+        catch (OpenAiClient.AiException e)
+        {
+            log.LogInformation("Stock confirmation for {Site}: the AI couldn't answer ({Error}); going by the page", site.Name, e.Message);
+            return new(true, $"{proof} (the AI couldn't answer: {e.Message})");
+        }
     }
 }
