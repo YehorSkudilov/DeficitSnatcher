@@ -117,7 +117,8 @@ public sealed partial class CheckoutAgent(OpenAiClient ai)
             JsonElement answer;
             try
             {
-                answer = await ai.AskJsonAsync(purpose, siteId, purchaseId, system, parts, ct);
+                // A real purchase isn't stopped by the day's token limit (dry runs and recordings are).
+                answer = await ai.AskJsonAsync(purpose, siteId, purchaseId, system, parts, ct, ignoreDailyLimit: !goal.DryRun);
             }
             catch (OpenAiClient.AiException e)
             {
@@ -249,7 +250,7 @@ public sealed partial class CheckoutAgent(OpenAiClient ai)
         JsonElement a;
         try
         {
-            a = await ai.AskJsonAsync("check-order", siteId, purchaseId, CheckSystem, parts, ct);
+            a = await ai.AskJsonAsync("check-order", siteId, purchaseId, CheckSystem, parts, ct, ignoreDailyLimit: !goal.DryRun);
         }
         catch (OpenAiClient.AiException e)
         {

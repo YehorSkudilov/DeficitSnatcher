@@ -335,7 +335,8 @@ public sealed partial class Buyer(IServiceScopeFactory scopes, SettingsStore set
 
                     Log($"AI: {result.End}: {result.Message}");
                     await NoteAiOutcomeAsync(site.Id, result.End is Ai.CheckoutAgent.End.Done or Ai.CheckoutAgent.End.DryRunStop,
-                        result.End == Ai.CheckoutAgent.End.Stuck && !manual);
+                        // Only the AI getting stuck on the page rests it, not the AI being unreachable (limit, off, network).
+                        result.End == Ai.CheckoutAgent.End.Stuck && !manual && !result.Message.StartsWith("AI: ", StringComparison.Ordinal));
                     (status, message) = result.End switch
                     {
                         Ai.CheckoutAgent.End.Done => (PurchaseStatus.Succeeded, $"Order placed by the AI{(aiTakesOver ? $" after step {brokeAt + 1} broke" : "")}. {result.Message}"),
