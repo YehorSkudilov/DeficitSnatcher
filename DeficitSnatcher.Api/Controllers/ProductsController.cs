@@ -74,11 +74,44 @@ public sealed class ProductsController(AppDbContext db) : ControllerBase
         return ToDto(product, (await Bought(ct)).GetValueOrDefault(id), sites);
     }
 
+    /// <summary>
+    /// Deletes the product with its pages and everything they kept. Done in steps (checks stopped first, then the scans and
+    /// their screenshots in batches): one cascading delete of thousands of scans ran past the database's time limit while
+    /// checks kept adding to them, and failed.
+    /// </summary>
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        await db.Purchases.Where(p => p.ProductId == id).ExecuteDeleteAsync(ct);
-        return await db.Products.Where(p => p.Id == id).ExecuteDeleteAsync(ct) == 0 ? NotFound() : NoContent();
+        var product = await db.Products.FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (product == null)
+            return NotFound();
+        // No new checks or buys while it goes.
+        product.Enabled = false;
+        product.AutoBuyEnabled = false;
+        product.CheckingPaused = true;
+        product.CheckingResumeAt = null;
+        await db.SaveChangesAsync(ct);
+
+        db.Database.SetCommandTimeout(TimeSpan.FromMinutes(5));
+        var siteIds = await db.Sites.Where(s => s.ProductId == id).Select(s => s.Id).ToListAsync(ct);
+        while (true)
+        {
+            var batch = await db.Scans.Where(s => siteIds.Contains(s.SiteId)).OrderBy(s => s.Id).Select(s => s.Id).Take(500).ToListAsync(ct);
+            if (batch.Count == 0)
+                break;
+            await db.ScanSnapshots.Where(x => batch.Contains(x.ScanId)).ExecuteDeleteAsync(ct);
+            await db.Scans.Where(s => batch.Contains(s.Id)).ExecuteDeleteAsync(ct);
+        }
+        var purchaseIds = await db.Purchases.Where(p => p.ProductId == id || siteIds.Contains(p.SiteId)).Select(p => p.Id).ToListAsync(ct);
+        await db.PurchaseShots.Where(x => purchaseIds.Contains(x.PurchaseId)).ExecuteDeleteAsync(ct);
+        await db.Purchases.Where(p => purchaseIds.Contains(p.Id)).ExecuteDeleteAsync(ct);
+        await db.PricePoints.Where(x => siteIds.Contains(x.SiteId)).ExecuteDeleteAsync(ct);
+        await db.AiCalls.Where(x => x.SiteId != null && siteIds.Contains(x.SiteId.Value)).ExecuteDeleteAsync(ct);
+        await db.BrowserSessions.Where(x => siteIds.Contains(x.SiteId)).ExecuteDeleteAsync(ct);
+        await db.RestockInsights.Where(x => x.ProductId == id).ExecuteDeleteAsync(ct);
+        await db.Sites.Where(s => s.ProductId == id).ExecuteDeleteAsync(ct);
+        await db.Products.Where(p => p.Id == id).ExecuteDeleteAsync(ct);
+        return NoContent();
     }
 
     [HttpPost("{id:int}/checking")]
