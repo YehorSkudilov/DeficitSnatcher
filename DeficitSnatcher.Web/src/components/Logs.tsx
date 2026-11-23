@@ -6,6 +6,7 @@ import { Purchases } from "./Purchases";
 import { Activity } from "./Activity";
 import { AiCalls } from "./AiCalls";
 import { Diagnostics } from "./Diagnostics";
+import { CopyLogsButton } from "./CopyLogs";
 
 const tabs = [
   ["scans", "Scans", "Every check, found or not, with the page's screenshot and source when something changed."],
@@ -20,8 +21,10 @@ export function Logs({ productId, siteId }: { productId?: number; siteId?: numbe
   const [tab, setTab] = useState<(typeof tabs)[number][0]>("scans");
   return (
     <div className="stack" style={{ gap: 14 }}>
-      {!productId && !siteId && <h1>Logs</h1>}
-      {(productId || siteId) && <div className="row" style={{ justifyContent: "space-between" }}><h2>Logs{siteId ? " of this page" : " of all its pages"}</h2></div>}
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        {productId || siteId ? <h2>Logs{siteId ? " of this page" : " of all its pages"}</h2> : <h1>Logs</h1>}
+        <CopyLogsButton productId={productId} siteId={siteId} />
+      </div>
       <div className="tabs" style={{ marginBottom: 0 }}>
         {tabs.map(([key, label, help]) => (
           <button key={key} className={tab === key ? "active" : ""} title={help} onClick={() => setTab(key)}>
